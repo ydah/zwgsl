@@ -40,6 +40,7 @@ pub const Function = struct {
     params: []const Param,
     body: []const Statement,
     stage: ?ast.Stage = null,
+    source_line: ?u32 = null,
 
     pub fn isMain(self: Function) bool {
         return std.mem.eql(u8, self.name, "main");
@@ -55,13 +56,18 @@ pub const Stage = struct {
     functions: []const Function = &.{},
 };
 
-pub const Statement = union(enum) {
-    var_decl: VarDecl,
-    assign: Assign,
-    expr: *Expr,
-    if_stmt: IfStmt,
-    return_stmt: ?*Expr,
-    discard: void,
+pub const Statement = struct {
+    source_line: ?u32 = null,
+    data: Data,
+
+    pub const Data = union(enum) {
+        var_decl: VarDecl,
+        assign: Assign,
+        expr: *Expr,
+        if_stmt: IfStmt,
+        return_stmt: ?*Expr,
+        discard: void,
+    };
 };
 
 pub const VarDecl = struct {

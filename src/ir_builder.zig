@@ -167,9 +167,11 @@ const Builder = struct {
 
         const body = try self.lowerStatementList(function.body, &context);
         var final_body = body;
-        if (!signature.return_type.isVoid() and body.len > 0 and body[body.len - 1] == .expr) {
+        if (!signature.return_type.isVoid() and body.len > 0 and body[body.len - 1].data == .expr) {
             var replaced = try self.allocator.dupe(ir.Statement, body);
-            replaced[replaced.len - 1] = .{ .return_stmt = body[body.len - 1].expr };
+            replaced[replaced.len - 1] = self.makeStatement(body[body.len - 1].source_line, .{
+                .return_stmt = body[body.len - 1].data.expr,
+            });
             final_body = replaced;
         }
 
@@ -179,6 +181,7 @@ const Builder = struct {
             .params = try params.toOwnedSlice(self.allocator),
             .body = final_body,
             .stage = stage,
+            .source_line = function.position.line,
         };
     }
 
@@ -201,18 +204,20 @@ const Builder = struct {
     ) anyerror!void {
         switch (statement.data) {
             .expression => |expr| {
-                try list.append(self.allocator, .{ .expr = try self.lowerExpr(expr, context) });
+                try list.append(self.allocator, self.makeStatement(statement.position.line, .{
+                    .expr = try self.lowerExpr(expr, context),
+                }));
             },
             .typed_assignment => |typed_assignment| {
                 const ty = self.typed.exprType(typed_assignment.value);
                 try context.locals.put(typed_assignment.name, ty);
-                try list.append(self.allocator, .{
+                try list.append(self.allocator, self.makeStatement(statement.position.line, .{
                     .var_decl = .{
                         .name = typed_assignment.name,
                         .ty = ty,
                         .value = try self.lowerExpr(typed_assignment.value, context),
                     },
-                });
+                }));
             },
             .assignment => |assignment| {
                 if (assignment.target.data == .identifier and assignment.operator == .assign) {
@@ -221,43 +226,43 @@ const Builder = struct {
                         const value = try self.lowerExpr(assignment.value, context);
                         const ty = self.typed.exprType(assignment.value);
                         try context.locals.put(name, ty);
-                        try list.append(self.allocator, .{
+                        try list.append(self.allocator, self.makeStatement(statement.position.line, .{
                             .var_decl = .{
                                 .name = name,
                                 .ty = ty,
                                 .value = value,
                             },
-                        });
+                        }));
                         return;
                     }
                 }
 
-                try list.append(self.allocator, .{
+                try list.append(self.allocator, self.makeStatement(statement.position.line, .{
                     .assign = .{
                         .target = try self.lowerExpr(assignment.target, context),
                         .operator = assignment.operator,
                         .value = try self.lowerExpr(assignment.value, context),
                     },
-                });
+                }));
             },
             .return_stmt => |value| {
-                try list.append(self.allocator, .{
+                try list.append(self.allocator, self.makeStatement(statement.position.line, .{
                     .return_stmt = if (value) |expr| try self.lowerExpr(expr, context) else null,
-                });
+                }));
             },
-            .discard => try list.append(self.allocator, .{ .discard = {} }),
+            .discard => try list.append(self.allocator, self.makeStatement(statement.position.line, .{ .discard = {} })),
             .conditional => |conditional| {
                 const lowered_body = try self.lowerSingleStatementSlice(conditional.body, context);
                 const condition = try self.lowerExpr(conditional.condition, context);
                 const then_body = if (conditional.negate) &.{} else lowered_body;
                 const else_body = if (conditional.negate) lowered_body else &.{};
-                try list.append(self.allocator, .{
+                try list.append(self.allocator, self.makeStatement(statement.position.line, .{
                     .if_stmt = .{
                         .condition = condition,
                         .then_body = then_body,
                         .else_body = else_body,
                     },
-                });
+                }));
             },
             .if_stmt => |if_stmt| try list.append(self.allocator, try self.lowerIf(if_stmt, context, 0)),
             .times_loop => |times_loop| {
@@ -267,7 +272,7 @@ const Builder = struct {
                     var nested = try context.clone(self.allocator);
                     defer nested.deinit();
                     if (times_loop.binding) |binding| {
-                        try nested.loop_bindings.put(binding, index);
+                        try nested.loop_bindings.put(binding, .{ .const_int = index });
                     }
                     const body = try self.lowerStatementList(times_loop.body, &nested);
                     for (body) |lowered_stmt| {
@@ -275,7 +280,34 @@ const Builder = struct {
                     }
                 }
             },
-            .each_loop => return error.UnsupportedLoop,
+            .each_loop => |each_loop| {
+                const collection_type = self.typed.exprType(each_loop.collection);
+                const vector_len = collection_type.vectorLen() orelse return error.UnsupportedLoop;
+                const element_type = collection_type.componentType() orelse return error.UnsupportedLoop;
+
+                var index: u8 = 0;
+                while (index < vector_len) : (index += 1) {
+                    var nested = try context.clone(self.allocator);
+                    defer nested.deinit();
+                    if (each_loop.binding) |binding| {
+                        const collection = try self.lowerExpr(each_loop.collection, context);
+                        const index_expr = try self.makeExpr(types.builtinType(.int), .{
+                            .integer = index,
+                        });
+                        const element_expr = try self.makeExpr(element_type, .{
+                            .index = .{
+                                .target = collection,
+                                .index = index_expr,
+                            },
+                        });
+                        try nested.loop_bindings.put(binding, .{ .expr = element_expr });
+                    }
+                    const body = try self.lowerStatementList(each_loop.body, &nested);
+                    for (body) |lowered_stmt| {
+                        try list.append(self.allocator, lowered_stmt);
+                    }
+                }
+            },
         }
     }
 
@@ -310,13 +342,13 @@ const Builder = struct {
             break :blk items;
         } else try self.lowerStatementList(if_stmt.else_body, context);
 
-        return .{
+        return self.makeStatement(if_stmt.branches[index].condition.position.line, .{
             .if_stmt = .{
                 .condition = condition,
                 .then_body = then_body,
                 .else_body = else_body,
             },
-        };
+        });
     }
 
     fn lowerExpr(self: *Builder, expr: *ast.Expr, context: *FunctionContext) anyerror!*ir.Expr {
@@ -325,8 +357,11 @@ const Builder = struct {
             .float => |value| self.makeExpr(self.typed.exprType(expr), .{ .float = value }),
             .bool => |value| self.makeExpr(self.typed.exprType(expr), .{ .bool = value }),
             .identifier => |name| blk: {
-                if (context.loop_bindings.get(name)) |value| {
-                    break :blk try self.makeExpr(types.builtinType(.int), .{ .integer = value });
+                if (context.loop_bindings.get(name)) |binding| {
+                    break :blk switch (binding) {
+                        .const_int => |value| try self.makeExpr(types.builtinType(.int), .{ .integer = value }),
+                        .expr => |value| value,
+                    };
                 }
                 break :blk try self.makeExpr(self.typed.exprType(expr), .{ .identifier = name });
             },
@@ -423,6 +458,13 @@ const Builder = struct {
         return expr;
     }
 
+    fn makeStatement(_: *Builder, source_line: ?u32, data: ir.Statement.Data) ir.Statement {
+        return .{
+            .source_line = source_line,
+            .data = data,
+        };
+    }
+
     fn registerUniforms(self: *Builder, context: *FunctionContext) anyerror!void {
         for (self.typed.program.items) |item| {
             if (item == .uniform) {
@@ -451,7 +493,13 @@ const Builder = struct {
     fn resolveConstInt(self: *Builder, expr: *ast.Expr, context: *FunctionContext) ?i64 {
         return switch (expr.data) {
             .integer => |value| value,
-            .identifier => |name| context.loop_bindings.get(name),
+            .identifier => |name| if (context.loop_bindings.get(name)) |binding|
+                switch (binding) {
+                    .const_int => |value| value,
+                    .expr => null,
+                }
+            else
+                null,
             .unary => |unary| if (unary.operator == .minus)
                 if (self.resolveConstInt(unary.operand, context)) |value|
                     -value
@@ -467,13 +515,13 @@ const Builder = struct {
 const FunctionContext = struct {
     locals: std.StringHashMap(types.Type),
     nonlocals: std.StringHashMap(void),
-    loop_bindings: std.StringHashMap(i64),
+    loop_bindings: std.StringHashMap(LoopBinding),
 
     fn init(allocator: std.mem.Allocator) FunctionContext {
         return .{
             .locals = std.StringHashMap(types.Type).init(allocator),
             .nonlocals = std.StringHashMap(void).init(allocator),
-            .loop_bindings = std.StringHashMap(i64).init(allocator),
+            .loop_bindings = std.StringHashMap(LoopBinding).init(allocator),
         };
     }
 
@@ -503,6 +551,11 @@ const FunctionContext = struct {
         self.nonlocals.deinit();
         self.loop_bindings.deinit();
     }
+};
+
+const LoopBinding = union(enum) {
+    const_int: i64,
+    expr: *ir.Expr,
 };
 
 fn stageName(stage: ast.Stage) []const u8 {

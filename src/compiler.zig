@@ -75,6 +75,8 @@ pub fn compile(allocator: std.mem.Allocator, source: []const u8, options: Option
     const module = try ir_builder.build(allocator, typed);
     const emitted = try glsl_emitter.emit(allocator, module, .{
         .emit_debug_comments = options.emit_debug_comments != 0,
+        .optimize_output = options.optimize_output != 0,
+        .source = source,
     });
 
     return .{

@@ -4,6 +4,8 @@ const token = @import("token.zig");
 
 pub const EmitOptions = struct {
     emit_debug_comments: bool = false,
+    optimize_output: bool = false,
+    source: ?[]const u8 = null,
 };
 
 pub const Output = struct {
@@ -12,14 +14,13 @@ pub const Output = struct {
 };
 
 pub fn emit(allocator: std.mem.Allocator, module: *const ir.Module, options: EmitOptions) anyerror!Output {
-    _ = options;
     return .{
-        .vertex = if (module.vertex) |stage| try emitStage(allocator, module, stage) else null,
-        .fragment = if (module.fragment) |stage| try emitStage(allocator, module, stage) else null,
+        .vertex = if (module.vertex) |stage| try emitStage(allocator, module, stage, options) else null,
+        .fragment = if (module.fragment) |stage| try emitStage(allocator, module, stage, options) else null,
     };
 }
 
-fn emitStage(allocator: std.mem.Allocator, module: *const ir.Module, stage: ir.Stage) anyerror![]const u8 {
+fn emitStage(allocator: std.mem.Allocator, module: *const ir.Module, stage: ir.Stage, options: EmitOptions) anyerror![]const u8 {
     var buffer = try std.ArrayList(u8).initCapacity(allocator, 0);
     const writer = buffer.writer(allocator);
 
@@ -69,26 +70,29 @@ fn emitStage(allocator: std.mem.Allocator, module: *const ir.Module, stage: ir.S
     }
 
     for (module.global_functions) |function| {
-        try emitFunction(writer, function);
+        try emitFunction(writer, function, options);
         try writer.writeByte('\n');
     }
 
     for (stage.functions) |function| {
         if (std.mem.eql(u8, function.name, "main")) continue;
-        try emitFunction(writer, function);
+        try emitFunction(writer, function, options);
         try writer.writeByte('\n');
     }
 
     for (stage.functions) |function| {
         if (!std.mem.eql(u8, function.name, "main")) continue;
-        try emitFunction(writer, function);
+        try emitFunction(writer, function, options);
         break;
     }
 
-    return try buffer.toOwnedSlice(allocator);
+    const output = try buffer.toOwnedSlice(allocator);
+    if (!options.optimize_output) return output;
+    return compactOutput(allocator, output);
 }
 
-fn emitFunction(writer: anytype, function: ir.Function) anyerror!void {
+fn emitFunction(writer: anytype, function: ir.Function, options: EmitOptions) anyerror!void {
+    try emitDebugComment(writer, options, function.source_line, 0);
     try writer.print("{s} {s}(", .{ function.return_type.glslName(), function.name });
     for (function.params, 0..) |param, index| {
         if (index > 0) try writer.writeAll(", ");
@@ -99,14 +103,15 @@ fn emitFunction(writer: anytype, function: ir.Function) anyerror!void {
         }
     }
     try writer.writeAll(") {\n");
-    try emitStatements(writer, function.body, 1);
+    try emitStatements(writer, function.body, 1, options);
     try writer.writeAll("}\n");
 }
 
-fn emitStatements(writer: anytype, statements: []const ir.Statement, indent: usize) anyerror!void {
+fn emitStatements(writer: anytype, statements: []const ir.Statement, indent: usize, options: EmitOptions) anyerror!void {
     for (statements) |statement| {
+        try emitDebugComment(writer, options, statement.source_line, indent);
         try writeIndent(writer, indent);
-        switch (statement) {
+        switch (statement.data) {
             .var_decl => |decl| {
                 try writer.print("{s} {s}", .{ decl.ty.glslName(), decl.name });
                 if (decl.value) |value| {
@@ -139,12 +144,12 @@ fn emitStatements(writer: anytype, statements: []const ir.Statement, indent: usi
                 try writer.writeAll("if (");
                 try emitExpr(writer, if_stmt.condition, 0);
                 try writer.writeAll(") {\n");
-                try emitStatements(writer, if_stmt.then_body, indent + 1);
+                try emitStatements(writer, if_stmt.then_body, indent + 1, options);
                 try writeIndent(writer, indent);
                 try writer.writeAll("}");
                 if (if_stmt.else_body.len > 0) {
                     try writer.writeAll(" else {\n");
-                    try emitStatements(writer, if_stmt.else_body, indent + 1);
+                    try emitStatements(writer, if_stmt.else_body, indent + 1, options);
                     try writeIndent(writer, indent);
                     try writer.writeAll("}");
                 }
@@ -227,6 +232,54 @@ fn writeIndent(writer: anytype, indent: usize) anyerror!void {
     for (0..indent) |_| {
         try writer.writeAll("    ");
     }
+}
+
+fn emitDebugComment(writer: anytype, options: EmitOptions, source_line: ?u32, indent: usize) anyerror!void {
+    if (!options.emit_debug_comments) return;
+    const line = source_line orelse return;
+    const source = options.source orelse return;
+    const text = sourceLineText(source, line);
+    try writeIndent(writer, indent);
+    if (text.len == 0) {
+        try writer.print("// zwgsl:{d}\n", .{line});
+    } else {
+        try writer.print("// zwgsl:{d}: {s}\n", .{ line, text });
+    }
+}
+
+fn sourceLineText(source: []const u8, line: u32) []const u8 {
+    var current_line: u32 = 1;
+    var start: usize = 0;
+    var index: usize = 0;
+    while (index < source.len) : (index += 1) {
+        if (current_line == line and source[index] == '\n') {
+            return std.mem.trim(u8, source[start..index], " \t\r");
+        }
+        if (source[index] == '\n') {
+            current_line += 1;
+            start = index + 1;
+        }
+    }
+    if (current_line == line and start <= source.len) {
+        return std.mem.trim(u8, source[start..], " \t\r");
+    }
+    return "";
+}
+
+fn compactOutput(allocator: std.mem.Allocator, source: []const u8) anyerror![]const u8 {
+    var buffer = try std.ArrayList(u8).initCapacity(allocator, source.len);
+    const writer = buffer.writer(allocator);
+    var iter = std.mem.splitScalar(u8, source, '\n');
+    var wrote_line = false;
+    while (iter.next()) |line| {
+        const trimmed = std.mem.trim(u8, line, " \t\r");
+        if (trimmed.len == 0) continue;
+        if (wrote_line) try writer.writeByte('\n');
+        try writer.writeAll(trimmed);
+        wrote_line = true;
+    }
+    if (wrote_line) try writer.writeByte('\n');
+    return try buffer.toOwnedSlice(allocator);
 }
 
 fn assignmentOp(tag: token.TokenTag) []const u8 {

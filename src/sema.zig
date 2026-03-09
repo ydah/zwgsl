@@ -475,8 +475,24 @@ const Analyzer = struct {
                 }
                 return null;
             },
-            .each_loop => {
-                try self.report(stmt.position, "each loops are not supported in phase 1", .{});
+            .each_loop => |each_loop| {
+                const collection_type = try self.analyzeExpr(scope, each_loop.collection, context);
+                if (!collection_type.isVector()) {
+                    try self.report(each_loop.collection.position, "each loops are only supported on vectors in phase 1", .{});
+                    return null;
+                }
+
+                var loop_scope = Scope.init(self.allocator, scope);
+                if (each_loop.binding) |binding| {
+                    _ = try loop_scope.put(binding, .{
+                        .ty = collection_type.componentType().?,
+                        .kind = .local,
+                        .mutable = false,
+                    });
+                }
+                for (each_loop.body) |body_stmt| {
+                    _ = try self.analyzeStmt(&loop_scope, body_stmt, context);
+                }
                 return null;
             },
         }

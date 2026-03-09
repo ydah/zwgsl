@@ -137,3 +137,42 @@ test "sema propagates method chain types" {
     const expr = function.body[0].data.expression;
     try std.testing.expect(analyzed.typed.exprType(expr).eql(zwgsl.types.builtinType(.vec3)));
 }
+
+test "sema accepts vector each loops" {
+    var analyzed = try analyzeSource(
+        \\vertex do
+        \\  input :position, Vec3, location: 0
+        \\  varying :v_sum, Float
+        \\  def main
+        \\    total: Float = 0.0
+        \\    position.each do |component|
+        \\      total += component
+        \\    end
+        \\    self.v_sum = total
+        \\    gl_Position = vec4(position, 1.0)
+        \\  end
+        \\end
+        \\
+        \\fragment do
+        \\  varying :v_sum, Float
+        \\  output :frag_color, Vec4, location: 0
+        \\  def main
+        \\    frag_color = vec4(v_sum)
+        \\  end
+        \\end
+    );
+    defer analyzed.arena.deinit();
+    try std.testing.expectEqual(@as(usize, 0), analyzed.diagnostics.items.items.len);
+}
+
+test "sema rejects each loops on non-vectors" {
+    var analyzed = try analyzeSource(
+        \\def bad_loop
+        \\  1.each do |item|
+        \\    item
+        \\  end
+        \\end
+    );
+    defer analyzed.arena.deinit();
+    try std.testing.expect(analyzed.diagnostics.items.items.len > 0);
+}
