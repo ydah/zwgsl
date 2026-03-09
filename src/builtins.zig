@@ -115,6 +115,9 @@ pub fn resolve(name: []const u8, args: []const types.Type) ?Resolution {
         if (args.len == 2 and args[0].isBuiltin(.sampler_cube) and args[1].isBuiltin(.vec3)) {
             return .{ .return_type = types.builtinType(.vec4), .method_callable = false };
         }
+        if (args.len == 2 and args[0].isBuiltin(.sampler3d) and args[1].isBuiltin(.vec3)) {
+            return .{ .return_type = types.builtinType(.vec4), .method_callable = false };
+        }
         return null;
     }
 

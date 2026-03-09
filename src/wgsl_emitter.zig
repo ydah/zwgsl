@@ -14,9 +14,10 @@ pub const EmitOptions = struct {
 pub const Output = glsl_emitter.Output;
 
 pub const EmitError = error{
+    UnsupportedInOutParams,
     UnsupportedSamplerType,
     UnsupportedTextureBuiltin,
-    UnsupportedInOutParams,
+    UnsupportedTextureSource,
 };
 
 pub fn emit(allocator: std.mem.Allocator, module: *const ir.Module, options: EmitOptions) anyerror!Output {
@@ -28,10 +29,6 @@ pub fn emit(allocator: std.mem.Allocator, module: *const ir.Module, options: Emi
 }
 
 fn emitStage(allocator: std.mem.Allocator, module: *const ir.Module, stage: ir.Stage, options: EmitOptions) anyerror![]const u8 {
-    for (module.uniforms) |uniform| {
-        if (uniform.ty.isSampler()) return error.UnsupportedSamplerType;
-    }
-
     var buffer = try std.ArrayList(u8).initCapacity(allocator, 0);
     const writer = buffer.writer(allocator);
 
@@ -47,12 +44,12 @@ fn emitStage(allocator: std.mem.Allocator, module: *const ir.Module, stage: ir.S
     }
 
     for (module.global_functions) |function| {
-        try emitFunction(writer, function, options, null);
+        try emitFunction(writer, function, options, null, module.uniforms);
         try writer.writeByte('\n');
     }
 
     for (stage.functions) |function| {
-        try emitFunction(writer, function, options, stage.stage);
+        try emitFunction(writer, function, options, stage.stage, module.uniforms);
         try writer.writeByte('\n');
     }
 
@@ -106,8 +103,28 @@ fn emitStageInterfaceStructs(writer: anytype, module: *const ir.Module, stage: i
 }
 
 fn emitUniforms(writer: anytype, uniforms: []const ir.Global) !void {
-    for (uniforms, 0..) |uniform, index| {
-        try writer.print("@group(0) @binding({d}) var<uniform> {s}: {s};\n", .{ index, uniform.name, uniform.ty.wgslName() });
+    var binding_index: u32 = 0;
+    for (uniforms) |uniform| {
+        if (uniform.ty.isSampler()) {
+            try writer.print("@group(0) @binding({d}) var {s}_texture: {s};\n", .{
+                binding_index,
+                uniform.name,
+                samplerTextureType(uniform.ty) orelse return error.UnsupportedSamplerType,
+            });
+            try writer.print("@group(0) @binding({d}) var {s}_sampler: sampler;\n", .{
+                binding_index + 1,
+                uniform.name,
+            });
+            binding_index += 2;
+            continue;
+        }
+
+        try writer.print("@group(0) @binding({d}) var<uniform> {s}: {s};\n", .{
+            binding_index,
+            uniform.name,
+            uniform.ty.wgslName(),
+        });
+        binding_index += 1;
     }
     if (uniforms.len > 0) try writer.writeByte('\n');
 }
@@ -154,7 +171,7 @@ fn emitUserStruct(writer: anytype, struct_decl: ir.StructDecl) !void {
     try writer.writeAll("};\n");
 }
 
-fn emitFunction(writer: anytype, function: ir.Function, options: EmitOptions, stage: ?ast.Stage) anyerror!void {
+fn emitFunction(writer: anytype, function: ir.Function, options: EmitOptions, stage: ?ast.Stage, uniforms: []const ir.Global) anyerror!void {
     for (function.params) |param| {
         if (param.is_inout) return error.UnsupportedInOutParams;
     }
@@ -172,7 +189,7 @@ fn emitFunction(writer: anytype, function: ir.Function, options: EmitOptions, st
         try writer.print(" -> {s}", .{function.return_type.wgslName()});
     }
     try writer.writeAll(" {\n");
-    try emitStatements(writer, function.body, 1, options);
+    try emitStatements(writer, function.body, 1, options, uniforms);
     try writer.writeAll("}\n");
 }
 
@@ -245,7 +262,7 @@ fn emitEntryPoint(writer: anytype, module: *const ir.Module, stage: ir.Stage) !v
     }
 }
 
-fn emitStatements(writer: anytype, statements: []const ir.Statement, indent: usize, options: EmitOptions) anyerror!void {
+fn emitStatements(writer: anytype, statements: []const ir.Statement, indent: usize, options: EmitOptions, uniforms: []const ir.Global) anyerror!void {
     for (statements) |statement| {
         try emitDebugComment(writer, options, statement.source_line, indent);
         try writeIndent(writer, indent);
@@ -254,24 +271,24 @@ fn emitStatements(writer: anytype, statements: []const ir.Statement, indent: usi
                 try writer.print("var {s}: {s}", .{ decl.name, decl.ty.wgslName() });
                 if (decl.value) |value| {
                     try writer.writeAll(" = ");
-                    try emitExpr(writer, value, 0);
+                    try emitExpr(writer, value, 0, uniforms);
                 }
                 try writer.writeAll(";\n");
             },
             .assign => |assignment| {
-                try emitExpr(writer, assignment.target, 0);
+                try emitExpr(writer, assignment.target, 0, uniforms);
                 try writer.print(" {s} ", .{assignmentOp(assignment.operator)});
-                try emitExpr(writer, assignment.value, 0);
+                try emitExpr(writer, assignment.value, 0, uniforms);
                 try writer.writeAll(";\n");
             },
             .expr => |expr| {
-                try emitExpr(writer, expr, 0);
+                try emitExpr(writer, expr, 0, uniforms);
                 try writer.writeAll(";\n");
             },
             .return_stmt => |value| {
                 if (value) |expr| {
                     try writer.writeAll("return ");
-                    try emitExpr(writer, expr, 0);
+                    try emitExpr(writer, expr, 0, uniforms);
                     try writer.writeAll(";\n");
                 } else {
                     try writer.writeAll("return;\n");
@@ -280,14 +297,14 @@ fn emitStatements(writer: anytype, statements: []const ir.Statement, indent: usi
             .discard => try writer.writeAll("discard;\n"),
             .if_stmt => |if_stmt| {
                 try writer.writeAll("if (");
-                try emitExpr(writer, if_stmt.condition, 0);
+                try emitExpr(writer, if_stmt.condition, 0, uniforms);
                 try writer.writeAll(") {\n");
-                try emitStatements(writer, if_stmt.then_body, indent + 1, options);
+                try emitStatements(writer, if_stmt.then_body, indent + 1, options, uniforms);
                 try writeIndent(writer, indent);
                 try writer.writeAll("}");
                 if (if_stmt.else_body.len > 0) {
                     try writer.writeAll(" else {\n");
-                    try emitStatements(writer, if_stmt.else_body, indent + 1, options);
+                    try emitStatements(writer, if_stmt.else_body, indent + 1, options, uniforms);
                     try writeIndent(writer, indent);
                     try writer.writeAll("}");
                 }
@@ -297,7 +314,7 @@ fn emitStatements(writer: anytype, statements: []const ir.Statement, indent: usi
     }
 }
 
-fn emitExpr(writer: anytype, expr: *const ir.Expr, parent_precedence: u8) anyerror!void {
+fn emitExpr(writer: anytype, expr: *const ir.Expr, parent_precedence: u8, uniforms: []const ir.Global) anyerror!void {
     const precedence = exprPrecedence(expr);
     const wrap = precedence < parent_precedence;
     if (wrap) try writer.writeByte('(');
@@ -309,36 +326,74 @@ fn emitExpr(writer: anytype, expr: *const ir.Expr, parent_precedence: u8) anyerr
         .identifier => |name| try writer.writeAll(name),
         .unary => |unary| {
             try writer.print("{s}", .{unaryOp(unary.operator)});
-            try emitExpr(writer, unary.operand, precedence);
+            try emitExpr(writer, unary.operand, precedence, uniforms);
         },
         .binary => |binary| {
-            try emitExpr(writer, binary.lhs, precedence);
+            try emitExpr(writer, binary.lhs, precedence, uniforms);
             try writer.print(" {s} ", .{binaryOp(binary.operator)});
-            try emitExpr(writer, binary.rhs, precedence + 1);
+            try emitExpr(writer, binary.rhs, precedence + 1, uniforms);
         },
         .call => |call| {
-            if (std.mem.eql(u8, call.name, "texture")) return error.UnsupportedTextureBuiltin;
+            if (std.mem.eql(u8, call.name, "texture")) {
+                try emitTextureCall(writer, call, uniforms);
+                if (wrap) try writer.writeByte(')');
+                return;
+            }
 
             try writer.print("{s}(", .{callName(call.name, expr.ty)});
             for (call.args, 0..) |arg, index| {
                 if (index > 0) try writer.writeAll(", ");
-                try emitExpr(writer, arg, 0);
+                try emitExpr(writer, arg, 0, uniforms);
             }
             try writer.writeByte(')');
         },
         .field => |field| {
-            try emitExpr(writer, field.target, precedence);
+            try emitExpr(writer, field.target, precedence, uniforms);
             try writer.print(".{s}", .{field.name});
         },
         .index => |index_expr| {
-            try emitExpr(writer, index_expr.target, precedence);
+            try emitExpr(writer, index_expr.target, precedence, uniforms);
             try writer.writeByte('[');
-            try emitExpr(writer, index_expr.index, 0);
+            try emitExpr(writer, index_expr.index, 0, uniforms);
             try writer.writeByte(']');
         },
     }
 
     if (wrap) try writer.writeByte(')');
+}
+
+fn emitTextureCall(writer: anytype, call: ir.Expr.Call, uniforms: []const ir.Global) anyerror!void {
+    if (call.args.len != 2) return error.UnsupportedTextureBuiltin;
+    const sampler_name = switch (call.args[0].data) {
+        .identifier => |name| name,
+        else => return error.UnsupportedTextureSource,
+    };
+
+    const uniform = findUniform(uniforms, sampler_name) orelse return error.UnsupportedTextureSource;
+    if (!uniform.ty.isSampler()) return error.UnsupportedTextureBuiltin;
+
+    try writer.print("textureSample({s}_texture, {s}_sampler, ", .{ sampler_name, sampler_name });
+    try emitExpr(writer, call.args[1], 0, uniforms);
+    try writer.writeByte(')');
+}
+
+fn findUniform(uniforms: []const ir.Global, name: []const u8) ?ir.Global {
+    for (uniforms) |uniform| {
+        if (std.mem.eql(u8, uniform.name, name)) return uniform;
+    }
+    return null;
+}
+
+fn samplerTextureType(ty: types.Type) ?[]const u8 {
+    return switch (ty) {
+        .builtin => |builtin| switch (builtin) {
+            .sampler2d => "texture_2d<f32>",
+            .sampler_cube => "texture_cube<f32>",
+            .sampler3d => "texture_3d<f32>",
+            else => null,
+        },
+        else => null,
+    };
 }
 
 fn varyingLocation(module: *const ir.Module, name: []const u8) u32 {

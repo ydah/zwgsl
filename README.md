@@ -223,7 +223,8 @@ This produces backend-specific shader source for both stages.
 - `optimize_output` currently performs compact output formatting rather than semantic optimization
 - Compute shaders are currently emitted only through the WGSL backend
 - WGSL uniform bindings are auto-assigned as `@group(0) @binding(N)`
-- WGSL sampler uniforms and texture sampling are not implemented yet
+- WGSL sampler uniforms are split into texture/sampler binding pairs automatically
+- WGSL `texture()` lowering currently supports sampler uniforms, not arbitrary sampler expressions or parameters
 
 ## Development Notes
 
