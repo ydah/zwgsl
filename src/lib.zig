@@ -3,9 +3,12 @@ const compiler = @import("compiler.zig");
 
 pub const ast = @import("ast.zig");
 pub const diagnostics = @import("diagnostics.zig");
+pub const builtins = @import("builtins.zig");
 pub const lexer = @import("lexer.zig");
 pub const parser = @import("parser.zig");
+pub const sema = @import("sema.zig");
 pub const token = @import("token.zig");
+pub const types = @import("types.zig");
 
 pub const ZwgslTarget = compiler.Target;
 pub const ZwgslErrorKind = compiler.ErrorKind;
