@@ -1,0 +1,27 @@
+version "300 es"
+precision :fragment, :mediump
+
+uniform :base_color, Vec4
+
+def tone_map(color: Vec3) -> Vec3
+  color.normalize.clamp(0.0, 1.0)
+end
+
+vertex do
+  input :position, Vec3, location: 0
+  varying :v_color, Vec3
+
+  def main
+    self.v_color = tone_map(base_color.rgb)
+    gl_Position = vec4(position, 1.0)
+  end
+end
+
+fragment do
+  varying :v_color, Vec3
+  output :frag_color, Vec4, location: 0
+
+  def main
+    frag_color = vec4(v_color, base_color.a)
+  end
+end

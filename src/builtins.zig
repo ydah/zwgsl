@@ -54,11 +54,20 @@ pub fn resolve(name: []const u8, args: []const types.Type) ?Resolution {
         }
         return null;
     }
-    if (std.mem.eql(u8, name, "clamp") or std.mem.eql(u8, name, "min") or std.mem.eql(u8, name, "max")) {
+    if (std.mem.eql(u8, name, "clamp")) {
         if (args.len == 3 and args[0].eql(args[1]) and args[0].eql(args[2])) {
             return .{ .return_type = args[0] };
         }
         if (args.len == 3 and args[0].isVector() and args[1].isScalar() and args[2].isScalar() and args[0].componentType().?.eql(args[1]) and args[1].eql(args[2])) {
+            return .{ .return_type = args[0] };
+        }
+        return null;
+    }
+    if (std.mem.eql(u8, name, "min") or std.mem.eql(u8, name, "max")) {
+        if (args.len == 2 and args[0].eql(args[1]) and args[0].isNumeric()) {
+            return .{ .return_type = args[0] };
+        }
+        if (args.len == 2 and args[0].isVector() and args[1].isScalar() and args[0].componentType().?.eql(args[1])) {
             return .{ .return_type = args[0] };
         }
         return null;

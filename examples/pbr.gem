@@ -1,0 +1,34 @@
+version "300 es"
+precision :fragment, :highp
+
+uniform :mvp, Mat4
+uniform :albedo, Vec3
+uniform :metallic, Float
+uniform :roughness, Float
+
+def saturate(x: Float) -> Float
+  clamp(x, 0.0, 1.0)
+end
+
+vertex do
+  input :position, Vec3, location: 0
+  input :normal, Vec3, location: 1
+  varying :v_normal, Vec3
+
+  def main
+    self.v_normal = normal
+    gl_Position = mvp * vec4(position, 1.0)
+  end
+end
+
+fragment do
+  varying :v_normal, Vec3
+  output :frag_color, Vec4, location: 0
+
+  def main
+    n_dot_up = saturate(dot(v_normal.normalize, vec3(0.0, 1.0, 0.0)))
+    energy = mix(0.04, 1.0, metallic)
+    color = albedo * (energy * (1.0 - roughness) * n_dot_up)
+    frag_color = vec4(color, 1.0)
+  end
+end

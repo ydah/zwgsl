@@ -1,0 +1,25 @@
+version "300 es"
+precision :fragment, :mediump
+
+uniform :scene_tex, Sampler2D
+
+vertex do
+  input :position, Vec3, location: 0
+  input :uv, Vec2, location: 1
+  varying :v_uv, Vec2
+
+  def main
+    self.v_uv = uv
+    gl_Position = vec4(position, 1.0)
+  end
+end
+
+fragment do
+  varying :v_uv, Vec2
+  output :frag_color, Vec4, location: 0
+
+  def main
+    color = texture(scene_tex, v_uv)
+    frag_color = vec4(color.rgb, 1.0)
+  end
+end

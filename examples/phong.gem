@@ -1,0 +1,38 @@
+version "300 es"
+precision :fragment, :highp
+
+uniform :model_matrix, Mat4
+uniform :view_matrix, Mat4
+uniform :projection_matrix, Mat4
+uniform :light_pos, Vec3
+uniform :base_color, Vec4
+
+def phong_strength(normal: Vec3, light_dir: Vec3) -> Float
+  max(dot(normal.normalize, light_dir.normalize), 0.0)
+end
+
+vertex do
+  input :position, Vec3, location: 0
+  input :normal, Vec3, location: 1
+  varying :v_normal, Vec3
+  varying :v_world_pos, Vec3
+
+  def main
+    world_pos = model_matrix * vec4(position, 1.0)
+    self.v_normal = mat3(model_matrix) * normal
+    self.v_world_pos = world_pos.xyz
+    gl_Position = projection_matrix * view_matrix * world_pos
+  end
+end
+
+fragment do
+  varying :v_normal, Vec3
+  varying :v_world_pos, Vec3
+  output :frag_color, Vec4, location: 0
+
+  def main
+    light_dir = light_pos - v_world_pos
+    light = phong_strength(v_normal, light_dir)
+    frag_color = vec4(base_color.rgb * (0.2 + 0.8 * light), base_color.a)
+  end
+end
