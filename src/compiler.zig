@@ -5,6 +5,7 @@ const ir_builder = @import("ir_builder.zig");
 const lexer = @import("lexer.zig");
 const parser = @import("parser.zig");
 const sema = @import("sema.zig");
+const string_pool = @import("string_pool.zig");
 const wgsl_emitter = @import("wgsl_emitter.zig");
 
 pub const Target = enum(c_int) {
@@ -50,16 +51,19 @@ pub const CompileOutput = struct {
 };
 
 pub fn compile(allocator: std.mem.Allocator, source: []const u8, options: Options) !CompileOutput {
-    const tokens = try lexer.Lexer.tokenize(allocator, source);
+    var pool = string_pool.StringPool.init(allocator);
+    defer pool.deinit();
+
+    const tokens = try lexer.Lexer.tokenizeWithPool(allocator, &pool, source);
     var diagnostic_list = diagnostics.DiagnosticList.init(allocator);
-    var syntax_parser = parser.Parser.init(allocator, source, tokens, &diagnostic_list);
+    var syntax_parser = parser.Parser.initWithPool(allocator, &pool, source, tokens, &diagnostic_list);
     const program = try syntax_parser.parseProgram();
 
     if (diagnostic_list.items.items.len > 0) {
         return .{ .errors = try diagnosticsToErrors(allocator, diagnostic_list.items.items) };
     }
 
-    const typed = try sema.analyze(allocator, program, &diagnostic_list);
+    const typed = try sema.analyzeWithPool(allocator, &pool, program, &diagnostic_list);
     if (diagnostic_list.items.items.len > 0) {
         return .{ .errors = try diagnosticsToErrors(allocator, diagnostic_list.items.items) };
     }

@@ -23,6 +23,33 @@ fn parseProgram(source: []const u8) !struct {
     };
 }
 
+fn parseProgramWithPool(source: []const u8) !struct {
+    arena: std.heap.ArenaAllocator,
+    diagnostics: zwgsl.diagnostics.DiagnosticList,
+    pool: zwgsl.string_pool.StringPool,
+    program: *zwgsl.ast.Program,
+} {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    errdefer arena.deinit();
+
+    const allocator = arena.allocator();
+    var pool = zwgsl.string_pool.StringPool.init(allocator);
+    errdefer pool.deinit();
+
+    const tokens = try zwgsl.lexer.Lexer.tokenizeWithPool(allocator, &pool, source);
+    var diagnostic_list = zwgsl.diagnostics.DiagnosticList.init(allocator);
+    errdefer diagnostic_list.deinit();
+
+    var parser = zwgsl.parser.Parser.initWithPool(allocator, &pool, source, tokens, &diagnostic_list);
+    const program = try parser.parseProgram();
+    return .{
+        .arena = arena,
+        .diagnostics = diagnostic_list,
+        .pool = pool,
+        .program = program,
+    };
+}
+
 test "parser handles version declarations" {
     var parsed = try parseProgram("version \"300 es\"");
     defer parsed.arena.deinit();
@@ -165,4 +192,20 @@ test "parser handles function return types" {
     const function = parsed.program.items[0].function;
     try std.testing.expectEqualStrings("Vec3", function.return_type.?);
     try std.testing.expectEqual(@as(usize, 1), function.params.len);
+}
+
+test "parser reuses interned identifier slices with a shared string pool" {
+    var parsed = try parseProgramWithPool(
+        \\def main(value: Float) -> Float
+        \\  value + value
+        \\end
+    );
+    defer parsed.arena.deinit();
+    defer parsed.pool.deinit();
+
+    const function = parsed.program.items[0].function;
+    const lhs = function.body[0].data.expression.data.binary.lhs.data.identifier;
+    const rhs = function.body[0].data.expression.data.binary.rhs.data.identifier;
+    try std.testing.expect(function.params[0].name.ptr == lhs.ptr);
+    try std.testing.expect(lhs.ptr == rhs.ptr);
 }

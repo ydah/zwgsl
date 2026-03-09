@@ -2,6 +2,7 @@ const std = @import("std");
 const ast = @import("ast.zig");
 const builtins = @import("builtins.zig");
 const diagnostics = @import("diagnostics.zig");
+const string_pool = @import("string_pool.zig");
 const types = @import("types.zig");
 
 const SymbolKind = enum {
@@ -91,12 +92,22 @@ pub fn analyze(
     program: *ast.Program,
     diagnostic_list: *diagnostics.DiagnosticList,
 ) anyerror!*TypedProgram {
-    var analyzer = Analyzer.init(allocator, program, diagnostic_list);
+    return analyzeWithPool(allocator, null, program, diagnostic_list);
+}
+
+pub fn analyzeWithPool(
+    allocator: std.mem.Allocator,
+    pool: ?*string_pool.StringPool,
+    program: *ast.Program,
+    diagnostic_list: *diagnostics.DiagnosticList,
+) anyerror!*TypedProgram {
+    var analyzer = try Analyzer.init(allocator, pool, program, diagnostic_list);
     return try analyzer.run();
 }
 
 const Analyzer = struct {
     allocator: std.mem.Allocator,
+    pool: ?*string_pool.StringPool,
     program: *ast.Program,
     diagnostics: *diagnostics.DiagnosticList,
     typed: *TypedProgram,
@@ -109,10 +120,11 @@ const Analyzer = struct {
 
     fn init(
         allocator: std.mem.Allocator,
+        pool: ?*string_pool.StringPool,
         program: *ast.Program,
         diagnostic_list: *diagnostics.DiagnosticList,
-    ) Analyzer {
-        const typed = allocator.create(TypedProgram) catch @panic("OOM");
+    ) !Analyzer {
+        const typed = try allocator.create(TypedProgram);
         typed.* = .{
             .allocator = allocator,
             .program = program,
@@ -122,6 +134,7 @@ const Analyzer = struct {
 
         return .{
             .allocator = allocator,
+            .pool = pool,
             .program = program,
             .diagnostics = diagnostic_list,
             .typed = typed,
@@ -246,7 +259,7 @@ const Analyzer = struct {
 
         const return_type = if (function.return_type) |name|
             try self.resolveTypeName(name, function.position)
-        else if (std.mem.eql(u8, function.name, "main"))
+        else if (sameName(function.name, "main"))
             types.builtinType(.void)
         else
             types.builtinType(.error_type);
@@ -306,34 +319,34 @@ const Analyzer = struct {
         var stage_scope = Scope.init(self.allocator, &self.global_scope);
 
         if (block.stage == .vertex) {
-            _ = try stage_scope.put("gl_Position", .{
+            _ = try stage_scope.put(try self.intern("gl_Position"), .{
                 .ty = types.builtinType(.vec4),
                 .kind = .builtin,
                 .mutable = true,
             });
         }
         if (block.stage == .compute) {
-            _ = try stage_scope.put("global_invocation_id", .{
+            _ = try stage_scope.put(try self.intern("global_invocation_id"), .{
                 .ty = types.builtinType(.uvec3),
                 .kind = .builtin,
                 .mutable = false,
             });
-            _ = try stage_scope.put("local_invocation_id", .{
+            _ = try stage_scope.put(try self.intern("local_invocation_id"), .{
                 .ty = types.builtinType(.uvec3),
                 .kind = .builtin,
                 .mutable = false,
             });
-            _ = try stage_scope.put("workgroup_id", .{
+            _ = try stage_scope.put(try self.intern("workgroup_id"), .{
                 .ty = types.builtinType(.uvec3),
                 .kind = .builtin,
                 .mutable = false,
             });
-            _ = try stage_scope.put("num_workgroups", .{
+            _ = try stage_scope.put(try self.intern("num_workgroups"), .{
                 .ty = types.builtinType(.uvec3),
                 .kind = .builtin,
                 .mutable = false,
             });
-            _ = try stage_scope.put("local_invocation_index", .{
+            _ = try stage_scope.put(try self.intern("local_invocation_index"), .{
                 .ty = types.builtinType(.uint),
                 .kind = .builtin,
                 .mutable = false,
@@ -373,6 +386,11 @@ const Analyzer = struct {
         }
     }
 
+    fn intern(self: *Analyzer, value: []const u8) ![]const u8 {
+        if (self.pool) |pool| return try pool.intern(value);
+        return value;
+    }
+
     fn bindStageDecl(
         self: *Analyzer,
         scope: *Scope,
@@ -381,7 +399,8 @@ const Analyzer = struct {
         mutable: bool,
     ) anyerror!void {
         const ty = try self.resolveTypeName(decl.type_name, decl.position);
-        if (!try scope.put(decl.name, .{
+        const name = try self.intern(decl.name);
+        if (!try scope.put(name, .{
             .ty = ty,
             .kind = kind,
             .mutable = mutable,
@@ -425,12 +444,12 @@ const Analyzer = struct {
             if (index + 1 == function.body.len) last_expr_type = stmt_type;
         }
 
-        if (std.mem.eql(u8, function.name, "main") and !signature.return_type.isVoid()) {
+        if (sameName(function.name, "main") and !signature.return_type.isVoid()) {
             try self.report(function.position, "main must not declare a return type", .{});
             signature.return_type = types.builtinType(.void);
         }
 
-        if (signature.return_type.isError() and !std.mem.eql(u8, function.name, "main")) {
+        if (signature.return_type.isError() and !sameName(function.name, "main")) {
             signature.return_type = last_expr_type orelse types.builtinType(.void);
         }
 
@@ -706,7 +725,7 @@ const Analyzer = struct {
                         break :blk types.builtinType(.error_type);
                     };
                     for (fields) |field| {
-                        if (std.mem.eql(u8, field.name, member.name)) {
+                        if (sameName(field.name, member.name)) {
                             break :blk try self.resolveTypeName(field.type_name, field.position);
                         }
                     }
@@ -777,7 +796,7 @@ const Analyzer = struct {
     ) ?FunctionSignature {
         for (functions) |function| {
             const signature = self.typed.function_signatures.get(function) orelse continue;
-            if (!std.mem.eql(u8, signature.name, name)) continue;
+            if (!sameName(signature.name, name)) continue;
             if (signature.params.len != arg_types.len) continue;
 
             var matched = true;
@@ -825,4 +844,8 @@ fn compoundOperator(tag: @import("token.zig").TokenTag) @import("token.zig").Tok
         .slash_assign => .slash,
         else => .assign,
     };
+}
+
+fn sameName(lhs: []const u8, rhs: []const u8) bool {
+    return (lhs.len == rhs.len and lhs.ptr == rhs.ptr) or std.mem.eql(u8, lhs, rhs);
 }

@@ -1,6 +1,7 @@
 const std = @import("std");
 const ast = @import("ast.zig");
 const diagnostics = @import("diagnostics.zig");
+const string_pool = @import("string_pool.zig");
 const token = @import("token.zig");
 
 pub const ParseError = error{ParseFailed};
@@ -11,6 +12,7 @@ pub const Parser = struct {
     tokens: []const token.Token,
     index: usize = 0,
     diagnostics: *diagnostics.DiagnosticList,
+    pool: ?*string_pool.StringPool = null,
 
     pub fn init(
         allocator: std.mem.Allocator,
@@ -24,6 +26,18 @@ pub const Parser = struct {
             .tokens = tokens,
             .diagnostics = diagnostic_list,
         };
+    }
+
+    pub fn initWithPool(
+        allocator: std.mem.Allocator,
+        pool: *string_pool.StringPool,
+        source: []const u8,
+        tokens: []const token.Token,
+        diagnostic_list: *diagnostics.DiagnosticList,
+    ) Parser {
+        var parser = init(allocator, source, tokens, diagnostic_list);
+        parser.pool = pool;
+        return parser;
     }
 
     pub fn parseProgram(self: *Parser) anyerror!*ast.Program {
@@ -114,7 +128,7 @@ pub const Parser = struct {
             const type_name = try self.expectIdentifier("field type");
             try fields.append(self.allocator, .{
                 .position = positionOf(field_name_tok),
-                .name = field_name_tok.lexeme(self.source),
+                .name = try self.identifierValue(field_name_tok),
                 .type_name = type_name,
             });
             self.consumeNewlines();
@@ -366,7 +380,7 @@ pub const Parser = struct {
             const value = try self.parseExpression(0);
             return try self.makeStmt(positionOf(name_tok), .{
                 .typed_assignment = .{
-                    .name = name_tok.lexeme(self.source),
+                    .name = try self.identifierValue(name_tok),
                     .type_name = type_name,
                     .value = value,
                 },
@@ -443,7 +457,7 @@ pub const Parser = struct {
                 expr = try self.makeExpr(positionOf(member_name_tok), .{
                     .member = .{
                         .target = expr,
-                        .name = member_name_tok.lexeme(self.source),
+                        .name = try self.identifierValue(member_name_tok),
                     },
                 });
                 continue;
@@ -504,13 +518,13 @@ pub const Parser = struct {
             .symbol => {
                 _ = self.advance();
                 return self.makeExpr(positionOf(tok), .{
-                    .symbol = tok.lexeme(self.source)[1..],
+                    .symbol = try self.symbolValue(tok),
                 });
             },
             .identifier => {
                 _ = self.advance();
                 return self.makeExpr(positionOf(tok), .{
-                    .identifier = tok.lexeme(self.source),
+                    .identifier = try self.identifierValue(tok),
                 });
             },
             .kw_true => {
@@ -613,12 +627,12 @@ pub const Parser = struct {
 
     fn parseSymbolName(self: *Parser, label: []const u8) anyerror![]const u8 {
         const symbol_tok = try self.expect(.symbol, label);
-        return symbol_tok.lexeme(self.source)[1..];
+        return try self.symbolValue(symbol_tok);
     }
 
     fn expectIdentifier(self: *Parser, what: []const u8) anyerror![]const u8 {
         const ident = try self.expect(.identifier, what);
-        return ident.lexeme(self.source);
+        return try self.identifierValue(ident);
     }
 
     fn expect(self: *Parser, tag: token.TokenTag, what: []const u8) anyerror!token.Token {
@@ -713,6 +727,21 @@ pub const Parser = struct {
             if (self.check(.kw_end) or self.check(.kw_else) or self.check(.kw_elsif)) return;
             _ = self.advance();
         }
+    }
+
+    fn intern(self: *Parser, value: []const u8) anyerror![]const u8 {
+        if (self.pool) |pool| return try pool.intern(value);
+        return value;
+    }
+
+    fn identifierValue(self: *Parser, tok: token.Token) anyerror![]const u8 {
+        if (tok.interned) |value| return value;
+        return try self.intern(tok.lexeme(self.source));
+    }
+
+    fn symbolValue(self: *Parser, tok: token.Token) anyerror![]const u8 {
+        if (tok.interned) |value| return value;
+        return try self.intern(tok.lexeme(self.source)[1..]);
     }
 };
 

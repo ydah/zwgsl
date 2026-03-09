@@ -1,4 +1,5 @@
 const std = @import("std");
+const string_pool = @import("string_pool.zig");
 const token = @import("token.zig");
 
 pub const Lexer = struct {
@@ -123,12 +124,23 @@ pub const Lexer = struct {
     }
 
     pub fn tokenize(allocator: std.mem.Allocator, source: []const u8) ![]token.Token {
+        return tokenizeWithPool(allocator, null, source);
+    }
+
+    pub fn tokenizeWithPool(
+        allocator: std.mem.Allocator,
+        pool: ?*string_pool.StringPool,
+        source: []const u8,
+    ) ![]token.Token {
         var lexer = Lexer.init(source);
         var items: std.ArrayListUnmanaged(token.Token) = .{};
         defer items.deinit(allocator);
 
         while (true) {
-            const item = lexer.next();
+            var item = lexer.next();
+            if (pool) |active_pool| {
+                item.interned = try internToken(active_pool, item, source);
+            }
             try items.append(allocator, item);
             if (item.tag == .eof) break;
         }
@@ -330,6 +342,44 @@ pub const Lexer = struct {
         return self.pos + 1 < self.source.len and self.source[self.pos + 1] == expected;
     }
 };
+
+fn internToken(
+    pool: *string_pool.StringPool,
+    item: token.Token,
+    source: []const u8,
+) !?[]const u8 {
+    return switch (item.tag) {
+        .identifier,
+        .kw_def,
+        .kw_end,
+        .kw_do,
+        .kw_if,
+        .kw_elsif,
+        .kw_else,
+        .kw_unless,
+        .kw_return,
+        .kw_vertex,
+        .kw_fragment,
+        .kw_compute,
+        .kw_uniform,
+        .kw_input,
+        .kw_output,
+        .kw_varying,
+        .kw_struct,
+        .kw_true,
+        .kw_false,
+        .kw_inout,
+        .kw_self,
+        .kw_discard,
+        .kw_version,
+        .kw_precision,
+        .kw_pipeline,
+        .kw_nil,
+        => try pool.intern(item.lexeme(source)),
+        .symbol => try pool.intern(item.lexeme(source)[1..]),
+        else => null,
+    };
+}
 
 fn isIdentifierStart(ch: u8) bool {
     return std.ascii.isAlphabetic(ch) or ch == '_';

@@ -76,6 +76,7 @@ pub const Token = struct {
     end: u32,
     line: u32,
     column: u32,
+    interned: ?[]const u8 = null,
 
     pub fn lexeme(self: Token, source: []const u8) []const u8 {
         return source[self.start..self.end];

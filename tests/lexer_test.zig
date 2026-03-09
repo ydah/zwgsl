@@ -51,3 +51,18 @@ test "lexer recognizes composite operators" {
 test "lexer recognizes symbols" {
     try expectTags(":highp :position", &.{ .symbol, .symbol, .eof });
 }
+
+test "lexer interns identifiers with a shared string pool" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var pool = zwgsl.string_pool.StringPool.init(arena.allocator());
+    defer pool.deinit();
+
+    const tokens = try zwgsl.lexer.Lexer.tokenizeWithPool(arena.allocator(), &pool, "value value :value");
+    try std.testing.expect(tokens[0].interned != null);
+    try std.testing.expect(tokens[1].interned != null);
+    try std.testing.expect(tokens[2].interned != null);
+    try std.testing.expect(tokens[0].interned.?.ptr == tokens[1].interned.?.ptr);
+    try std.testing.expect(tokens[1].interned.?.ptr == tokens[2].interned.?.ptr);
+}
