@@ -5,6 +5,7 @@ test {
 }
 
 comptime {
+    _ = @import("diagnostics_test.zig");
     _ = @import("glsl_emitter_test.zig");
     _ = @import("integration_test.zig");
     _ = @import("lexer_test.zig");
