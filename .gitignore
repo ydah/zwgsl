@@ -1,0 +1,13 @@
+/.idea/
+zig-cache/
+zig-out/
+build/
+build-*/
+docgen_tmp/
+*.log
+*.tmp
+*.bak
+*.swp
+*.swo
+*.DS_Store
+*.vscode/
