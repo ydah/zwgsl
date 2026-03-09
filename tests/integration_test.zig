@@ -16,17 +16,17 @@ fn expectCompilesPath(path: []const u8) !void {
 }
 
 test "hello triangle example compiles" {
-    try expectCompilesPath("examples/hello_triangle.gem");
+    try expectCompilesPath("examples/hello_triangle.zwgsl");
 }
 
 test "phong example compiles" {
-    try expectCompilesPath("examples/phong.gem");
+    try expectCompilesPath("examples/phong.zwgsl");
 }
 
 test "pbr example compiles" {
-    try expectCompilesPath("examples/pbr.gem");
+    try expectCompilesPath("examples/pbr.zwgsl");
 }
 
 test "postprocess example compiles" {
-    try expectCompilesPath("examples/postprocess.gem");
+    try expectCompilesPath("examples/postprocess.zwgsl");
 }
