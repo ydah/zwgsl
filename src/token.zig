@@ -1,0 +1,114 @@
+const std = @import("std");
+
+pub const TokenTag = enum {
+    kw_def,
+    kw_end,
+    kw_do,
+    kw_if,
+    kw_elsif,
+    kw_else,
+    kw_unless,
+    kw_return,
+    kw_vertex,
+    kw_fragment,
+    kw_compute,
+    kw_uniform,
+    kw_input,
+    kw_output,
+    kw_varying,
+    kw_struct,
+    kw_true,
+    kw_false,
+    kw_inout,
+    kw_self,
+    kw_discard,
+    kw_version,
+    kw_precision,
+    kw_pipeline,
+    kw_nil,
+
+    integer_literal,
+    float_literal,
+    string_literal,
+
+    identifier,
+    symbol,
+
+    plus,
+    minus,
+    star,
+    slash,
+    percent,
+    eq,
+    neq,
+    lt,
+    gt,
+    le,
+    ge,
+    and_and,
+    or_or,
+    bang,
+    assign,
+    plus_assign,
+    minus_assign,
+    star_assign,
+    slash_assign,
+
+    lparen,
+    rparen,
+    lbracket,
+    rbracket,
+    comma,
+    dot,
+    colon,
+    arrow,
+    pipe,
+    newline,
+
+    comment,
+    eof,
+    invalid,
+};
+
+pub const Token = struct {
+    tag: TokenTag,
+    start: u32,
+    end: u32,
+    line: u32,
+    column: u32,
+
+    pub fn lexeme(self: Token, source: []const u8) []const u8 {
+        return source[self.start..self.end];
+    }
+};
+
+pub fn keywordTag(identifier: []const u8) ?TokenTag {
+    const map = std.StaticStringMap(TokenTag).initComptime(.{
+        .{ "def", .kw_def },
+        .{ "end", .kw_end },
+        .{ "do", .kw_do },
+        .{ "if", .kw_if },
+        .{ "elsif", .kw_elsif },
+        .{ "else", .kw_else },
+        .{ "unless", .kw_unless },
+        .{ "return", .kw_return },
+        .{ "vertex", .kw_vertex },
+        .{ "fragment", .kw_fragment },
+        .{ "compute", .kw_compute },
+        .{ "uniform", .kw_uniform },
+        .{ "input", .kw_input },
+        .{ "output", .kw_output },
+        .{ "varying", .kw_varying },
+        .{ "struct", .kw_struct },
+        .{ "true", .kw_true },
+        .{ "false", .kw_false },
+        .{ "inout", .kw_inout },
+        .{ "self", .kw_self },
+        .{ "discard", .kw_discard },
+        .{ "version", .kw_version },
+        .{ "precision", .kw_precision },
+        .{ "pipeline", .kw_pipeline },
+        .{ "nil", .kw_nil },
+    });
+    return map.get(identifier);
+}
