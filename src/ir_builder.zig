@@ -31,6 +31,9 @@ const Builder = struct {
         if (self.typed.fragment_block) |block| {
             module.fragment = try self.lowerStage(block, self.typed.fragment_functions);
         }
+        if (self.typed.compute_block) |block| {
+            module.compute = try self.lowerStage(block, self.typed.compute_functions);
+        }
 
         return module;
     }
@@ -164,6 +167,13 @@ const Builder = struct {
             for (sets[2]) |decl| try context.nonlocals.put(decl.name, {});
         }
         if (stage == .vertex) try context.nonlocals.put("gl_Position", {});
+        if (stage == .compute) {
+            try context.nonlocals.put("global_invocation_id", {});
+            try context.nonlocals.put("local_invocation_id", {});
+            try context.nonlocals.put("workgroup_id", {});
+            try context.nonlocals.put("num_workgroups", {});
+            try context.nonlocals.put("local_invocation_index", {});
+        }
 
         const body = try self.lowerStatementList(function.body, &context);
         var final_body = body;

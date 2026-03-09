@@ -12,6 +12,9 @@ pub const Builtin = enum {
     ivec2,
     ivec3,
     ivec4,
+    uvec2,
+    uvec3,
+    uvec4,
     bvec2,
     bvec3,
     bvec4,
@@ -70,6 +73,9 @@ pub const Type = union(enum) {
                 .ivec2 => "ivec2",
                 .ivec3 => "ivec3",
                 .ivec4 => "ivec4",
+                .uvec2 => "uvec2",
+                .uvec3 => "uvec3",
+                .uvec4 => "uvec4",
                 .bvec2 => "bvec2",
                 .bvec3 => "bvec3",
                 .bvec4 => "bvec4",
@@ -86,6 +92,38 @@ pub const Type = union(enum) {
         };
     }
 
+    pub fn wgslName(self: Type) []const u8 {
+        return switch (self) {
+            .builtin => |builtin| switch (builtin) {
+                .float => "f32",
+                .int => "i32",
+                .uint => "u32",
+                .bool => "bool",
+                .vec2 => "vec2f",
+                .vec3 => "vec3f",
+                .vec4 => "vec4f",
+                .ivec2 => "vec2i",
+                .ivec3 => "vec3i",
+                .ivec4 => "vec4i",
+                .uvec2 => "vec2u",
+                .uvec3 => "vec3u",
+                .uvec4 => "vec4u",
+                .bvec2 => "vec2<bool>",
+                .bvec3 => "vec3<bool>",
+                .bvec4 => "vec4<bool>",
+                .mat2 => "mat2x2f",
+                .mat3 => "mat3x3f",
+                .mat4 => "mat4x4f",
+                .sampler2d => "texture_2d<f32>",
+                .sampler_cube => "texture_cube<f32>",
+                .sampler3d => "texture_3d<f32>",
+                .void => "void",
+                .error_type => "__error__",
+            },
+            .struct_type => |name| name,
+        };
+    }
+
     pub fn componentType(self: Type) ?Type {
         return switch (self) {
             .builtin => |builtin| switch (builtin) {
@@ -95,6 +133,7 @@ pub const Type = union(enum) {
                 .bool => builtinType(.bool),
                 .vec2, .vec3, .vec4, .mat2, .mat3, .mat4 => builtinType(.float),
                 .ivec2, .ivec3, .ivec4 => builtinType(.int),
+                .uvec2, .uvec3, .uvec4 => builtinType(.uint),
                 .bvec2, .bvec3, .bvec4 => builtinType(.bool),
                 else => null,
             },
@@ -105,9 +144,9 @@ pub const Type = union(enum) {
     pub fn vectorLen(self: Type) ?u8 {
         return switch (self) {
             .builtin => |builtin| switch (builtin) {
-                .vec2, .ivec2, .bvec2 => 2,
-                .vec3, .ivec3, .bvec3 => 3,
-                .vec4, .ivec4, .bvec4 => 4,
+                .vec2, .ivec2, .uvec2, .bvec2 => 2,
+                .vec3, .ivec3, .uvec3, .bvec3 => 3,
+                .vec4, .ivec4, .uvec4, .bvec4 => 4,
                 else => null,
             },
             else => null,
@@ -166,6 +205,9 @@ pub const Type = union(enum) {
                 .ivec2,
                 .ivec3,
                 .ivec4,
+                .uvec2,
+                .uvec3,
+                .uvec4,
                 .mat2,
                 .mat3,
                 .mat4,
@@ -212,6 +254,9 @@ fn mapName(name: []const u8, title_case: bool) ?Type {
             .{ "IVec2", builtinType(.ivec2) },
             .{ "IVec3", builtinType(.ivec3) },
             .{ "IVec4", builtinType(.ivec4) },
+            .{ "UVec2", builtinType(.uvec2) },
+            .{ "UVec3", builtinType(.uvec3) },
+            .{ "UVec4", builtinType(.uvec4) },
             .{ "BVec2", builtinType(.bvec2) },
             .{ "BVec3", builtinType(.bvec3) },
             .{ "BVec4", builtinType(.bvec4) },
@@ -235,6 +280,9 @@ fn mapName(name: []const u8, title_case: bool) ?Type {
             .{ "ivec2", builtinType(.ivec2) },
             .{ "ivec3", builtinType(.ivec3) },
             .{ "ivec4", builtinType(.ivec4) },
+            .{ "uvec2", builtinType(.uvec2) },
+            .{ "uvec3", builtinType(.uvec3) },
+            .{ "uvec4", builtinType(.uvec4) },
             .{ "bvec2", builtinType(.bvec2) },
             .{ "bvec3", builtinType(.bvec3) },
             .{ "bvec4", builtinType(.bvec4) },
@@ -336,6 +384,12 @@ pub fn vectorTypeForComponent(component: Type, len: u8) ?Type {
                 2 => builtinType(.ivec2),
                 3 => builtinType(.ivec3),
                 4 => builtinType(.ivec4),
+                else => null,
+            },
+            .uint => switch (len) {
+                2 => builtinType(.uvec2),
+                3 => builtinType(.uvec3),
+                4 => builtinType(.uvec4),
                 else => null,
             },
             .bool => switch (len) {

@@ -5,6 +5,7 @@ const ir_builder = @import("ir_builder.zig");
 const lexer = @import("lexer.zig");
 const parser = @import("parser.zig");
 const sema = @import("sema.zig");
+const wgsl_emitter = @import("wgsl_emitter.zig");
 
 pub const Target = enum(c_int) {
     glsl_es_300 = 0,
@@ -35,6 +36,7 @@ pub const Options = extern struct {
 pub const Result = extern struct {
     vertex_source: ?[*:0]const u8 = null,
     fragment_source: ?[*:0]const u8 = null,
+    compute_source: ?[*:0]const u8 = null,
     errors: ?[*]const Error = null,
     error_count: u32 = 0,
     _internal: ?*anyopaque = null,
@@ -43,21 +45,11 @@ pub const Result = extern struct {
 pub const CompileOutput = struct {
     vertex_source: ?[]const u8 = null,
     fragment_source: ?[]const u8 = null,
+    compute_source: ?[]const u8 = null,
     errors: []const Error = &.{},
 };
 
 pub fn compile(allocator: std.mem.Allocator, source: []const u8, options: Options) !CompileOutput {
-    if (options.target == .wgsl) {
-        const errors = try allocator.alloc(Error, 1);
-        errors[0] = .{
-            .kind = .semantic,
-            .message = try allocator.dupeZ(u8, "WGSL backend is not implemented yet"),
-            .line = 0,
-            .column = 0,
-        };
-        return .{ .errors = errors };
-    }
-
     const tokens = try lexer.Lexer.tokenize(allocator, source);
     var diagnostic_list = diagnostics.DiagnosticList.init(allocator);
     var syntax_parser = parser.Parser.init(allocator, source, tokens, &diagnostic_list);
@@ -72,16 +64,38 @@ pub fn compile(allocator: std.mem.Allocator, source: []const u8, options: Option
         return .{ .errors = try diagnosticsToErrors(allocator, diagnostic_list.items.items) };
     }
 
+    if (typed.compute_block != null and options.target == .glsl_es_300) {
+        return singleError(
+            allocator,
+            "GLSL ES 3.00 backend does not support compute shaders",
+            typed.compute_block.?.position.line,
+            typed.compute_block.?.position.column,
+        );
+    }
+
     const module = try ir_builder.build(allocator, typed);
-    const emitted = try glsl_emitter.emit(allocator, module, .{
-        .emit_debug_comments = options.emit_debug_comments != 0,
-        .optimize_output = options.optimize_output != 0,
-        .source = source,
-    });
+    const emitted = switch (options.target) {
+        .glsl_es_300 => try glsl_emitter.emit(allocator, module, .{
+            .emit_debug_comments = options.emit_debug_comments != 0,
+            .optimize_output = options.optimize_output != 0,
+            .source = source,
+        }),
+        .wgsl => wgsl_emitter.emit(allocator, module, .{
+            .emit_debug_comments = options.emit_debug_comments != 0,
+            .optimize_output = options.optimize_output != 0,
+            .source = source,
+        }) catch |err| switch (err) {
+            error.UnsupportedSamplerType => return singleError(allocator, "WGSL backend does not support sampler uniforms yet", 0, 0),
+            error.UnsupportedTextureBuiltin => return singleError(allocator, "WGSL backend does not support texture sampling yet", 0, 0),
+            error.UnsupportedInOutParams => return singleError(allocator, "WGSL backend does not support inout parameters yet", 0, 0),
+            else => return err,
+        },
+    };
 
     return .{
         .vertex_source = emitted.vertex,
         .fragment_source = emitted.fragment,
+        .compute_source = emitted.compute,
     };
 }
 
@@ -99,4 +113,15 @@ fn diagnosticsToErrors(allocator: std.mem.Allocator, items: []const diagnostics.
         };
     }
     return errors;
+}
+
+fn singleError(allocator: std.mem.Allocator, message: []const u8, line: u32, column: u32) !CompileOutput {
+    const errors = try allocator.alloc(Error, 1);
+    errors[0] = .{
+        .kind = .semantic,
+        .message = try allocator.dupeZ(u8, message),
+        .line = line,
+        .column = column,
+    };
+    return .{ .errors = errors };
 }

@@ -14,6 +14,7 @@ pub const sema = @import("sema.zig");
 pub const string_pool = @import("string_pool.zig");
 pub const token = @import("token.zig");
 pub const types = @import("types.zig");
+pub const wgsl_emitter = @import("wgsl_emitter.zig");
 
 pub const ZwgslTarget = compiler_api.Target;
 pub const ZwgslErrorKind = compiler_api.ErrorKind;
@@ -28,12 +29,14 @@ const ResultStorage = struct {
     errors: []compiler.Error = &.{},
     vertex_source: ?[:0]u8 = null,
     fragment_source: ?[:0]u8 = null,
+    compute_source: ?[:0]u8 = null,
 };
 
 fn emptyResult() compiler.Result {
     return .{
         .vertex_source = null,
         .fragment_source = null,
+        .compute_source = null,
         .errors = null,
         .error_count = 0,
         ._internal = null,
@@ -73,6 +76,9 @@ pub export fn zwgsl_compile(source: [*]const u8, source_len: usize, options: com
     if (output.fragment_source) |fragment| {
         storage.fragment_source = arena.dupeZ(u8, fragment) catch return emptyResult();
     }
+    if (output.compute_source) |compute| {
+        storage.compute_source = arena.dupeZ(u8, compute) catch return emptyResult();
+    }
     if (output.errors.len > 0) {
         storage.errors = arena.alloc(compiler.Error, output.errors.len) catch return emptyResult();
         @memcpy(storage.errors, output.errors);
@@ -81,6 +87,7 @@ pub export fn zwgsl_compile(source: [*]const u8, source_len: usize, options: com
     return .{
         .vertex_source = if (storage.vertex_source) |value| value.ptr else null,
         .fragment_source = if (storage.fragment_source) |value| value.ptr else null,
+        .compute_source = if (storage.compute_source) |value| value.ptr else null,
         .errors = if (storage.errors.len > 0) storage.errors.ptr else null,
         .error_count = @intCast(storage.errors.len),
         ._internal = storage,
@@ -129,6 +136,25 @@ test "C API compiles a basic shader" {
     try std.testing.expectEqual(@as(u32, 0), result.error_count);
     try std.testing.expect(result.vertex_source != null);
     try std.testing.expect(result.fragment_source != null);
+    try std.testing.expect(result.compute_source == null);
+}
+
+test "C API returns WGSL compute output" {
+    const source =
+        \\compute do
+        \\  def main
+        \\    id: UVec3 = global_invocation_id
+        \\  end
+        \\end
+    ;
+
+    var result = zwgsl_compile(source.ptr, source.len, .{ .target = .wgsl });
+    defer zwgsl_free(&result);
+
+    try std.testing.expectEqual(@as(u32, 0), result.error_count);
+    try std.testing.expect(result.compute_source != null);
+    try std.testing.expect(result.vertex_source == null);
+    try std.testing.expect(result.fragment_source == null);
 }
 
 test "C API returns semantic errors" {

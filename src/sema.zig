@@ -72,8 +72,10 @@ pub const TypedProgram = struct {
     global_functions: []const *ast.FunctionDef = &.{},
     vertex_functions: []const *ast.FunctionDef = &.{},
     fragment_functions: []const *ast.FunctionDef = &.{},
+    compute_functions: []const *ast.FunctionDef = &.{},
     vertex_block: ?*ast.ShaderBlock = null,
     fragment_block: ?*ast.ShaderBlock = null,
+    compute_block: ?*ast.ShaderBlock = null,
 
     pub fn exprType(self: *const TypedProgram, expr: *ast.Expr) types.Type {
         return self.expr_types.get(expr) orelse types.builtinType(.error_type);
@@ -103,6 +105,7 @@ const Analyzer = struct {
     global_functions: std.ArrayListUnmanaged(*ast.FunctionDef) = .{},
     vertex_functions: std.ArrayListUnmanaged(*ast.FunctionDef) = .{},
     fragment_functions: std.ArrayListUnmanaged(*ast.FunctionDef) = .{},
+    compute_functions: std.ArrayListUnmanaged(*ast.FunctionDef) = .{},
 
     fn init(
         allocator: std.mem.Allocator,
@@ -134,10 +137,12 @@ const Analyzer = struct {
         try self.analyzeGlobalFunctions();
         if (self.typed.vertex_block) |vertex| try self.analyzeStage(vertex, self.vertex_functions.items);
         if (self.typed.fragment_block) |fragment| try self.analyzeStage(fragment, self.fragment_functions.items);
+        if (self.typed.compute_block) |compute| try self.analyzeStage(compute, self.compute_functions.items);
 
         self.typed.global_functions = try self.global_functions.toOwnedSlice(self.allocator);
         self.typed.vertex_functions = try self.vertex_functions.toOwnedSlice(self.allocator);
         self.typed.fragment_functions = try self.fragment_functions.toOwnedSlice(self.allocator);
+        self.typed.compute_functions = try self.compute_functions.toOwnedSlice(self.allocator);
         return self.typed;
     }
 
@@ -163,12 +168,34 @@ const Analyzer = struct {
                 },
                 .function => |function| try self.global_functions.append(self.allocator, function),
                 .shader_block => |block| switch (block.stage) {
-                    .vertex => self.typed.vertex_block = block,
-                    .fragment => self.typed.fragment_block = block,
-                    .compute => {},
+                    .vertex => {
+                        if (self.typed.vertex_block == null) {
+                            self.typed.vertex_block = block;
+                        } else {
+                            try self.report(block.position, "multiple vertex shader blocks are not supported", .{});
+                        }
+                    },
+                    .fragment => {
+                        if (self.typed.fragment_block == null) {
+                            self.typed.fragment_block = block;
+                        } else {
+                            try self.report(block.position, "multiple fragment shader blocks are not supported", .{});
+                        }
+                    },
+                    .compute => {
+                        if (self.typed.compute_block == null) {
+                            self.typed.compute_block = block;
+                        } else {
+                            try self.report(block.position, "multiple compute shader blocks are not supported", .{});
+                        }
+                    },
                 },
                 else => {},
             }
+        }
+
+        if (self.typed.compute_block != null and (self.typed.vertex_block != null or self.typed.fragment_block != null)) {
+            try self.report(self.typed.compute_block.?.position, "compute shaders cannot be combined with vertex/fragment stages", .{});
         }
     }
 
@@ -191,6 +218,15 @@ const Analyzer = struct {
                 if (item == .function) {
                     try self.fragment_functions.append(self.allocator, item.function);
                     try self.registerFunction(item.function, .fragment);
+                }
+            }
+        }
+
+        if (self.typed.compute_block) |block| {
+            for (block.items) |item| {
+                if (item == .function) {
+                    try self.compute_functions.append(self.allocator, item.function);
+                    try self.registerFunction(item.function, .compute);
                 }
             }
         }
@@ -276,14 +312,55 @@ const Analyzer = struct {
                 .mutable = true,
             });
         }
+        if (block.stage == .compute) {
+            _ = try stage_scope.put("global_invocation_id", .{
+                .ty = types.builtinType(.uvec3),
+                .kind = .builtin,
+                .mutable = false,
+            });
+            _ = try stage_scope.put("local_invocation_id", .{
+                .ty = types.builtinType(.uvec3),
+                .kind = .builtin,
+                .mutable = false,
+            });
+            _ = try stage_scope.put("workgroup_id", .{
+                .ty = types.builtinType(.uvec3),
+                .kind = .builtin,
+                .mutable = false,
+            });
+            _ = try stage_scope.put("num_workgroups", .{
+                .ty = types.builtinType(.uvec3),
+                .kind = .builtin,
+                .mutable = false,
+            });
+            _ = try stage_scope.put("local_invocation_index", .{
+                .ty = types.builtinType(.uint),
+                .kind = .builtin,
+                .mutable = false,
+            });
+        }
 
         for (block.items) |item| {
             switch (item) {
-                .input => |decl| try self.bindStageDecl(&stage_scope, decl, .input, false),
-                .output => |decl| try self.bindStageDecl(&stage_scope, decl, .output, true),
-                .varying => |decl| {
-                    const mutable = block.stage == .vertex;
-                    try self.bindStageDecl(&stage_scope, decl, .varying, mutable);
+                .input, .output, .varying => if (block.stage == .compute) {
+                    const decl = switch (item) {
+                        .input => item.input,
+                        .output => item.output,
+                        .varying => item.varying,
+                        else => unreachable,
+                    };
+                    try self.report(decl.position, "compute shaders do not support stage I/O declarations", .{});
+                } else switch (item) {
+                    .input => |decl| try self.bindStageDecl(&stage_scope, decl, .input, false),
+                    .output => |decl| try self.bindStageDecl(&stage_scope, decl, .output, true),
+                    .varying => |decl| {
+                        const mutable = block.stage == .vertex;
+                        try self.bindStageDecl(&stage_scope, decl, .varying, mutable);
+                    },
+                    else => unreachable,
+                },
+                .precision => |decl| if (block.stage == .compute) {
+                    try self.report(decl.position, "compute shaders do not use precision qualifiers", .{});
                 },
                 else => {},
             }

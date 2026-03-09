@@ -11,6 +11,7 @@ pub const EmitOptions = struct {
 pub const Output = struct {
     vertex: ?[]const u8 = null,
     fragment: ?[]const u8 = null,
+    compute: ?[]const u8 = null,
 };
 
 pub fn emit(allocator: std.mem.Allocator, module: *const ir.Module, options: EmitOptions) anyerror!Output {

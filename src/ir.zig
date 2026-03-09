@@ -10,6 +10,7 @@ pub const Module = struct {
     global_functions: []const Function = &.{},
     vertex: ?Stage = null,
     fragment: ?Stage = null,
+    compute: ?Stage = null,
 };
 
 pub const Global = struct {

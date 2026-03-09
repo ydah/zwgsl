@@ -1,7 +1,7 @@
 # zwgsl
 
 `zwgsl` is a Zig library that compiles a small shader DSL into GPU shader source code.
-Today, the implemented backend targets GLSL ES 3.00 and produces separate vertex and fragment shader outputs.
+It currently targets GLSL ES 3.00 and WGSL, and can produce vertex, fragment, or compute shader outputs depending on the selected backend and stage.
 
 The project exposes:
 
@@ -12,11 +12,9 @@ The project exposes:
 ## Status
 
 - Zig version: `0.15.0` or newer
-- Current stable output target: `GLSL ES 3.00`
-- Planned but not yet implemented: `WGSL`
+- Implemented output targets: `GLSL ES 3.00`, `WGSL`
+- Compute shaders are available through the WGSL backend
 - No standalone CLI is included yet
-
-If `target = .wgsl` or `ZWGSL_TARGET_WGSL` is requested, the compiler currently returns an error indicating that the WGSL backend is not implemented.
 
 ## What The Compiler Does
 
@@ -26,12 +24,13 @@ The pipeline is organized as:
 2. Parsing
 3. Semantic analysis
 4. IR construction
-5. GLSL emission
+5. Backend emission (`GLSL ES 3.00` or `WGSL`)
 
 At the API level, compilation returns:
 
 - `vertex_source`
 - `fragment_source`
+- `compute_source`
 - Structured diagnostics with line and column information
 
 ## Repository Layout
@@ -171,8 +170,9 @@ int main(void) {
         return 1;
     }
 
-    puts(result.vertex_source);
-    puts(result.fragment_source);
+    if (result.vertex_source) puts(result.vertex_source);
+    if (result.fragment_source) puts(result.fragment_source);
+    if (result.compute_source) puts(result.compute_source);
     zwgsl_free(&result);
     return 0;
 }
@@ -215,19 +215,21 @@ fragment do
 end
 ```
 
-This produces GLSL ES 3.00 shader source for both stages.
+This produces backend-specific shader source for both stages.
 
 ## Current Limitations
 
-- Only the GLSL ES 3.00 backend is implemented
 - The compiler expects source that fits the currently supported DSL and semantic rules covered by the test suite
-- `optimize_output` is part of the public options struct, but there is no optimization pass wired in yet
-- The project currently focuses on vertex and fragment shaders
+- `optimize_output` currently performs compact output formatting rather than semantic optimization
+- Compute shaders are currently emitted only through the WGSL backend
+- WGSL uniform bindings are auto-assigned as `@group(0) @binding(N)`
+- WGSL sampler uniforms and texture sampling are not implemented yet
 
 ## Development Notes
 
 - Examples under `examples/` are expected to compile in integration tests
 - Golden GLSL outputs live in `tests/fixtures/`
+- WGSL backend coverage lives in `tests/wgsl_emitter_test.zig`
 - The public C ABI is defined in `include/zwgsl.h`
 - The Zig module entry point is `src/lib.zig`
 

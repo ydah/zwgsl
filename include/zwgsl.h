@@ -31,6 +31,7 @@ typedef struct {
 typedef struct {
     const char* vertex_source;
     const char* fragment_source;
+    const char* compute_source;
     const ZwgslError* errors;
     uint32_t error_count;
     void* _internal;
