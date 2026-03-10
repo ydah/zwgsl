@@ -1,10 +1,10 @@
 struct VertexInput {
     @location(0) position: vec3f,
-};
+}
 
 struct VertexOutput {
     @builtin(position) gl_Position: vec4f,
-};
+}
 
 var<private> gl_Position: vec4f;
 var<private> position: vec3f;

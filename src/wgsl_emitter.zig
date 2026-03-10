@@ -222,7 +222,7 @@ fn emitStageInterfaceStructs(writer: anytype, module: *const mir.Module, entry_p
                 for (entry_point.interface.inputs, 0..) |input, index| {
                     try writer.print("    @location({d}) {s}: {s},\n", .{ declLocation(input, index), input.name, input.ty.wgslName() });
                 }
-                try writer.writeAll("};\n\n");
+                try writer.writeAll("}\n\n");
             }
 
             try writer.writeAll("struct VertexOutput {\n");
@@ -233,7 +233,7 @@ fn emitStageInterfaceStructs(writer: anytype, module: *const mir.Module, entry_p
             for (entry_point.interface.outputs, 0..) |output, index| {
                 try writer.print("    @location({d}) {s}: {s},\n", .{ declLocation(output, index), output.name, output.ty.wgslName() });
             }
-            try writer.writeAll("};\n\n");
+            try writer.writeAll("}\n\n");
         },
         .fragment => {
             if (entry_point.interface.varyings.len > 0) {
@@ -241,7 +241,7 @@ fn emitStageInterfaceStructs(writer: anytype, module: *const mir.Module, entry_p
                 for (entry_point.interface.varyings) |varying| {
                     try writer.print("    @location({d}) {s}: {s},\n", .{ varyingLocation(module, varying.name), varying.name, varying.ty.wgslName() });
                 }
-                try writer.writeAll("};\n\n");
+                try writer.writeAll("}\n\n");
             }
 
             if (entry_point.interface.outputs.len > 0) {
@@ -249,7 +249,7 @@ fn emitStageInterfaceStructs(writer: anytype, module: *const mir.Module, entry_p
                 for (entry_point.interface.outputs, 0..) |output, index| {
                     try writer.print("    @location({d}) {s}: {s},\n", .{ declLocation(output, index), output.name, output.ty.wgslName() });
                 }
-                try writer.writeAll("};\n\n");
+                try writer.writeAll("}\n\n");
             }
         },
         .compute => {},
@@ -263,7 +263,7 @@ fn emitBindings(writer: anytype, bindings: []const mir.Binding) !void {
                 if (uniformRequiresWrapper(binding.ty)) {
                     try writer.print("struct __zwgsl_uniform_{s} {{\n", .{binding.name});
                     try writer.print("    @align(16) value: {s},\n", .{binding.ty.wgslName()});
-                    try writer.writeAll("};\n");
+                    try writer.writeAll("}\n");
                     try writer.print("@group({d}) @binding({d}) var<uniform> {s}: __zwgsl_uniform_{s};\n", .{
                         binding.group,
                         binding.binding,
@@ -334,7 +334,7 @@ fn emitUserStruct(writer: anytype, struct_decl: mir.StructDecl) !void {
     for (struct_decl.fields) |field| {
         try writer.print("    {s}: {s},\n", .{ field.name, field.ty.wgslName() });
     }
-    try writer.writeAll("};\n");
+    try writer.writeAll("}\n");
 }
 
 fn emitFunction(

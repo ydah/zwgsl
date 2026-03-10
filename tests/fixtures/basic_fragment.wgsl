@@ -1,6 +1,6 @@
 struct FragmentOutput {
     @location(0) frag_color: vec4f,
-};
+}
 
 var<private> frag_color: vec4f;
 

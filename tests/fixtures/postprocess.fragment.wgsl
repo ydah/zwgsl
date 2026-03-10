@@ -1,10 +1,10 @@
 struct FragmentInput {
     @location(0) v_uv: vec2f,
-};
+}
 
 struct FragmentOutput {
     @location(0) frag_color: vec4f,
-};
+}
 
 @group(0) @binding(0) var scene_tex_texture: texture_2d<f32>;
 @group(0) @binding(1) var scene_tex_sampler: sampler;

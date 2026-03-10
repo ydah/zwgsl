@@ -1,13 +1,13 @@
 struct VertexInput {
     @location(0) position: vec3f,
     @location(1) normal: vec3f,
-};
+}
 
 struct VertexOutput {
     @builtin(position) gl_Position: vec4f,
     @location(0) v_normal: vec3f,
     @location(1) v_world_pos: vec3f,
-};
+}
 
 @group(0) @binding(0) var<uniform> model_matrix: mat4x4f;
 @group(0) @binding(1) var<uniform> view_matrix: mat4x4f;

@@ -309,7 +309,7 @@ const collectUniformSpecs = (...sources: Array<string | null>) => {
 const collectWrappedUniformTypes = (source: string) => {
   const wrappedTypes = new Map<string, string>();
   const pattern =
-    /struct\s+([A-Za-z_]\w*)\s*\{\s*(?:@align\(16\)\s*)?value:\s*([A-Za-z0-9_<>]+),\s*\};/g;
+    /struct\s+([A-Za-z_]\w*)\s*\{\s*(?:@align\(16\)\s*)?value:\s*([A-Za-z0-9_<>]+),\s*\};?/g;
 
   for (const match of source.matchAll(pattern)) {
     wrappedTypes.set(match[1], match[2]);
@@ -605,7 +605,7 @@ const createVertexPreviewState = (device: GPUDevice, source: string): VertexPrev
 };
 
 const collectVertexAttributeSpecs = (source: string) => {
-  const structMatch = /struct\s+VertexInput\s*\{([\s\S]*?)\};/.exec(source);
+  const structMatch = /struct\s+VertexInput\s*\{([\s\S]*?)\};?/.exec(source);
   if (!structMatch) return [];
 
   const pattern = /@location\((\d+)\)\s*([A-Za-z_]\w*):\s*([A-Za-z0-9_]+),/g;

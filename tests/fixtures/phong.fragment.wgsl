@@ -1,11 +1,11 @@
 struct FragmentInput {
     @location(0) v_normal: vec3f,
     @location(1) v_world_pos: vec3f,
-};
+}
 
 struct FragmentOutput {
     @location(0) frag_color: vec4f,
-};
+}
 
 @group(0) @binding(0) var<uniform> model_matrix: mat4x4f;
 @group(0) @binding(1) var<uniform> view_matrix: mat4x4f;
