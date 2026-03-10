@@ -180,6 +180,13 @@ export const createPreview = async (
     try {
       const vertexModule = device.createShaderModule({ code: vertexSource });
       const fragmentModule = device.createShaderModule({ code: fragmentSource });
+      const vertexErrors = await collectShaderModuleErrors(vertexModule, "vertex");
+      const fragmentErrors = await collectShaderModuleErrors(fragmentModule, "fragment");
+
+      if (vertexErrors.length > 0 || fragmentErrors.length > 0) {
+        throw new Error([...vertexErrors, ...fragmentErrors].join(" "));
+      }
+
       const pipeline = await device.createRenderPipelineAsync({
         layout: "auto",
         vertex: {
@@ -427,8 +434,8 @@ const parseUniformSpec = (binding: number, name: string, typeName: string): Unif
 };
 
 const autoUniform = (name: string): UniformSpec["auto"] => {
-  if (name === "iTime") return "time";
-  if (name === "iResolution") return "resolution";
+  if (name === "iTime" || name === "time") return "time";
+  if (name === "iResolution" || name === "resolution") return "resolution";
   return null;
 };
 
@@ -794,6 +801,16 @@ const writeVertexAttribute = (
 const describePreviewError = (error: unknown) => {
   if (error instanceof Error && error.message) return error.message;
   return "Check the browser console for the WebGPU validation error.";
+};
+
+const collectShaderModuleErrors = async (module: GPUShaderModule, stage: "vertex" | "fragment") => {
+  const info = await module.getCompilationInfo();
+  return info.messages
+    .filter((message) => message.type === "error")
+    .map(
+      (message) =>
+        `${stage} shader error L${message.lineNum}:C${message.linePos} ${message.message}`.trim(),
+    );
 };
 
 const renderControls = (root: HTMLElement, uniforms: UniformState[], textures: TextureState[]) => {

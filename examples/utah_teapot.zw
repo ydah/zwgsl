@@ -111,6 +111,24 @@ where
   grad = p0 * f0 + p1 * f1 + p2 * f2 + p3 * f3 - p * (f0 + f1 + f2 + f3)
 end
 
+def march_once(origin: Vec3, ray: Vec3, state: Vec4) -> Vec4
+  next_state: Vec4 = state
+  if state.z > 0.5 && state.x < 4.7
+    next_step = scene_distance(origin + ray * state.x)
+    if next_step < 0.0005
+      next_state = vec4(state.x, next_step, 0.0, 0.0)
+    else
+      next_state = vec4(state.x + next_step, next_step, 1.0, 0.0)
+    end
+  end
+  next_state
+end
+
+def shadow_once(hit_pos: Vec3, light_dir: Vec3, state: Vec2) -> Vec2
+  next_t = state.y + 0.02
+  vec2(min(state.x, scene_distance(hit_pos + light_dir * next_t) / next_t), next_t)
+end
+
 def shade(uv: Vec2) -> Vec3
   screen = uv + uv - 1.0
   pixel = vec2(screen.x * resolution.x / max(resolution.y, 1.0), screen.y)
@@ -124,40 +142,29 @@ def shade(uv: Vec2) -> Vec3
   bg = mix(hsv2rgb_smooth(0.5 + time * 0.02, 0.35, 0.4), hsv2rgb_smooth(-0.5 + time * 0.02, 0.35, 0.7), uv.y)
   vignette = pow(16.0 * uv.x * uv.y * (1.0 - uv.x) * (1.0 - uv.y), 0.16)
   color: Vec3 = bg
-  travel: Float = 0.0
-  march_step: Float = 0.1
-  marching: Bool = true
+  march: Vec4 = vec4(0.0, 0.1, 1.0, 0.0)
 
   48.times do |i|
-    if marching && travel < 4.7
-      march_step = scene_distance(origin + ray * travel)
-      if march_step < 0.0005
-        marching = false
-      else
-        travel += march_step
-      end
-    end
+    march = march_once(origin, ray, march)
   end
 
-  if marching == false && travel < 4.7
-    hit_pos = origin + ray * travel
-    normal = estimate_normal(hit_pos, ray, travel)
+  if march.z < 0.5 && march.x < 4.7
+    hit_pos = origin + ray * march.x
+    normal = estimate_normal(hit_pos, ray, march.x)
     light_dir = normalize(vec3(1.0, 0.72, 1.0))
     view_dir = normalize(origin - hit_pos)
     half_dir = normalize(light_dir + view_dir)
     reflected = normalize(reflect(vec3(0.0) - light_dir, normal))
     tangent = tangent_from_normal(normal)
     bitangent = bitangent_from_normal(normal, tangent)
-    shadow: Float = 1.0
-    shadow_t: Float = 0.0
+    shadow_state: Vec2 = vec2(1.0, 0.0)
 
     20.times do |j|
-      shadow_t += 0.02
-      shadow = min(shadow, scene_distance(hit_pos + light_dir * shadow_t) / shadow_t)
+      shadow_state = shadow_once(hit_pos, light_dir, shadow_state)
     end
 
     highlight = pow(max(dot(reflect(vec3(0.0) - light_dir, normal), view_dir), 0.0), 32.0)
-    color = compute_brdf(normal, light_dir, half_dir, reflected, tangent, bitangent) * (0.35 + 0.65 * clamp(3.0 * shadow, 0.0, 1.0)) + vec3(0.15 * highlight)
+    color = compute_brdf(normal, light_dir, half_dir, reflected, tangent, bitangent) * (0.35 + 0.65 * clamp(3.0 * shadow_state.x, 0.0, 1.0)) + vec3(0.15 * highlight)
   end
 
   clamp(color * vignette, 0.0, 1.0)
