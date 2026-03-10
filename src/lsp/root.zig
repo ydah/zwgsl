@@ -6,4 +6,5 @@ pub const goto_def = @import("goto_def.zig");
 pub const handler = @import("handler.zig");
 pub const hover = @import("hover.zig");
 pub const protocol = @import("protocol.zig");
+pub const server = @import("server.zig");
 pub const semantic_tokens = @import("semantic_tokens.zig");

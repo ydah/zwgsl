@@ -1,15 +1,13 @@
 const std = @import("std");
-const zwgsl = @import("zwgsl");
-
-const ast = zwgsl.ast;
-const builtins = zwgsl.builtins;
-const core_diagnostics = zwgsl.diagnostics;
-const lexer = zwgsl.lexer;
-const parser = zwgsl.parser;
-const sema = zwgsl.sema;
-const string_pool = zwgsl.string_pool;
-const token = zwgsl.token;
-const types = zwgsl.types;
+const ast = @import("../ast.zig");
+const builtins = @import("../builtins.zig");
+const core_diagnostics = @import("../diagnostics.zig");
+const lexer = @import("../lexer.zig");
+const parser = @import("../parser.zig");
+const sema = @import("../sema.zig");
+const string_pool = @import("../string_pool.zig");
+const token = @import("../token.zig");
+const types = @import("../types.zig");
 
 pub const LspTokenType = enum(u32) {
     keyword = 0,

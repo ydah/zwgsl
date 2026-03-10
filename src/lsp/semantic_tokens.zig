@@ -1,5 +1,6 @@
 const std = @import("std");
 const analysis = @import("analysis.zig");
+const token = @import("../token.zig");
 
 const Piece = struct {
     line: u32,
@@ -57,7 +58,7 @@ pub fn response(allocator: std.mem.Allocator, source: []const u8) ![]u8 {
     return try buffer.toOwnedSlice(allocator);
 }
 
-fn isSemanticToken(tag: @import("zwgsl").token.TokenTag) bool {
+fn isSemanticToken(tag: token.TokenTag) bool {
     return switch (tag) {
         .newline,
         .virtual_indent,

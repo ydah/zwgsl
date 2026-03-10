@@ -1,6 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const compiler_api = @import("compiler.zig");
+const lsp_root = @import("lsp/root.zig");
 
 pub const ast = @import("ast.zig");
 pub const diagnostics = @import("diagnostics.zig");
@@ -24,6 +25,7 @@ pub const typeclass = @import("typeclass.zig");
 pub const types = @import("types.zig");
 pub const unify = @import("unify.zig");
 pub const wgsl_emitter = @import("wgsl_emitter.zig");
+pub const lsp = lsp_root;
 
 pub const ZwgslTarget = compiler_api.Target;
 pub const ZwgslErrorKind = compiler_api.ErrorKind;
@@ -138,10 +140,20 @@ pub const WasmCompileResult = extern struct {
     diagnostics_len: usize = 0,
 };
 
+pub const WasmJsonResult = extern struct {
+    json_ptr: usize = 0,
+    json_len: usize = 0,
+};
+
 const WasmResultStorage = struct {
     result: WasmCompileResult = .{},
     arena: std.heap.ArenaAllocator,
     diagnostics: []WasmDiagnostic = &.{},
+};
+
+const WasmJsonStorage = struct {
+    result: WasmJsonResult = .{},
+    arena: std.heap.ArenaAllocator,
 };
 
 pub export fn zwgsl_wasm_alloc(len: usize) usize {
@@ -224,6 +236,77 @@ pub export fn zwgsl_wasm_result_free(result_ptr: usize) void {
     const storage: *WasmResultStorage = @alignCast(@fieldParentPtr("result", result));
     storage.arena.deinit();
     ffi_allocator.destroy(storage);
+}
+
+pub export fn zwgsl_wasm_hover(source_ptr: usize, source_len: usize, line: u32, character: u32) usize {
+    return buildWasmJsonResult(source_ptr, source_len, line, character, .hover);
+}
+
+pub export fn zwgsl_wasm_completion(source_ptr: usize, source_len: usize, line: u32, character: u32) usize {
+    return buildWasmJsonResult(source_ptr, source_len, line, character, .completion);
+}
+
+pub export fn zwgsl_wasm_definition(source_ptr: usize, source_len: usize, line: u32, character: u32) usize {
+    return buildWasmJsonResult(source_ptr, source_len, line, character, .definition);
+}
+
+pub export fn zwgsl_wasm_json_result_free(result_ptr: usize) void {
+    if (result_ptr == 0) return;
+    const result: *WasmJsonResult = @ptrFromInt(result_ptr);
+    const storage: *WasmJsonStorage = @alignCast(@fieldParentPtr("result", result));
+    storage.arena.deinit();
+    ffi_allocator.destroy(storage);
+}
+
+const WasmJsonKind = enum {
+    hover,
+    completion,
+    definition,
+};
+
+fn buildWasmJsonResult(
+    source_ptr: usize,
+    source_len: usize,
+    line: u32,
+    character: u32,
+    comptime kind: WasmJsonKind,
+) usize {
+    var storage = ffi_allocator.create(WasmJsonStorage) catch return 0;
+    storage.* = .{
+        .arena = std.heap.ArenaAllocator.init(ffi_allocator),
+    };
+    errdefer {
+        storage.arena.deinit();
+        ffi_allocator.destroy(storage);
+    }
+
+    const arena = storage.arena.allocator();
+    const source = wasmSourceSlice(source_ptr, source_len);
+    const json = switch (kind) {
+        .hover => lsp_root.hover.response(arena, source, line, character),
+        .completion => lsp_root.completion.response(arena, source, line, character),
+        .definition => lsp_root.goto_def.response(arena, "inmemory://playground.zw", source, line, character),
+    } catch defaultWasmJson(arena, kind) catch return 0;
+
+    storage.result = .{
+        .json_ptr = slicePtrU32(json),
+        .json_len = json.len,
+    };
+    return pointerToInt(&storage.result);
+}
+
+fn defaultWasmJson(allocator: std.mem.Allocator, comptime kind: WasmJsonKind) ![]u8 {
+    return try allocator.dupe(u8, switch (kind) {
+        .hover, .definition => "null",
+        .completion => "[]",
+    });
+}
+
+fn wasmSourceSlice(source_ptr: usize, source_len: usize) []const u8 {
+    return if (source_len == 0)
+        ""
+    else
+        @as([*]const u8, @ptrFromInt(source_ptr))[0..source_len];
 }
 
 fn pointerToInt(ptr: anytype) usize {

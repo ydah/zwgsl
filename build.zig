@@ -34,7 +34,7 @@ pub fn build(b: *std.Build) void {
     const lsp_server = b.addExecutable(.{
         .name = "zwgsl-lsp",
         .root_module = b.createModule(.{
-            .root_source_file = b.path("src/lsp/server.zig"),
+            .root_source_file = b.path("src/lsp_main.zig"),
             .imports = &.{
                 .{
                     .name = "zwgsl",
@@ -47,18 +47,6 @@ pub fn build(b: *std.Build) void {
     });
     lsp_server.linkLibC();
     b.installArtifact(lsp_server);
-
-    const lsp_module = b.createModule(.{
-        .root_source_file = b.path("src/lsp/root.zig"),
-        .imports = &.{
-            .{
-                .name = "zwgsl",
-                .module = lib_module,
-            },
-        },
-        .target = target,
-        .optimize = optimize,
-    });
 
     const wasm_exe = b.addExecutable(.{
         .name = "zwgsl",
@@ -86,10 +74,6 @@ pub fn build(b: *std.Build) void {
                 .{
                     .name = "zwgsl",
                     .module = lib_module,
-                },
-                .{
-                    .name = "zwgsl_lsp",
-                    .module = lsp_module,
                 },
             },
             .target = target,

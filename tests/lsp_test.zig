@@ -1,5 +1,5 @@
 const std = @import("std");
-const lsp = @import("zwgsl_lsp");
+const lsp = @import("zwgsl").lsp;
 
 const completion = lsp.completion;
 const goto_def = lsp.goto_def;

@@ -11,15 +11,44 @@ export type CompileResult = {
   }>;
 };
 
+export type HoverResult =
+  | {
+      contents?: {
+        kind?: string;
+        value: string;
+      };
+    }
+  | null;
+
+export type CompletionResult = Array<{
+  label: string;
+  kind: number;
+  detail?: string;
+}>;
+
+export type DefinitionResult = Array<{
+  uri: string;
+  range: {
+    start: { line: number; character: number };
+    end: { line: number; character: number };
+  };
+}>;
+
 type WasmExports = {
   memory: WebAssembly.Memory;
   zwgsl_wasm_alloc(size: number): number;
   zwgsl_wasm_free(ptr: number, size: number): void;
   zwgsl_wasm_compile(ptr: number, size: number): number;
   zwgsl_wasm_result_free(ptr: number): void;
+  zwgsl_wasm_hover(ptr: number, size: number, line: number, character: number): number;
+  zwgsl_wasm_completion(ptr: number, size: number, line: number, character: number): number;
+  zwgsl_wasm_definition(ptr: number, size: number, line: number, character: number): number;
+  zwgsl_wasm_json_result_free(ptr: number): void;
 };
 
-let compilerPromise: Promise<ReturnType<typeof createLoadedCompiler>> | null = null;
+type Compiler = Awaited<ReturnType<typeof createLoadedCompiler>>;
+
+let compilerPromise: Promise<Compiler> | null = null;
 
 export const createCompiler = async () => {
   compilerPromise ??= createLoadedCompiler();
@@ -45,6 +74,15 @@ const createLoadedCompiler = async () => {
             },
           ],
         };
+      },
+      async hover(): Promise<HoverResult> {
+        return null;
+      },
+      async completion(): Promise<CompletionResult> {
+        return [];
+      },
+      async definition(): Promise<DefinitionResult> {
+        return [];
       },
     };
   }
@@ -93,6 +131,15 @@ const createLoadedCompiler = async () => {
         exports.zwgsl_wasm_free(sourcePtr, bytes.byteLength);
       }
     },
+    async hover(source: string, line: number, character: number): Promise<HoverResult> {
+      return invokeJsonRequest(exports, "zwgsl_wasm_hover", source, line, character, null);
+    },
+    async completion(source: string, line: number, character: number): Promise<CompletionResult> {
+      return invokeJsonRequest(exports, "zwgsl_wasm_completion", source, line, character, []);
+    },
+    async definition(source: string, line: number, character: number): Promise<DefinitionResult> {
+      return invokeJsonRequest(exports, "zwgsl_wasm_definition", source, line, character, []);
+    },
   };
 };
 
@@ -140,6 +187,47 @@ const readDiagnostics = (memory: WebAssembly.Memory, ptr: number, len: number) =
   }
 
   return diagnostics;
+};
+
+type JsonRequestName =
+  | "zwgsl_wasm_hover"
+  | "zwgsl_wasm_completion"
+  | "zwgsl_wasm_definition";
+
+const invokeJsonRequest = <T>(
+  exports: WasmExports,
+  request: JsonRequestName,
+  source: string,
+  line: number,
+  character: number,
+  fallback: T,
+): T => {
+  const bytes = new TextEncoder().encode(source);
+  const sourcePtr = exports.zwgsl_wasm_alloc(bytes.byteLength);
+  if (!sourcePtr) return fallback;
+
+  try {
+    new Uint8Array(exports.memory.buffer, sourcePtr, bytes.byteLength).set(bytes);
+    const resultPtr = exports[request](sourcePtr, bytes.byteLength, line, character);
+    if (!resultPtr) return fallback;
+
+    try {
+      const view = new DataView(exports.memory.buffer);
+      const json = readOptionalString(
+        exports.memory,
+        view.getUint32(resultPtr, true),
+        view.getUint32(resultPtr + 4, true),
+      );
+      if (!json) return fallback;
+      return JSON.parse(json) as T;
+    } catch {
+      return fallback;
+    } finally {
+      exports.zwgsl_wasm_json_result_free(resultPtr);
+    }
+  } finally {
+    exports.zwgsl_wasm_free(sourcePtr, bytes.byteLength);
+  }
 };
 
 const fallbackResult = (message: string): CompileResult => ({
