@@ -18,20 +18,6 @@ fn Circle(arg_0: f32) -> Shape {
     return _result;
 }
 
-fn Rect(arg_0: f32, arg_1: f32) -> Shape {
-    var _result: Shape;
-    _result.tag = 1;
-    _result._Rect_width = arg_0;
-    _result._Rect_height = arg_1;
-    return _result;
-}
-
-fn Point() -> Shape {
-    var _result: Shape;
-    _result.tag = 2;
-    return _result;
-}
-
 fn _match_0(_match_value: Shape) -> f32 {
     switch (_match_value.tag) {
         case 0: {

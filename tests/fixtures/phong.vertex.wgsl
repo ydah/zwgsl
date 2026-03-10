@@ -21,10 +21,6 @@ var<private> normal: vec3f;
 var<private> v_normal: vec3f;
 var<private> v_world_pos: vec3f;
 
-fn phong_strength(normal: vec3f, light_dir: vec3f) -> f32 {
-    return max(dot(normalize(normal), normalize(light_dir)), 0.0);
-}
-
 fn _zwgsl_vertex_main() {
     let world_pos: vec4f = model_matrix * vec4f(position, 1.0);
     v_normal = mat3x3f(model_matrix[0].xyz, model_matrix[1].xyz, model_matrix[2].xyz) * normal;
