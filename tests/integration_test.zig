@@ -53,6 +53,10 @@ test "postprocess example compiles" {
     try expectCompilesPath("examples/postprocess.zw");
 }
 
+test "utah teapot example compiles" {
+    try expectCompilesPath("examples/utah_teapot.zw");
+}
+
 test "hello triangle example compiles to WGSL" {
     try expectCompilesPathToWgsl("examples/hello_triangle.zw", &.{
         "@group(0) @binding(0) var<uniform> mvp: mat4x4f;",
@@ -91,5 +95,17 @@ test "postprocess example compiles to WGSL" {
     }, &.{
         "let color: vec4f = textureSample(scene_tex_texture, scene_tex_sampler, v_uv);",
         "frag_color = vec4f(color.rgb, 1.0);",
+    });
+}
+
+test "utah teapot example compiles to WGSL" {
+    try expectCompilesPathToWgsl("examples/utah_teapot.zw", &.{
+        "struct _zwgsl_uniform_time",
+        "struct _zwgsl_uniform_resolution",
+        "gl_Position = vec4f(position, 1.0);",
+    }, &.{
+        "fn scene_distance(p: vec3f) -> f32",
+        "let color: vec3f = shade(v_uv);",
+        "frag_color = vec4f(color, 1.0);",
     });
 }
