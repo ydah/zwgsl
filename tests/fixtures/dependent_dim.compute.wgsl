@@ -4,7 +4,7 @@ var<private> workgroup_id: vec3u;
 var<private> num_workgroups: vec3u;
 var<private> local_invocation_index: u32;
 
-fn __zwgsl_compute_main() {
+fn _zwgsl_compute_main() {
     let transform: mat4x4f = mat4x4f(1.0);
     let value: vec4f = vec4f(1.0);
     let energy: f32 = dot(value, value);
@@ -23,5 +23,5 @@ fn main(
     workgroup_id = workgroup_id_input;
     num_workgroups = num_workgroups_input;
     local_invocation_index = local_invocation_index_input;
-    __zwgsl_compute_main();
+    _zwgsl_compute_main();
 }

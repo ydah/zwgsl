@@ -75,8 +75,8 @@ test "phong example compiles to WGSL" {
 
 test "pbr example compiles to WGSL" {
     try expectCompilesPathToWgsl("examples/pbr.zw", &.{
-        "struct __zwgsl_uniform_metallic",
-        "struct __zwgsl_uniform_roughness",
+        "struct _zwgsl_uniform_metallic",
+        "struct _zwgsl_uniform_roughness",
         "gl_Position = mvp * vec4f(position, 1.0);",
     }, &.{
         "let energy: f32 = mix(0.04, 1.0, metallic.value);",

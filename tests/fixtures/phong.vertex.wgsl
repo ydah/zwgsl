@@ -25,7 +25,7 @@ fn phong_strength(normal: vec3f, light_dir: vec3f) -> f32 {
     return max(dot(normalize(normal), normalize(light_dir)), 0.0);
 }
 
-fn __zwgsl_vertex_main() {
+fn _zwgsl_vertex_main() {
     let world_pos: vec4f = model_matrix * vec4f(position, 1.0);
     v_normal = mat3x3f(model_matrix) * normal;
     v_world_pos = world_pos.xyz;
@@ -36,7 +36,7 @@ fn __zwgsl_vertex_main() {
 fn main(input: VertexInput) -> VertexOutput {
     position = input.position;
     normal = input.normal;
-    __zwgsl_vertex_main();
+    _zwgsl_vertex_main();
     var output: VertexOutput;
     output.gl_Position = gl_Position;
     output.v_normal = v_normal;

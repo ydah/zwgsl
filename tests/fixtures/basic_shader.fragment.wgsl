@@ -12,14 +12,14 @@ struct FragmentOutput {
 var<private> v_pos: vec3f;
 var<private> frag_color: vec4f;
 
-fn __zwgsl_fragment_main() {
+fn _zwgsl_fragment_main() {
     frag_color = vec4f(v_pos, base_color.a);
 }
 
 @fragment
 fn main(input: FragmentInput) -> FragmentOutput {
     v_pos = input.v_pos;
-    __zwgsl_fragment_main();
+    _zwgsl_fragment_main();
     var output: FragmentOutput;
     output.frag_color = frag_color;
     return output;

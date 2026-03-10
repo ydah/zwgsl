@@ -92,10 +92,10 @@ test "compiler wraps scalar and vec2 uniforms for WGSL" {
 
     try std.testing.expectEqual(@as(usize, 0), output.errors.len);
     try std.testing.expect(output.vertex_source != null);
-    try std.testing.expect(std.mem.indexOf(u8, output.vertex_source.?, "struct __zwgsl_uniform_time") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output.vertex_source.?, "struct _zwgsl_uniform_time") != null);
     try std.testing.expect(std.mem.indexOf(u8, output.vertex_source.?, "@align(16) value: f32") != null);
-    try std.testing.expect(std.mem.indexOf(u8, output.vertex_source.?, "var<uniform> time: __zwgsl_uniform_time;") != null);
-    try std.testing.expect(std.mem.indexOf(u8, output.vertex_source.?, "struct __zwgsl_uniform_resolution") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output.vertex_source.?, "var<uniform> time: _zwgsl_uniform_time;") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output.vertex_source.?, "struct _zwgsl_uniform_resolution") != null);
     try std.testing.expect(std.mem.indexOf(u8, output.vertex_source.?, "@align(16) value: vec2f") != null);
     try std.testing.expect(std.mem.indexOf(u8, output.vertex_source.?, "position * time.value") != null);
 }
@@ -268,7 +268,7 @@ test "compiler lowers symbol match patterns for WGSL" {
     try std.testing.expectEqual(@as(usize, 0), output.errors.len);
     try std.testing.expect(output.compute_source != null);
     try std.testing.expect(std.mem.indexOf(u8, output.compute_source.?, "mode: i32 = ") != null);
-    try std.testing.expect(std.mem.indexOf(u8, output.compute_source.?, "if (__match_value ==") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output.compute_source.?, "if (_match_value ==") != null);
 }
 
 test "compiler rejects compute shaders for GLSL ES 3.00" {
@@ -350,11 +350,11 @@ test "compiler specializes constrained trait calls for WGSL" {
 
     try std.testing.expectEqual(@as(usize, 0), output.errors.len);
     try std.testing.expect(output.compute_source != null);
-    try std.testing.expect(std.mem.indexOf(u8, output.compute_source.?, "fn __trait_Numeric_Float_add") == null);
-    try std.testing.expect(std.mem.indexOf(u8, output.compute_source.?, "fn __trait_Numeric_Float_mul") == null);
-    try std.testing.expect(std.mem.indexOf(u8, output.compute_source.?, "fn __spec_lerp_Float_Float_Float") != null);
-    try std.testing.expect(std.mem.indexOf(u8, output.compute_source.?, "__spec_lerp_Float_Float_Float(1.0, 2.0, 0.5)") != null);
-    try std.testing.expect(std.mem.indexOf(u8, output.compute_source.?, "__trait_Numeric_Float_") == null);
+    try std.testing.expect(std.mem.indexOf(u8, output.compute_source.?, "fn _trait_Numeric_Float_add") == null);
+    try std.testing.expect(std.mem.indexOf(u8, output.compute_source.?, "fn _trait_Numeric_Float_mul") == null);
+    try std.testing.expect(std.mem.indexOf(u8, output.compute_source.?, "fn _spec_lerp_Float_Float_Float") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output.compute_source.?, "_spec_lerp_Float_Float_Float(1.0, 2.0, 0.5)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output.compute_source.?, "_trait_Numeric_Float_") == null);
 }
 
 test "compiler lowers inout functions to WGSL pointers" {
