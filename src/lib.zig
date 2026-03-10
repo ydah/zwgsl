@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const compiler_api = @import("compiler.zig");
 
 pub const ast = @import("ast.zig");
@@ -31,6 +32,10 @@ pub const ZwgslOptions = compiler_api.Options;
 pub const ZwgslResult = compiler_api.Result;
 
 const VERSION: [*:0]const u8 = "0.1.0";
+const ffi_allocator = if (builtin.target.cpu.arch == .wasm32)
+    std.heap.wasm_allocator
+else
+    std.heap.c_allocator;
 
 const ResultStorage = struct {
     arena: std.heap.ArenaAllocator,
@@ -52,13 +57,13 @@ fn emptyResult() compiler.Result {
 }
 
 pub export fn zwgsl_compile(source: [*]const u8, source_len: usize, options: compiler_api.Options) compiler_api.Result {
-    var storage = std.heap.c_allocator.create(ResultStorage) catch return emptyResult();
+    var storage = ffi_allocator.create(ResultStorage) catch return emptyResult();
     storage.* = .{
-        .arena = std.heap.ArenaAllocator.init(std.heap.c_allocator),
+        .arena = std.heap.ArenaAllocator.init(ffi_allocator),
     };
     errdefer {
         storage.arena.deinit();
-        std.heap.c_allocator.destroy(storage);
+        ffi_allocator.destroy(storage);
     }
 
     const arena = storage.arena.allocator();
@@ -106,12 +111,135 @@ pub export fn zwgsl_free(result: *compiler_api.Result) void {
     const internal = result._internal orelse return;
     const storage: *ResultStorage = @ptrCast(@alignCast(internal));
     storage.arena.deinit();
-    std.heap.c_allocator.destroy(storage);
+    ffi_allocator.destroy(storage);
     result.* = emptyResult();
 }
 
 pub export fn zwgsl_version() [*:0]const u8 {
     return VERSION;
+}
+
+pub const WasmDiagnostic = extern struct {
+    message_ptr: usize = 0,
+    message_len: usize = 0,
+    line: u32 = 0,
+    column: u32 = 0,
+    severity: u32 = 0,
+};
+
+pub const WasmCompileResult = extern struct {
+    vertex_ptr: usize = 0,
+    vertex_len: usize = 0,
+    fragment_ptr: usize = 0,
+    fragment_len: usize = 0,
+    compute_ptr: usize = 0,
+    compute_len: usize = 0,
+    diagnostics_ptr: usize = 0,
+    diagnostics_len: usize = 0,
+};
+
+const WasmResultStorage = struct {
+    result: WasmCompileResult = .{},
+    arena: std.heap.ArenaAllocator,
+    diagnostics: []WasmDiagnostic = &.{},
+};
+
+pub export fn zwgsl_wasm_alloc(len: usize) usize {
+    if (len == 0) return 0;
+    const buffer = ffi_allocator.alloc(u8, len) catch return 0;
+    return pointerToInt(buffer.ptr);
+}
+
+pub export fn zwgsl_wasm_free(ptr: usize, len: usize) void {
+    if (ptr == 0 or len == 0) return;
+    const buffer: [*]u8 = @ptrFromInt(ptr);
+    ffi_allocator.free(buffer[0..len]);
+}
+
+pub export fn zwgsl_wasm_compile(source_ptr: usize, source_len: usize) usize {
+    var storage = ffi_allocator.create(WasmResultStorage) catch return 0;
+    storage.* = .{
+        .arena = std.heap.ArenaAllocator.init(ffi_allocator),
+    };
+    errdefer {
+        storage.arena.deinit();
+        ffi_allocator.destroy(storage);
+    }
+
+    const arena = storage.arena.allocator();
+    const source: []const u8 = if (source_len == 0)
+        ""
+    else
+        @as([*]const u8, @ptrFromInt(source_ptr))[0..source_len];
+
+    const output = compiler_api.compile(arena, source, .{ .target = .wgsl }) catch |err| {
+        const message = arena.dupe(u8, @errorName(err)) catch return 0;
+        storage.diagnostics = arena.alloc(WasmDiagnostic, 1) catch return 0;
+        storage.diagnostics[0] = .{
+            .message_ptr = slicePtrU32(message),
+            .message_len = message.len,
+            .severity = 1,
+        };
+        storage.result = .{
+            .diagnostics_ptr = slicePtrU32(storage.diagnostics),
+            .diagnostics_len = 1,
+        };
+        return pointerToInt(&storage.result);
+    };
+
+    if (output.errors.len > 0) {
+        storage.diagnostics = arena.alloc(WasmDiagnostic, output.errors.len) catch return 0;
+        for (output.errors, 0..) |diagnostic, index| {
+            const message = std.mem.span(diagnostic.message);
+            storage.diagnostics[index] = .{
+                .message_ptr = slicePtrU32(message),
+                .message_len = message.len,
+                .line = diagnostic.line,
+                .column = diagnostic.column,
+                .severity = switch (diagnostic.kind) {
+                    .ok => 0,
+                    else => 1,
+                },
+            };
+        }
+    }
+
+    storage.result = .{
+        .vertex_ptr = optionalSlicePtrU32(output.vertex_source),
+        .vertex_len = optionalSliceLen(output.vertex_source),
+        .fragment_ptr = optionalSlicePtrU32(output.fragment_source),
+        .fragment_len = optionalSliceLen(output.fragment_source),
+        .compute_ptr = optionalSlicePtrU32(output.compute_source),
+        .compute_len = optionalSliceLen(output.compute_source),
+        .diagnostics_ptr = if (storage.diagnostics.len > 0) slicePtrU32(storage.diagnostics) else 0,
+        .diagnostics_len = storage.diagnostics.len,
+    };
+
+    return pointerToInt(&storage.result);
+}
+
+pub export fn zwgsl_wasm_result_free(result_ptr: usize) void {
+    if (result_ptr == 0) return;
+    const result: *WasmCompileResult = @ptrFromInt(result_ptr);
+    const storage: *WasmResultStorage = @alignCast(@fieldParentPtr("result", result));
+    storage.arena.deinit();
+    ffi_allocator.destroy(storage);
+}
+
+fn pointerToInt(ptr: anytype) usize {
+    return @intFromPtr(ptr);
+}
+
+fn slicePtrU32(slice: anytype) usize {
+    return pointerToInt(slice.ptr);
+}
+
+fn optionalSlicePtrU32(value: ?[]const u8) usize {
+    return if (value) |slice| slicePtrU32(slice) else 0;
+}
+
+fn optionalSliceLen(value: ?[]const u8) usize {
+    return if (value) |slice| slice.len else 0;
 }
 
 test "version is stable" {

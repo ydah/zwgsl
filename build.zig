@@ -48,9 +48,20 @@ pub fn build(b: *std.Build) void {
     lsp_server.linkLibC();
     b.installArtifact(lsp_server);
 
-    const wasm_lib = b.addLibrary(.{
-        .name = "zwgsl-wasm",
-        .linkage = .static,
+    const lsp_module = b.createModule(.{
+        .root_source_file = b.path("src/lsp/root.zig"),
+        .imports = &.{
+            .{
+                .name = "zwgsl",
+                .module = lib_module,
+            },
+        },
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const wasm_exe = b.addExecutable(.{
+        .name = "zwgsl",
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/lib.zig"),
             .target = b.resolveTargetQuery(.{
@@ -60,8 +71,13 @@ pub fn build(b: *std.Build) void {
             .optimize = .ReleaseSmall,
         }),
     });
+    wasm_exe.entry = .disabled;
+    wasm_exe.rdynamic = true;
+    const install_wasm = b.addInstallArtifact(wasm_exe, .{
+        .dest_sub_path = "zwgsl.wasm",
+    });
     const wasm_step = b.step("wasm", "Build the freestanding wasm32 library");
-    wasm_step.dependOn(&wasm_lib.step);
+    wasm_step.dependOn(&install_wasm.step);
 
     const tests = b.addTest(.{
         .root_module = b.createModule(.{
@@ -70,6 +86,10 @@ pub fn build(b: *std.Build) void {
                 .{
                     .name = "zwgsl",
                     .module = lib_module,
+                },
+                .{
+                    .name = "zwgsl_lsp",
+                    .module = lsp_module,
                 },
             },
             .target = target,

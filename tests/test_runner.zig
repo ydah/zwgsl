@@ -9,6 +9,7 @@ comptime {
     _ = @import("glsl_emitter_test.zig");
     _ = @import("integration_test.zig");
     _ = @import("lexer_test.zig");
+    _ = @import("lsp_test.zig");
     _ = @import("parser_test.zig");
     _ = @import("sema_test.zig");
     _ = @import("wgsl_emitter_test.zig");

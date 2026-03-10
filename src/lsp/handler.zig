@@ -35,7 +35,7 @@ pub fn handle(allocator: std.mem.Allocator, state: *State, message: []const u8) 
     const params = root.get("params");
 
     if (std.mem.eql(u8, method_name, "initialize")) {
-        return try response(allocator, id_value, "{\"capabilities\":{\"textDocumentSync\":1,\"hoverProvider\":true,\"completionProvider\":{},\"definitionProvider\":true,\"semanticTokensProvider\":{\"legend\":{\"tokenTypes\":[\"keyword\",\"function\",\"variable\",\"parameter\",\"type\",\"number\",\"string\",\"comment\",\"operator\",\"property\"],\"tokenModifiers\":[]},\"full\":true}}}");
+        return try response(allocator, id_value, "{\"capabilities\":{\"textDocumentSync\":1,\"hoverProvider\":true,\"completionProvider\":{\"triggerCharacters\":[\".\"]},\"definitionProvider\":true,\"semanticTokensProvider\":{\"legend\":{\"tokenTypes\":[\"keyword\",\"function\",\"variable\",\"parameter\",\"type\",\"number\",\"string\",\"comment\",\"operator\",\"property\"],\"tokenModifiers\":[]},\"full\":true}}}");
     }
     if (std.mem.eql(u8, method_name, "shutdown")) {
         state.shutdown_requested = true;
@@ -76,7 +76,9 @@ pub fn handle(allocator: std.mem.Allocator, state: *State, message: []const u8) 
         return try responseOwned(allocator, id_value, result);
     }
     if (std.mem.eql(u8, method_name, "textDocument/completion")) {
-        const result = try completion.response(allocator);
+        const line = nestedU32(params.?, &.{ "position", "line" }) orelse 0;
+        const character = nestedU32(params.?, &.{ "position", "character" }) orelse 0;
+        const result = try completion.response(allocator, source, line, character);
         return try responseOwned(allocator, id_value, result);
     }
     if (std.mem.eql(u8, method_name, "textDocument/definition")) {

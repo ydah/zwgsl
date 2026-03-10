@@ -1,49 +1,35 @@
 const std = @import("std");
+const analysis = @import("analysis.zig");
 
 pub fn response(allocator: std.mem.Allocator, uri: []const u8, source: []const u8, line: u32, character: u32) ![]u8 {
-    const word = wordAt(source, line, character) orelse return try allocator.dupe(u8, "null");
-    if (findDefinition(source, word)) |definition_line| {
-        return try std.fmt.allocPrint(
-            allocator,
-            "[{{\"uri\":{s},\"range\":{{\"start\":{{\"line\":{d},\"character\":0}},\"end\":{{\"line\":{d},\"character\":{d}}}}}}}]",
-            .{ try jsonString(allocator, uri), definition_line, definition_line, word.len },
-        );
-    }
-    return try allocator.dupe(u8, "null");
-}
+    var document = try analysis.Document.init(allocator, source);
+    defer document.deinit();
 
-fn findDefinition(source: []const u8, word: []const u8) ?u32 {
-    var iterator = std.mem.splitScalar(u8, source, '\n');
-    var line: u32 = 0;
-    while (iterator.next()) |item| : (line += 1) {
-        if (std.mem.startsWith(u8, std.mem.trim(u8, item, " "), "def ")) {
-            if (std.mem.indexOf(u8, item, word)) |_| return line;
-        }
-        if (std.mem.startsWith(u8, std.mem.trim(u8, item, " "), "let ")) {
-            if (std.mem.indexOf(u8, item, word)) |_| return line;
-        }
-    }
-    return null;
-}
+    const token_info = document.tokenAt(line, character) orelse
+        document.tokenBeforeOrAt(line, character) orelse
+        return try allocator.dupe(u8, "null");
+    const name = switch (token_info.tok.tag) {
+        .identifier => document.lexeme(token_info.tok),
+        .symbol => document.lexeme(token_info.tok)[1..],
+        else => return try allocator.dupe(u8, "null"),
+    };
+    const definition = document.resolveDefinition(name, line, character) orelse return try allocator.dupe(u8, "null");
+    if (definition.line == 0) return try allocator.dupe(u8, "null");
 
-fn wordAt(source: []const u8, line: u32, character: u32) ?[]const u8 {
-    var iterator = std.mem.splitScalar(u8, source, '\n');
-    var current: u32 = 0;
-    while (iterator.next()) |item| : (current += 1) {
-        if (current != line) continue;
-        if (character >= item.len) return null;
-        var start: usize = character;
-        while (start > 0 and isWord(item[start - 1])) : (start -= 1) {}
-        var end: usize = character;
-        while (end < item.len and isWord(item[end])) : (end += 1) {}
-        if (start == end) return null;
-        return item[start..end];
-    }
-    return null;
-}
+    const escaped_uri = try jsonString(allocator, uri);
+    defer allocator.free(escaped_uri);
 
-fn isWord(ch: u8) bool {
-    return std.ascii.isAlphanumeric(ch) or ch == '_';
+    return try std.fmt.allocPrint(
+        allocator,
+        "[{{\"uri\":{s},\"range\":{{\"start\":{{\"line\":{d},\"character\":{d}}},\"end\":{{\"line\":{d},\"character\":{d}}}}}}}]",
+        .{
+            escaped_uri,
+            definition.line - 1,
+            if (definition.column > 0) definition.column - 1 else 0,
+            definition.line - 1,
+            if (definition.end_column > 0) definition.end_column - 1 else 0,
+        },
+    );
 }
 
 fn jsonString(allocator: std.mem.Allocator, value: []const u8) ![]u8 {

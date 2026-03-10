@@ -14,6 +14,7 @@ pub const DocumentStore = struct {
     pub fn deinit(self: *DocumentStore) void {
         var iterator = self.documents.iterator();
         while (iterator.next()) |entry| {
+            self.allocator.free(entry.key_ptr.*);
             self.allocator.free(entry.value_ptr.*);
         }
         self.documents.deinit();

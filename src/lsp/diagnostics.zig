@@ -1,8 +1,9 @@
 const std = @import("std");
-const compiler = @import("zwgsl").compiler;
+const analysis = @import("analysis.zig");
 
 pub fn publish(allocator: std.mem.Allocator, uri: []const u8, source: []const u8) ![]u8 {
-    const output = try compiler.compile(allocator, source, .{ .target = .wgsl });
+    var document = try analysis.Document.init(allocator, source);
+    defer document.deinit();
     var buffer: std.ArrayList(u8) = .empty;
     defer buffer.deinit(allocator);
     const writer = buffer.writer(allocator);
@@ -14,18 +15,23 @@ pub fn publish(allocator: std.mem.Allocator, uri: []const u8, source: []const u8
     try writeJsonString(writer, uri);
     try writer.writeAll(",\"diagnostics\":[");
 
-    for (output.errors, 0..) |diagnostic, index| {
+    for (document.diagnostics, 0..) |diagnostic, index| {
         if (index != 0) try writer.writeByte(',');
+        const severity: u32 = switch (diagnostic.kind) {
+            .@"error" => 1,
+            .warning => 2,
+        };
         try writer.print(
-            "{{\"range\":{{\"start\":{{\"line\":{d},\"character\":{d}}},\"end\":{{\"line\":{d},\"character\":{d}}}}},\"severity\":1,\"message\":",
+            "{{\"range\":{{\"start\":{{\"line\":{d},\"character\":{d}}},\"end\":{{\"line\":{d},\"character\":{d}}}}},\"severity\":{d},\"message\":",
             .{
                 if (diagnostic.line > 0) diagnostic.line - 1 else 0,
                 if (diagnostic.column > 0) diagnostic.column - 1 else 0,
                 if (diagnostic.line > 0) diagnostic.line - 1 else 0,
                 if (diagnostic.column > 0) diagnostic.column else 0,
+                severity,
             },
         );
-        try writeJsonString(writer, std.mem.span(diagnostic.message));
+        try writeJsonString(writer, diagnostic.message);
         try writer.writeByte('}');
     }
 
