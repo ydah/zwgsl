@@ -652,6 +652,45 @@ test "HIR and MIR preserve entry points and CFG structure" {
     try std.testing.expect(saw_if_term);
 }
 
+test "MIR lowers expressions into SSA-style instructions" {
+    var analyzed = try analyzeSource(
+        \\compute do
+        \\  def main
+        \\    total: Float = 1.0
+        \\    total += 2.0
+        \\  end
+        \\end
+    );
+    defer analyzed.arena.deinit();
+
+    try std.testing.expectEqual(@as(usize, 0), analyzed.diagnostics.items.items.len);
+
+    const allocator = analyzed.arena.allocator();
+    const hir_module = try zwgsl.hir_builder.build(allocator, analyzed.typed);
+    const mir_module = try zwgsl.mir_builder.build(allocator, hir_module);
+
+    const function = mir_module.entryPoint(.compute).?.mainFunction();
+    try std.testing.expectEqual(@as(usize, 1), function.blocks.len);
+    const block = function.blocks[0];
+    try std.testing.expectEqual(@as(usize, 4), block.instructions.len);
+
+    try std.testing.expectEqual(.local_alloc, std.meta.activeTag(block.instructions[0].data));
+    try std.testing.expectEqual(.load, std.meta.activeTag(block.instructions[1].data));
+    try std.testing.expectEqual(.binary, std.meta.activeTag(block.instructions[2].data));
+    try std.testing.expectEqual(.store, std.meta.activeTag(block.instructions[3].data));
+
+    const loaded_value = block.instructions[1].result.?;
+    const binary_value = block.instructions[2].result.?;
+    const binary = block.instructions[2].data.binary;
+    const store = block.instructions[3].data.store;
+
+    try std.testing.expect(store.target == block.instructions[1].data.load);
+    try std.testing.expect(binary.lhs.data == .identifier);
+    try std.testing.expect(store.value.data == .identifier);
+    try std.testing.expect(std.mem.eql(u8, binary.lhs.data.identifier, loaded_value.name));
+    try std.testing.expect(std.mem.eql(u8, store.value.data.identifier, binary_value.name));
+}
+
 test "HIR builder unrolls vector loops directly from typed AST" {
     var analyzed = try analyzeSource(
         \\vertex do
