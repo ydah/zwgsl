@@ -4,6 +4,7 @@ const builtins = @import("builtins.zig");
 const diagnostics = @import("diagnostics.zig");
 const hm = @import("hm.zig");
 const string_pool = @import("string_pool.zig");
+const typeclass = @import("typeclass.zig");
 const types = @import("types.zig");
 const unify = @import("unify.zig");
 
@@ -71,7 +72,13 @@ pub const FunctionSignature = struct {
     name: []const u8,
     params: []const ParamInfo,
     return_type: types.Type,
+    constraints: []const ConstraintInfo = &.{},
     stage: ?ast.Stage = null,
+};
+
+pub const ConstraintInfo = struct {
+    type_var: u32,
+    trait_name: []const u8,
 };
 
 pub const VariantInfo = struct {
@@ -161,6 +168,7 @@ const Analyzer = struct {
     struct_fields: std.StringHashMap([]const ast.StructField),
     type_defs: std.StringHashMap(TypeDefInfo),
     constructors: std.StringHashMap(ConstructorInfo),
+    traits: typeclass.TraitRegistry,
     global_scope: Scope,
     global_functions: std.ArrayListUnmanaged(*ast.FunctionDef) = .{},
     vertex_functions: std.ArrayListUnmanaged(*ast.FunctionDef) = .{},
@@ -193,6 +201,7 @@ const Analyzer = struct {
             .struct_fields = std.StringHashMap([]const ast.StructField).init(allocator),
             .type_defs = std.StringHashMap(TypeDefInfo).init(allocator),
             .constructors = std.StringHashMap(ConstructorInfo).init(allocator),
+            .traits = typeclass.TraitRegistry.init(allocator),
             .global_scope = Scope.init(allocator, null),
         };
     }
@@ -234,6 +243,8 @@ const Analyzer = struct {
                     }
                 },
                 .type_def => |type_def| try self.registerTypeDef(type_def),
+                .trait_def => |trait_def| try self.registerTraitDef(trait_def),
+                .impl_def => |impl_def| try self.registerImplDef(impl_def),
                 .function => |function| try self.global_functions.append(self.allocator, function),
                 .shader_block => |block| switch (block.stage) {
                     .vertex => {
@@ -349,6 +360,52 @@ const Analyzer = struct {
         try self.typed.type_defs.put(type_def.name, type_info);
     }
 
+    fn registerTraitDef(self: *Analyzer, trait_def: ast.TraitDef) anyerror!void {
+        if (self.traits.traits.contains(trait_def.name)) {
+            try self.report(trait_def.position, "redefinition of trait '{s}'", .{trait_def.name});
+            return;
+        }
+
+        var methods = std.ArrayListUnmanaged(typeclass.TraitMethod){};
+        defer methods.deinit(self.allocator);
+        const self_param = [_][]const u8{"Self"};
+
+        for (trait_def.methods) |method| {
+            var params = std.ArrayListUnmanaged(types.Type){};
+            defer params.deinit(self.allocator);
+            for (method.params) |param| {
+                try params.append(self.allocator, try self.resolveTypeNameWithParams(param.type_name, param.position, &self_param));
+            }
+            const return_type = if (method.return_type) |type_name|
+                try self.resolveTypeNameWithParams(type_name, method.position, &self_param)
+            else
+                types.builtinType(.void);
+
+            try methods.append(self.allocator, .{
+                .name = method.name,
+                .params = try params.toOwnedSlice(self.allocator),
+                .return_type = return_type,
+            });
+        }
+
+        try self.traits.traits.put(trait_def.name, .{
+            .name = trait_def.name,
+            .methods = try methods.toOwnedSlice(self.allocator),
+        });
+    }
+
+    fn registerImplDef(self: *Analyzer, impl_def: ast.ImplDef) anyerror!void {
+        if (!self.traits.traits.contains(impl_def.trait_name)) {
+            try self.report(impl_def.position, "unknown trait '{s}'", .{impl_def.trait_name});
+            return;
+        }
+
+        try self.traits.impls.append(self.allocator, .{
+            .trait_name = impl_def.trait_name,
+            .for_type = try self.resolveTypeName(impl_def.for_type_name, impl_def.position),
+        });
+    }
+
     fn registerFunctions(self: *Analyzer) anyerror!void {
         for (self.global_functions.items) |function| {
             try self.registerFunction(function, null);
@@ -387,6 +444,8 @@ const Analyzer = struct {
         defer params.deinit(self.allocator);
         var generic_params = std.ArrayListUnmanaged([]const u8){};
         defer generic_params.deinit(self.allocator);
+        var constraints = std.ArrayListUnmanaged(ConstraintInfo){};
+        defer constraints.deinit(self.allocator);
 
         for (function.params) |param| {
             try params.append(self.allocator, .{
@@ -403,11 +462,28 @@ const Analyzer = struct {
         else
             types.builtinType(.error_type);
 
+        for (function.constraints) |constraint| {
+            const type_var = constraintTypeVar(generic_params.items, constraint.param_name) orelse blk: {
+                try self.report(constraint.position, "unknown type parameter '{s}' in constraint", .{constraint.param_name});
+                break :blk null;
+            };
+            if (type_var) |id| {
+                if (!self.traits.traits.contains(constraint.trait_name)) {
+                    try self.report(constraint.position, "unknown trait '{s}'", .{constraint.trait_name});
+                }
+                try constraints.append(self.allocator, .{
+                    .type_var = id,
+                    .trait_name = constraint.trait_name,
+                });
+            }
+        }
+
         try self.typed.function_signatures.put(function, .{
             .function = function,
             .name = function.name,
             .params = try params.toOwnedSlice(self.allocator),
             .return_type = return_type,
+            .constraints = try constraints.toOwnedSlice(self.allocator),
             .stage = stage,
         });
     }
@@ -1278,6 +1354,12 @@ const Analyzer = struct {
             for (signature.params, arg_types) |param, arg_type| {
                 unify.unify(&substitution, param.ty, arg_type) catch continue :function_loop;
             }
+            for (signature.constraints) |constraint| {
+                const constrained_type = substitution.apply(types.typeVar(constraint.type_var)) catch continue :function_loop;
+                if (!self.traits.hasImpl(constraint.trait_name, constrained_type)) {
+                    continue :function_loop;
+                }
+            }
             return substitution.apply(signature.return_type) catch signature.return_type;
         }
         return null;
@@ -1508,6 +1590,13 @@ fn compoundOperator(tag: @import("token.zig").TokenTag) @import("token.zig").Tok
 
 fn sameName(lhs: []const u8, rhs: []const u8) bool {
     return (lhs.len == rhs.len and lhs.ptr == rhs.ptr) or std.mem.eql(u8, lhs, rhs);
+}
+
+fn constraintTypeVar(params: []const []const u8, name: []const u8) ?u32 {
+    for (params, 0..) |param, index| {
+        if (sameName(param, name)) return @intCast(index);
+    }
+    return null;
 }
 
 fn collectExprIdentifiers(

@@ -1,239 +1,173 @@
 # zwgsl
 
-`zwgsl` is a Zig library that compiles a small shader DSL into GPU shader source code.
-It currently targets GLSL ES 3.00 and WGSL, and can produce vertex, fragment, or compute shader outputs depending on the selected backend and stage.
+A Ruby-inspired shading language that compiles to WGSL and GLSL ES 3.00.
+Built with Zig, with an indentation-aware lexer, HM-flavored local inference,
+ADT syntax, `match`, dependent dimension type matching, a minimal LSP server,
+and a browser playground scaffold.
 
-The project exposes:
+## Why zwgsl?
 
-- A Zig API for embedding the compiler directly
-- A C API for integration from non-Zig codebases
-- Examples and tests that document the supported language surface
+Shader languages are powerful, but they are rarely pleasant to read or write.
+`zwgsl` keeps shader code close to Ruby-style control flow:
 
-## Status
+- `end` blocks instead of braces
+- layout-aware indentation and implicit statement separators
+- method chains and postfix conditionals
+- `let` bindings and `where` clauses
+- algebraic `type` definitions and `match` expressions
 
-- Zig version: `0.15.0` or newer
-- Implemented output targets: `GLSL ES 3.00`, `WGSL`
-- Compute shaders are available through the WGSL backend
-- No standalone CLI is included yet
+## Feature Snapshot
 
-## What The Compiler Does
+- Ruby-like syntax with `def`, `do`, `end`, symbols, postfix `if` / `unless`
+- Layout resolver that inserts virtual indent / dedent / statement separators
+- `let` bindings, immutable locals, and function-level `where` clauses
+- Local HM inference for lambda-heavy `let` bindings
+- Algebraic data type declarations and constructor registration
+- `match` parsing and semantic checking, including constructor patterns and non-exhaustive warnings
+- Dependent-dimension-aware type matching for signatures such as `Vec(N)` and `Mat(M, N)`
+- Generic struct parsing and generic function signature matching
+- WGSL emission path staged through `HIR -> MIR` wrapper modules
+- GLSL ES 3.00 and WGSL backends
+- Standalone LSP server target: `zwgsl-lsp`
+- Vite + Monaco playground scaffold under [`playground/`](./playground)
 
-The pipeline is organized as:
+## Example
 
-1. Lexing
-2. Parsing
-3. Semantic analysis
-4. IR construction
-5. Backend emission (`GLSL ES 3.00` or `WGSL`)
-
-At the API level, compilation returns:
-
-- `vertex_source`
-- `fragment_source`
-- `compute_source`
-- Structured diagnostics with line and column information
-
-## Repository Layout
-
-```text
-.
-|-- build.zig
-|-- build.zig.zon
-|-- include/
-|   `-- zwgsl.h
-|-- src/
-|   |-- lib.zig
-|   |-- compiler.zig
-|   |-- lexer.zig
-|   |-- parser.zig
-|   |-- sema.zig
-|   |-- ir_builder.zig
-|   |-- glsl_emitter.zig
-|   `-- ...
-|-- examples/
-|   `-- *.zwgsl
-`-- tests/
-    `-- *_test.zig
-```
-
-## Build And Test
-
-Build the library artifacts:
-
-```sh
-zig build
-```
-
-This installs the generated outputs under `zig-out/`, including:
-
-- `zig-out/lib/libzwgsl.a`
-- `zig-out/lib/libzwgsl.dylib` (on macOS)
-- `zig-out/include/zwgsl.h`
-
-Run the full test suite:
-
-```sh
-zig build test
-```
-
-## Zig Integration
-
-After adding `zwgsl` to your `build.zig.zon`, import it as a module and call the compiler directly:
-
-```zig
-const std = @import("std");
-const zwgsl = @import("zwgsl");
-
-pub fn main() !void {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-
-    const source =
-        \\version "300 es"
-        \\precision :fragment, :highp
-        \\
-        \\vertex do
-        \\  input :position, Vec3, location: 0
-        \\  def main
-        \\    gl_Position = vec4(position, 1.0)
-        \\  end
-        \\end
-        \\
-        \\fragment do
-        \\  output :frag_color, Vec4, location: 0
-        \\  def main
-        \\    frag_color = vec4(1.0)
-        \\  end
-        \\end
-    ;
-
-    const result = try zwgsl.compiler.compile(arena.allocator(), source, .{
-        .target = .glsl_es_300,
-        .emit_debug_comments = 0,
-        .optimize_output = 0,
-    });
-
-    if (result.errors.len != 0) {
-        for (result.errors) |err| {
-            std.debug.print("{d}:{d}: {s}\n", .{ err.line, err.column, std.mem.span(err.message) });
-        }
-        return;
-    }
-
-    std.debug.print("vertex:\n{s}\n", .{result.vertex_source.?});
-    std.debug.print("fragment:\n{s}\n", .{result.fragment_source.?});
-}
-```
-
-## C Integration
-
-Build the library, include `zwgsl.h`, then call the exported C API:
-
-```c
-#include <stdio.h>
-#include <string.h>
-#include "zwgsl.h"
-
-int main(void) {
-    const char* source =
-        "version \"300 es\"\n"
-        "precision :fragment, :highp\n"
-        "\n"
-        "vertex do\n"
-        "  input :position, Vec3, location: 0\n"
-        "  def main\n"
-        "    gl_Position = vec4(position, 1.0)\n"
-        "  end\n"
-        "end\n"
-        "\n"
-        "fragment do\n"
-        "  output :frag_color, Vec4, location: 0\n"
-        "  def main\n"
-        "    frag_color = vec4(1.0)\n"
-        "  end\n"
-        "end\n";
-
-    ZwgslOptions options = {
-        .target = ZWGSL_TARGET_GLSL_ES_300,
-        .emit_debug_comments = 0,
-        .optimize_output = 0,
-    };
-
-    ZwgslResult result = zwgsl_compile(source, strlen(source), options);
-
-    if (result.error_count > 0) {
-        for (uint32_t i = 0; i < result.error_count; ++i) {
-            const ZwgslError err = result.errors[i];
-            fprintf(stderr, "%u:%u: %s\n", err.line, err.column, err.message);
-        }
-        zwgsl_free(&result);
-        return 1;
-    }
-
-    if (result.vertex_source) puts(result.vertex_source);
-    if (result.fragment_source) puts(result.fragment_source);
-    if (result.compute_source) puts(result.compute_source);
-    zwgsl_free(&result);
-    return 0;
-}
-```
-
-The C API surface is:
-
-- `zwgsl_compile`
-- `zwgsl_free`
-- `zwgsl_version`
-
-## Language Snapshot
-
-Example source from `examples/hello_triangle.zwgsl`:
-
-```text
-version "300 es"
-precision :fragment, :highp
-
+```ruby
 uniform :mvp, Mat4
 
 vertex do
   input :position, Vec3, location: 0
-  input :color, Vec3, location: 1
-  varying :v_color, Vec3
 
   def main
-    self.v_color = color
     gl_Position = mvp * vec4(position, 1.0)
   end
 end
 
 fragment do
-  varying :v_color, Vec3
   output :frag_color, Vec4, location: 0
 
   def main
-    frag_color = vec4(v_color, 1.0)
+    frag_color = vec4(0.9, 0.5, 0.2, 1.0)
   end
 end
 ```
 
-This produces backend-specific shader source for both stages.
+## Build
 
-## Current Limitations
+Build libraries and the LSP server:
 
-- The compiler expects source that fits the currently supported DSL and semantic rules covered by the test suite
-- `optimize_output` currently performs compact output formatting rather than semantic optimization
-- Compute shaders are currently emitted only through the WGSL backend
-- WGSL uniform bindings are auto-assigned as `@group(0) @binding(N)`
-- WGSL sampler uniforms are split into texture/sampler binding pairs automatically
-- WGSL `texture()` lowering currently supports sampler uniforms, not arbitrary sampler expressions or parameters
+```sh
+zig build
+```
 
-## Development Notes
+Run the test suite:
 
-- Examples under `examples/` are expected to compile in integration tests
-- Golden GLSL outputs live in `tests/fixtures/`
-- WGSL backend coverage lives in `tests/wgsl_emitter_test.zig`
-- The public C ABI is defined in `include/zwgsl.h`
-- The Zig module entry point is `src/lib.zig`
+```sh
+zig build test
+```
+
+Build the freestanding wasm-targeted library artifact:
+
+```sh
+zig build wasm
+```
+
+## Artifacts
+
+`zig build` installs:
+
+- `zig-out/lib/libzwgsl.a`
+- `zig-out/lib/libzwgsl.dylib` or platform equivalent
+- `zig-out/include/zwgsl.h`
+- `zig-out/bin/zwgsl-lsp`
+
+## C API
+
+```c
+#include "zwgsl.h"
+
+ZwgslOptions options = {
+    .target = ZWGSL_TARGET_WGSL,
+};
+
+ZwgslResult result = zwgsl_compile(source, source_len, options);
+if (result.error_count == 0) {
+    puts(result.vertex_source);
+}
+zwgsl_free(&result);
+```
+
+## LSP
+
+The server entry point lives at [`src/lsp/server.zig`](./src/lsp/server.zig).
+The current implementation supports:
+
+- `initialize`
+- `shutdown`
+- full-sync `didOpen` / `didChange` / `didClose`
+- basic `hover`
+- basic `completion`
+- basic `definition`
+- basic `semanticTokens/full`
+- publish-diagnostics notifications based on compiler errors
+
+## Playground
+
+The playground scaffold lives under [`playground/`](./playground).
+
+```sh
+cd playground
+npm install
+npm run dev
+```
+
+It currently provides:
+
+- Monaco editor bootstrapping
+- WGSL output panel
+- WebGPU preview canvas
+- worker-based diagnostics hook
+- wasm loader placeholder at `playground/public/zwgsl.wasm`
+
+## Status
+
+| Area | Status |
+| --- | --- |
+| Lexer + layout | Implemented |
+| Parser | Implemented |
+| HM local inference | Implemented for local lambdas / let-polymorphism |
+| ADT + match typing | Implemented |
+| Dependent dimension matching | Implemented for signature / call matching |
+| Generic struct parsing | Implemented |
+| Trait / impl basis | Minimal parser + constraint registry |
+| WGSL HIR / MIR staging | Thin wrapper layers in place |
+| LSP server | Minimal implementation |
+| Playground | Scaffold in place |
+
+## Repository Layout
+
+```text
+src/
+  ast.zig
+  compiler.zig
+  hir.zig
+  hir_builder.zig
+  ir.zig
+  ir_builder.zig
+  lsp/
+  mir.zig
+  mir_builder.zig
+  parser.zig
+  sema.zig
+  typeclass.zig
+  wgsl_emitter.zig
+tests/
+examples/
+playground/
+include/
+```
 
 ## License
 
-Released under the MIT License. See `LICENSE` for details.
+MIT

@@ -83,8 +83,15 @@ pub const FunctionDef = struct {
     name: []const u8,
     params: []const Param,
     return_type: ?[]const u8,
+    constraints: []const TypeConstraint = &.{},
     body: []const *Stmt,
     where_clause: ?WhereClause = null,
+};
+
+pub const TypeConstraint = struct {
+    position: Position,
+    param_name: []const u8,
+    trait_name: []const u8,
 };
 
 pub const LetBinding = struct {
@@ -105,12 +112,27 @@ pub const ShaderBlock = struct {
     items: []const StageItem,
 };
 
+pub const TraitDef = struct {
+    position: Position,
+    name: []const u8,
+    methods: []const *FunctionDef,
+};
+
+pub const ImplDef = struct {
+    position: Position,
+    trait_name: []const u8,
+    for_type_name: []const u8,
+    methods: []const *FunctionDef,
+};
+
 pub const Item = union(enum) {
     version: VersionDecl,
     precision: PrecisionDecl,
     uniform: UniformDecl,
     struct_def: StructDef,
     type_def: TypeDef,
+    trait_def: TraitDef,
+    impl_def: ImplDef,
     function: *FunctionDef,
     shader_block: *ShaderBlock,
 };

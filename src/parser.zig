@@ -76,6 +76,8 @@ pub const Parser = struct {
             .kw_uniform => .{ .uniform = try self.parseUniformDecl() },
             .kw_struct => .{ .struct_def = try self.parseStructDef() },
             .kw_type => .{ .type_def = try self.parseTypeDef() },
+            .kw_trait => .{ .trait_def = try self.parseTraitDef() },
+            .kw_impl => .{ .impl_def = try self.parseImplDef() },
             .kw_def => .{ .function = try self.parseFunctionDef() },
             .kw_vertex, .kw_fragment, .kw_compute => .{ .shader_block = try self.parseShaderBlock() },
             else => {
@@ -252,6 +254,10 @@ pub const Parser = struct {
         if (self.match(.arrow)) {
             return_type = try self.expectTypeSpec("return type");
         }
+        const constraints = if (self.check(.kw_where))
+            try self.parseTypeConstraints()
+        else
+            &.{};
 
         self.consumeNewlines();
         const body = try self.parseStatementList(&.{ .kw_where, .kw_end });
@@ -267,10 +273,32 @@ pub const Parser = struct {
             .name = name,
             .params = try params.toOwnedSlice(self.allocator),
             .return_type = return_type,
+            .constraints = constraints,
             .body = body,
             .where_clause = where_clause,
         };
         return function;
+    }
+
+    fn parseTypeConstraints(self: *Parser) anyerror![]const ast.TypeConstraint {
+        _ = try self.expect(.kw_where, "type constraint");
+        var constraints: std.ArrayListUnmanaged(ast.TypeConstraint) = .{};
+        defer constraints.deinit(self.allocator);
+
+        while (true) {
+            const start = self.current();
+            const param_name = try self.expectIdentifier("constraint type parameter");
+            _ = try self.expect(.colon, "':' after type parameter");
+            const trait_name = try self.expectIdentifier("trait name");
+            try constraints.append(self.allocator, .{
+                .position = positionOf(start),
+                .param_name = param_name,
+                .trait_name = trait_name,
+            });
+            if (!self.match(.comma)) break;
+        }
+
+        return try constraints.toOwnedSlice(self.allocator);
     }
 
     fn parseTypeDef(self: *Parser) anyerror!ast.TypeDef {
@@ -351,6 +379,91 @@ pub const Parser = struct {
         return .{
             .position = positionOf(start),
             .bindings = try bindings.toOwnedSlice(self.allocator),
+        };
+    }
+
+    fn parseTraitDef(self: *Parser) anyerror!ast.TraitDef {
+        const start = try self.expect(.kw_trait, "trait definition");
+        const name = try self.expectIdentifier("trait name");
+        self.consumeNewlines();
+
+        var methods: std.ArrayListUnmanaged(*ast.FunctionDef) = .{};
+        defer methods.deinit(self.allocator);
+
+        while (!self.isAtEnd() and !self.check(.kw_end)) {
+            try methods.append(self.allocator, try self.parseTraitMethod());
+            self.consumeNewlines();
+        }
+
+        _ = try self.expect(.kw_end, "'end' to close trait");
+        return .{
+            .position = positionOf(start),
+            .name = name,
+            .methods = try methods.toOwnedSlice(self.allocator),
+        };
+    }
+
+    fn parseTraitMethod(self: *Parser) anyerror!*ast.FunctionDef {
+        const start = try self.expect(.kw_def, "trait method");
+        const name = try self.expectIdentifier("trait method name");
+        var params: std.ArrayListUnmanaged(ast.Param) = .{};
+        defer params.deinit(self.allocator);
+
+        if (self.match(.lparen)) {
+            if (!self.check(.rparen)) {
+                while (true) {
+                    try params.append(self.allocator, try self.parseParam());
+                    if (!self.match(.comma)) break;
+                }
+            }
+            _ = try self.expect(.rparen, "')' after parameters");
+        }
+
+        var return_type: ?[]const u8 = null;
+        if (self.match(.arrow)) {
+            return_type = try self.expectTypeSpec("return type");
+        }
+
+        const constraints = if (self.check(.kw_where))
+            try self.parseTypeConstraints()
+        else
+            &.{};
+        _ = try self.expect(.kw_end, "'end' to close trait method");
+
+        const function = try self.allocator.create(ast.FunctionDef);
+        function.* = .{
+            .position = positionOf(start),
+            .name = name,
+            .params = try params.toOwnedSlice(self.allocator),
+            .return_type = return_type,
+            .constraints = constraints,
+            .body = &.{},
+            .where_clause = null,
+        };
+        return function;
+    }
+
+    fn parseImplDef(self: *Parser) anyerror!ast.ImplDef {
+        const start = try self.expect(.kw_impl, "impl definition");
+        const trait_name = try self.expectIdentifier("trait name");
+        _ = try self.expect(.kw_for, "'for' after trait name");
+        const for_type_name = try self.expectTypeSpec("impl target type");
+        self.consumeNewlines();
+
+        var methods: std.ArrayListUnmanaged(*ast.FunctionDef) = .{};
+        defer methods.deinit(self.allocator);
+
+        while (!self.isAtEnd() and !self.check(.kw_end)) {
+            try methods.append(self.allocator, try self.parseFunctionDef());
+            self.consumeNewlines();
+        }
+
+        _ = try self.expect(.kw_end, "'end' to close impl");
+        return .{
+            .position = positionOf(start),
+            .trait_name = trait_name,
+            .for_type_name = for_type_name,
+            .methods = try methods.toOwnedSlice(self.allocator),
         };
     }
 

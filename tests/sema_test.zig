@@ -380,3 +380,53 @@ test "sema reports dependent dimension mismatches" {
 
     try std.testing.expect(analyzed.diagnostics.items.items.len > 0);
 }
+
+test "sema resolves simple trait constraints" {
+    var analyzed = try analyzeSource(
+        \\trait Numeric
+        \\  def zero -> Self end
+        \\end
+        \\
+        \\impl Numeric for Float
+        \\  def zero -> Float
+        \\    0.0
+        \\  end
+        \\end
+        \\
+        \\def choose(a: T, b: T) -> T where T: Numeric
+        \\  a
+        \\end
+        \\
+        \\def run -> Float
+        \\  choose(1.0, 2.0)
+        \\end
+    );
+    defer analyzed.arena.deinit();
+
+    try std.testing.expectEqual(@as(usize, 0), analyzed.diagnostics.items.items.len);
+}
+
+test "sema rejects unsatisfied trait constraints" {
+    var analyzed = try analyzeSource(
+        \\trait Numeric
+        \\  def zero -> Self end
+        \\end
+        \\
+        \\impl Numeric for Float
+        \\  def zero -> Float
+        \\    0.0
+        \\  end
+        \\end
+        \\
+        \\def choose(a: T, b: T) -> T where T: Numeric
+        \\  a
+        \\end
+        \\
+        \\def run
+        \\  choose(vec3(1.0), vec3(2.0))
+        \\end
+    );
+    defer analyzed.arena.deinit();
+
+    try std.testing.expect(analyzed.diagnostics.items.items.len > 0);
+}

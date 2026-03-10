@@ -294,6 +294,24 @@ test "parser handles match expressions" {
     try std.testing.expectEqual(.wildcard, std.meta.activeTag(expr.data.match_expr.arms[1].pattern));
 }
 
+test "parser handles trait and impl definitions" {
+    var parsed = try parseProgram(
+        \\trait Numeric
+        \\  def zero -> Self end
+        \\end
+        \\
+        \\impl Numeric for Float
+        \\  def zero -> Float
+        \\    0.0
+        \\  end
+        \\end
+    );
+    defer parsed.arena.deinit();
+
+    try std.testing.expectEqual(.trait_def, std.meta.activeTag(parsed.program.items[0]));
+    try std.testing.expectEqual(.impl_def, std.meta.activeTag(parsed.program.items[1]));
+}
+
 test "parser reuses interned identifier slices with a shared string pool" {
     var parsed = try parseProgramWithPool(
         \\def main(value: Float) -> Float

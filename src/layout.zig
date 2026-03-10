@@ -147,6 +147,8 @@ fn startsIndentedBlock(tag: token.TokenTag) bool {
         .kw_where,
         .kw_type,
         .kw_when,
+        .kw_trait,
+        .kw_impl,
         => true,
         else => false,
     };

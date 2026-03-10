@@ -31,6 +31,9 @@ pub const TokenTag = enum {
     kw_type,
     kw_match,
     kw_when,
+    kw_trait,
+    kw_impl,
+    kw_for,
 
     integer_literal,
     float_literal,
@@ -123,6 +126,9 @@ pub fn keywordTag(identifier: []const u8) ?TokenTag {
         .{ "type", .kw_type },
         .{ "match", .kw_match },
         .{ "when", .kw_when },
+        .{ "trait", .kw_trait },
+        .{ "impl", .kw_impl },
+        .{ "for", .kw_for },
     });
     return map.get(identifier);
 }
