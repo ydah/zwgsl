@@ -431,6 +431,36 @@ test "sema rejects unsatisfied trait constraints" {
     try std.testing.expect(analyzed.diagnostics.items.items.len > 0);
 }
 
+test "sema type checks impl methods and constrained trait method calls" {
+    var analyzed = try analyzeSource(
+        \\trait Numeric
+        \\  def add(other: Self) -> Self end
+        \\  def mul(other: Self) -> Self end
+        \\end
+        \\
+        \\impl Numeric for Float
+        \\  def add(other: Self) -> Self
+        \\    self + other
+        \\  end
+        \\
+        \\  def mul(other: Float) -> Float
+        \\    self * other
+        \\  end
+        \\end
+        \\
+        \\def lerp(a: T, b: T, t: Float) -> T where T: Numeric
+        \\  a.mul(1.0 - t).add(b.mul(t))
+        \\end
+        \\
+        \\def run -> Float
+        \\  lerp(1.0, 2.0, 0.5)
+        \\end
+    );
+    defer analyzed.arena.deinit();
+
+    try std.testing.expectEqual(@as(usize, 0), analyzed.diagnostics.items.items.len);
+}
+
 test "sema infers generic struct constructors and field access" {
     var analyzed = try analyzeSource(
         \\struct Pair(a, b)

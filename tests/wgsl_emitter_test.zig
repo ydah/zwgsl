@@ -118,3 +118,46 @@ test "compiler rejects mixing compute with render stages" {
     try std.testing.expect(output.errors.len > 0);
     try std.testing.expect(std.mem.indexOf(u8, std.mem.span(output.errors[0].message), "cannot be combined") != null);
 }
+
+test "compiler specializes constrained trait calls for WGSL" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const source =
+        \\trait Numeric
+        \\  def add(other: Self) -> Self end
+        \\  def mul(other: Self) -> Self end
+        \\end
+        \\
+        \\impl Numeric for Float
+        \\  def add(other: Self) -> Self
+        \\    self + other
+        \\  end
+        \\
+        \\  def mul(other: Self) -> Self
+        \\    self * other
+        \\  end
+        \\end
+        \\
+        \\def lerp(a: T, b: T, t: Float) -> T where T: Numeric
+        \\  a.mul(1.0 - t).add(b.mul(t))
+        \\end
+        \\
+        \\compute do
+        \\  def main
+        \\    value: Float = lerp(1.0, 2.0, 0.5)
+        \\  end
+        \\end
+    ;
+
+    const output = try zwgsl.compiler.compile(arena.allocator(), source, .{
+        .target = .wgsl,
+    });
+
+    try std.testing.expectEqual(@as(usize, 0), output.errors.len);
+    try std.testing.expect(output.compute_source != null);
+    try std.testing.expect(std.mem.indexOf(u8, output.compute_source.?, "fn __trait_Numeric_Float_add") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output.compute_source.?, "fn __trait_Numeric_Float_mul") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output.compute_source.?, "fn __spec_lerp_Float_Float_Float") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output.compute_source.?, "__spec_lerp_Float_Float_Float(1.0, 2.0, 0.5)") != null);
+}

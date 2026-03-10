@@ -82,6 +82,8 @@ pub const LayoutResolver = struct {
                     line_has_code = true;
                     if (startsIndentedBlock(item.tag) or item.tag == .kw_do) {
                         line_opens_block = true;
+                    } else if (item.tag == .kw_end) {
+                        line_opens_block = false;
                     }
 
                     try resolved.append(allocator, item);

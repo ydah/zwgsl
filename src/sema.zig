@@ -119,6 +119,7 @@ pub const TypedProgram = struct {
     struct_defs: std.StringHashMap(StructInfo),
     type_defs: std.StringHashMap(TypeDefInfo),
     constructors: std.StringHashMap(ConstructorInfo),
+    traits: typeclass.TraitRegistry,
     global_functions: []const *ast.FunctionDef = &.{},
     vertex_functions: []const *ast.FunctionDef = &.{},
     fragment_functions: []const *ast.FunctionDef = &.{},
@@ -203,6 +204,7 @@ const Analyzer = struct {
             .struct_defs = std.StringHashMap(StructInfo).init(allocator),
             .type_defs = std.StringHashMap(TypeDefInfo).init(allocator),
             .constructors = std.StringHashMap(ConstructorInfo).init(allocator),
+            .traits = typeclass.TraitRegistry.init(allocator),
         };
 
         return .{
@@ -225,10 +227,12 @@ const Analyzer = struct {
         try self.registerFunctions();
         try self.validateVaryings();
         try self.analyzeGlobalFunctions();
+        try self.analyzeImplFunctions();
         if (self.typed.vertex_block) |vertex| try self.analyzeStage(vertex, self.vertex_functions.items);
         if (self.typed.fragment_block) |fragment| try self.analyzeStage(fragment, self.fragment_functions.items);
         if (self.typed.compute_block) |compute| try self.analyzeStage(compute, self.compute_functions.items);
 
+        self.typed.traits = self.traits;
         self.typed.global_functions = try self.global_functions.toOwnedSlice(self.allocator);
         self.typed.vertex_functions = try self.vertex_functions.toOwnedSlice(self.allocator);
         self.typed.fragment_functions = try self.fragment_functions.toOwnedSlice(self.allocator);
@@ -416,15 +420,166 @@ const Analyzer = struct {
     }
 
     fn registerImplDef(self: *Analyzer, impl_def: ast.ImplDef) anyerror!void {
-        if (!self.traits.traits.contains(impl_def.trait_name)) {
+        const trait_def = self.traits.findTrait(impl_def.trait_name) orelse {
             try self.report(impl_def.position, "unknown trait '{s}'", .{impl_def.trait_name});
             return;
+        };
+        const receiver_type = try self.resolveTypeName(impl_def.for_type_name, impl_def.position);
+        if (self.traits.hasImpl(impl_def.trait_name, receiver_type)) {
+            try self.report(impl_def.position, "duplicate impl of trait '{s}' for {s}", .{ impl_def.trait_name, receiver_type.glslName() });
+            return;
+        }
+
+        var methods = std.ArrayListUnmanaged(typeclass.TraitImplMethod){};
+        defer methods.deinit(self.allocator);
+        var implemented = std.StringHashMapUnmanaged(void){};
+        defer implemented.deinit(self.allocator);
+        const self_param = [_][]const u8{"Self"};
+
+        for (impl_def.methods) |method| {
+            if (implemented.contains(method.name)) {
+                try self.report(method.position, "duplicate impl method '{s}'", .{method.name});
+                continue;
+            }
+            try implemented.put(self.allocator, method.name, {});
+
+            const trait_method = self.traits.findTraitMethod(impl_def.trait_name, method.name) orelse {
+                try self.report(method.position, "trait '{s}' does not define method '{s}'", .{ impl_def.trait_name, method.name });
+                continue;
+            };
+            const expected_signature = try self.instantiateTraitMethod(trait_method, receiver_type);
+
+            if (method.params.len != expected_signature.params.len) {
+                try self.report(method.position, "impl method '{s}' has wrong arity", .{method.name});
+                continue;
+            }
+
+            const param_infos = try self.allocator.alloc(ParamInfo, method.params.len + 1);
+            param_infos[0] = .{
+                .name = try self.intern("self"),
+                .ty = receiver_type,
+                .is_inout = false,
+            };
+
+            for (method.params, expected_signature.params, 0..) |param, expected_param_type, index| {
+                const annotated_type = try self.resolveTypeNameWithParams(param.type_name, param.position, &self_param);
+                const actual_type = try self.substituteSelfType(annotated_type, receiver_type);
+                if (!self.typesCompatible(expected_param_type, actual_type)) {
+                    try self.report(param.position, "impl method '{s}' expected parameter type {s}, got {s}", .{
+                        method.name,
+                        expected_param_type.glslName(),
+                        actual_type.glslName(),
+                    });
+                }
+                param_infos[index + 1] = .{
+                    .name = param.name,
+                    .ty = actual_type,
+                    .is_inout = param.is_inout,
+                };
+            }
+
+            const actual_return_type = if (method.return_type) |return_type_name| blk: {
+                const annotated_type = try self.resolveTypeNameWithParams(return_type_name, method.position, &self_param);
+                break :blk try self.substituteSelfType(annotated_type, receiver_type);
+            } else expected_signature.return_type;
+            if (!self.typesCompatible(expected_signature.return_type, actual_return_type)) {
+                try self.report(method.position, "impl method '{s}' expected return type {s}, got {s}", .{
+                    method.name,
+                    expected_signature.return_type.glslName(),
+                    actual_return_type.glslName(),
+                });
+            }
+
+            const mangled_name = try typeclass.mangleImplMethodName(
+                self.allocator,
+                impl_def.trait_name,
+                receiver_type,
+                method.name,
+            );
+            try self.typed.function_signatures.put(method, .{
+                .function = method,
+                .name = mangled_name,
+                .params = param_infos,
+                .return_type = actual_return_type,
+                .constraints = &.{},
+                .stage = null,
+            });
+
+            try methods.append(self.allocator, .{
+                .name = method.name,
+                .function = method,
+                .mangled_name = mangled_name,
+                .params = expected_signature.params,
+                .return_type = expected_signature.return_type,
+            });
+        }
+
+        for (trait_def.methods) |trait_method| {
+            if (!implemented.contains(trait_method.name)) {
+                try self.report(impl_def.position, "impl for trait '{s}' is missing method '{s}'", .{ impl_def.trait_name, trait_method.name });
+            }
         }
 
         try self.traits.impls.append(self.allocator, .{
             .trait_name = impl_def.trait_name,
-            .for_type = try self.resolveTypeName(impl_def.for_type_name, impl_def.position),
+            .for_type = receiver_type,
+            .methods = try methods.toOwnedSlice(self.allocator),
         });
+    }
+
+    fn instantiateTraitMethod(
+        self: *Analyzer,
+        trait_method: typeclass.TraitMethod,
+        receiver_type: types.Type,
+    ) anyerror!typeclass.TraitMethod {
+        const params = try self.allocator.alloc(types.Type, trait_method.params.len);
+        for (trait_method.params, 0..) |param, index| {
+            params[index] = try self.substituteSelfType(param, receiver_type);
+        }
+
+        return .{
+            .name = trait_method.name,
+            .params = params,
+            .return_type = try self.substituteSelfType(trait_method.return_type, receiver_type),
+        };
+    }
+
+    fn substituteSelfType(
+        self: *Analyzer,
+        ty: types.Type,
+        receiver_type: types.Type,
+    ) anyerror!types.Type {
+        return switch (ty) {
+            .type_var => |id| if (id == 0) receiver_type else ty,
+            .function => |function| blk: {
+                const params = try self.allocator.alloc(types.Type, function.params.len);
+                for (function.params, 0..) |param, index| {
+                    params[index] = try self.substituteSelfType(param, receiver_type);
+                }
+
+                const return_type = try self.allocator.create(types.Type);
+                return_type.* = try self.substituteSelfType(function.return_type.*, receiver_type);
+                break :blk .{
+                    .function = .{
+                        .params = params,
+                        .return_type = return_type,
+                    },
+                };
+            },
+            .type_app => |app_ty| blk: {
+                const args = try self.allocator.alloc(types.Type, app_ty.args.len);
+                for (app_ty.args, 0..) |arg, index| {
+                    args[index] = try self.substituteSelfType(arg, receiver_type);
+                }
+                break :blk .{
+                    .type_app = .{
+                        .name = app_ty.name,
+                        .args = args,
+                    },
+                };
+            },
+            else => ty,
+        };
     }
 
     fn registerFunctions(self: *Analyzer) anyerror!void {
@@ -547,7 +702,22 @@ const Analyzer = struct {
 
     fn analyzeGlobalFunctions(self: *Analyzer) anyerror!void {
         for (self.global_functions.items) |function| {
-            try self.analyzeFunction(function, &self.global_scope, null, self.global_functions.items, &self.global_scope);
+            try self.analyzeFunction(function, &self.global_scope, null, self.global_functions.items, &self.global_scope, null);
+        }
+    }
+
+    fn analyzeImplFunctions(self: *Analyzer) anyerror!void {
+        for (self.traits.impls.items) |impl_info| {
+            for (impl_info.methods) |method| {
+                try self.analyzeFunction(
+                    method.function,
+                    &self.global_scope,
+                    null,
+                    self.global_functions.items,
+                    &self.global_scope,
+                    impl_info.for_type,
+                );
+            }
         }
     }
 
@@ -617,7 +787,7 @@ const Analyzer = struct {
 
         for (block.items) |item| {
             if (item == .function) {
-                try self.analyzeFunction(item.function, &stage_scope, block.stage, stage_functions, &stage_scope);
+                try self.analyzeFunction(item.function, &stage_scope, block.stage, stage_functions, &stage_scope, null);
             }
         }
     }
@@ -652,6 +822,7 @@ const Analyzer = struct {
         stage: ?ast.Stage,
         stage_functions: []const *ast.FunctionDef,
         stage_scope: *const Scope,
+        self_type: ?types.Type,
     ) anyerror!void {
         var scope = Scope.init(self.allocator, parent_scope);
         const signature = self.typed.function_signatures.getPtr(function).?;
@@ -676,6 +847,7 @@ const Analyzer = struct {
             .stage_scope = stage_scope,
             .stage_functions = stage_functions,
             .hm_engine = &hm_engine,
+            .self_type = self_type,
         };
 
         if (function.where_clause) |where_clause| {
@@ -1075,7 +1247,10 @@ const Analyzer = struct {
                 break :blk symbol.ty;
             },
             .self_ref => blk: {
-                try self.report(expr.position, "self must be followed by a member access", .{});
+                if (context.self_type) |self_type| {
+                    break :blk self_type;
+                }
+                try self.report(expr.position, "self must be used inside an impl method or followed by a stage member access", .{});
                 break :blk types.builtinType(.error_type);
             },
             .unary => |unary| blk: {
@@ -1104,6 +1279,19 @@ const Analyzer = struct {
             },
             .member => |member| blk: {
                 if (member.target.data == .self_ref) {
+                    if (context.self_type) |self_type| {
+                        if (types.isValidSwizzle(self_type, member.name)) |swizzle_type| {
+                            break :blk swizzle_type;
+                        }
+                        if (builtins.resolveMethod(member.name, self_type, &.{})) |builtin_resolution| {
+                            break :blk builtin_resolution.return_type;
+                        }
+                        if (try self.resolveStructFieldType(self_type, member.name)) |field_type| {
+                            break :blk field_type;
+                        }
+                        try self.report(expr.position, "member '{s}' does not exist on {s}", .{ member.name, self_type.glslName() });
+                        break :blk types.builtinType(.error_type);
+                    }
                     if (context.stage == null) {
                         try self.report(expr.position, "self is only valid inside shader stages", .{});
                         break :blk types.builtinType(.error_type);
@@ -1167,6 +1355,9 @@ const Analyzer = struct {
                         if (builtins.resolveMethod(member.name, receiver_type, arg_types.items)) |resolution| {
                             break :blk resolution.return_type;
                         }
+                        if (try self.resolveTraitMethodCall(receiver_type, member.name, arg_types.items, context, expr.position)) |resolution| {
+                            break :blk resolution;
+                        }
                         try self.report(expr.position, "unknown method '{s}' for {s}", .{ member.name, receiver_type.glslName() });
                         break :blk types.builtinType(.error_type);
                     },
@@ -1206,6 +1397,80 @@ const Analyzer = struct {
 
         try self.rememberExprType(expr, resolved);
         return resolved;
+    }
+
+    fn resolveTraitMethodCall(
+        self: *Analyzer,
+        receiver_type: types.Type,
+        method_name: []const u8,
+        arg_types: []const types.Type,
+        context: *FunctionContext,
+        position: ast.Position,
+    ) anyerror!?types.Type {
+        if (receiver_type == .type_var) {
+            var resolved_type: ?types.Type = null;
+            var match_count: usize = 0;
+
+            for (context.signature.constraints) |constraint| {
+                if (constraint.type_var != receiver_type.type_var) continue;
+                const trait_method = self.traits.findTraitMethod(constraint.trait_name, method_name) orelse continue;
+                const return_type = try self.matchTraitMethodCall(trait_method, receiver_type, arg_types);
+                if (return_type == null) continue;
+                resolved_type = return_type;
+                match_count += 1;
+            }
+
+            if (match_count > 1) {
+                try self.report(position, "method '{s}' is ambiguous for constrained type", .{method_name});
+                return types.builtinType(.error_type);
+            }
+            return resolved_type;
+        }
+
+        var resolved_type: ?types.Type = null;
+        var match_count: usize = 0;
+        for (self.traits.impls.items) |impl_info| {
+            if (!impl_info.for_type.eql(receiver_type)) continue;
+            const impl_method = self.traits.findImplMethod(impl_info.trait_name, receiver_type, method_name) orelse continue;
+            if (!try self.matchConcreteMethodCall(impl_method.params, arg_types)) continue;
+            resolved_type = impl_method.return_type;
+            match_count += 1;
+        }
+
+        if (match_count > 1) {
+            try self.report(position, "method '{s}' is ambiguous for {s}", .{ method_name, receiver_type.glslName() });
+            return types.builtinType(.error_type);
+        }
+        return resolved_type;
+    }
+
+    fn matchTraitMethodCall(
+        self: *Analyzer,
+        trait_method: typeclass.TraitMethod,
+        receiver_type: types.Type,
+        arg_types: []const types.Type,
+    ) anyerror!?types.Type {
+        if (trait_method.params.len != arg_types.len) return null;
+
+        var substitution = unify.Substitution.init(self.allocator);
+        defer substitution.deinit();
+
+        for (trait_method.params, arg_types) |param_type, arg_type| {
+            unify.unify(&substitution, try self.substituteSelfType(param_type, receiver_type), arg_type) catch return null;
+        }
+        return try substitution.apply(try self.substituteSelfType(trait_method.return_type, receiver_type));
+    }
+
+    fn matchConcreteMethodCall(
+        self: *Analyzer,
+        param_types: []const types.Type,
+        arg_types: []const types.Type,
+    ) anyerror!bool {
+        if (param_types.len != arg_types.len) return false;
+        for (param_types, arg_types) |param_type, arg_type| {
+            if (!self.typesCompatible(param_type, arg_type)) return false;
+        }
+        return true;
     }
 
     fn analyzeMatchExpr(
@@ -1763,6 +2028,7 @@ const FunctionContext = struct {
     stage_scope: *const Scope,
     stage_functions: []const *ast.FunctionDef,
     hm_engine: *hm.Engine,
+    self_type: ?types.Type = null,
     return_types: std.ArrayListUnmanaged(types.Type) = .{},
 };
 
