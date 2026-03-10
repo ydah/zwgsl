@@ -71,7 +71,8 @@ export const registerLanguage = (instance: typeof monaco) => {
           },
         }],
         [/[+\-*/%=<>!&|.^~]+/, "operator"],
-        [/[()[\],.]/, "@brackets"],
+        [/[()[\]]/, "@brackets"],
+        [/[,.]/, "delimiter"],
       ],
       string: [
         [/[^\\"]+/, "string"],
