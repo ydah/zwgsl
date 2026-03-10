@@ -63,7 +63,7 @@ pub fn handle(allocator: std.mem.Allocator, state: *State, message: []const u8) 
     if (std.mem.eql(u8, method_name, "textDocument/didClose")) {
         const uri = nestedString(params.?, &.{ "textDocument", "uri" }) orelse return null;
         state.store.remove(uri);
-        return null;
+        return try diagnostics.clear(allocator, uri);
     }
 
     const uri = nestedString(params orelse return null, &.{ "textDocument", "uri" }) orelse return null;

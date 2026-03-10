@@ -39,6 +39,20 @@ pub fn publish(allocator: std.mem.Allocator, uri: []const u8, source: []const u8
     return try buffer.toOwnedSlice(allocator);
 }
 
+pub fn clear(allocator: std.mem.Allocator, uri: []const u8) ![]u8 {
+    var buffer: std.ArrayList(u8) = .empty;
+    defer buffer.deinit(allocator);
+    const writer = buffer.writer(allocator);
+
+    try writer.print(
+        "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/publishDiagnostics\",\"params\":{{\"uri\":",
+        .{},
+    );
+    try writeJsonString(writer, uri);
+    try writer.writeAll(",\"diagnostics\":[]}}");
+    return try buffer.toOwnedSlice(allocator);
+}
+
 fn writeJsonString(writer: anytype, value: []const u8) !void {
     try writer.writeByte('"');
     for (value) |ch| switch (ch) {

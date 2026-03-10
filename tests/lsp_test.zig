@@ -67,6 +67,45 @@ test "lsp didOpen publishes diagnostics" {
     try std.testing.expect(std.mem.indexOf(u8, response, "expected 'end'") != null);
 }
 
+test "lsp didClose clears published diagnostics" {
+    var state = handler.State.init(std.testing.allocator);
+    defer state.deinit();
+
+    const source =
+        \\vertex do
+        \\  def main
+        \\    gl_Position = vec4(position, 1.0)
+        \\  end
+    ;
+    const escaped_source = try jsonString(std.testing.allocator, source);
+    defer std.testing.allocator.free(escaped_source);
+
+    const open_message = try std.mem.concat(
+        std.testing.allocator,
+        u8,
+        &.{
+            "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file:///shader.zw\",\"text\":",
+            escaped_source,
+            "}}}",
+        },
+    );
+    defer std.testing.allocator.free(open_message);
+
+    const open_response = (try handler.handle(std.testing.allocator, &state, open_message)).?;
+    defer std.testing.allocator.free(open_response);
+    try std.testing.expect(std.mem.indexOf(u8, open_response, "\"diagnostics\":[") != null);
+
+    const close_response = (try handler.handle(
+        std.testing.allocator,
+        &state,
+        "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didClose\",\"params\":{\"textDocument\":{\"uri\":\"file:///shader.zw\"}}}",
+    )).?;
+    defer std.testing.allocator.free(close_response);
+
+    try std.testing.expect(std.mem.indexOf(u8, close_response, "\"textDocument/publishDiagnostics\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, close_response, "\"diagnostics\":[]") != null);
+}
+
 test "lsp hover returns builtin and inferred type information" {
     const source =
         \\vertex do
