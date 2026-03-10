@@ -293,15 +293,29 @@ const collectUniformSpecs = (...sources: Array<string | null>) => {
 
   for (const source of sources) {
     if (!source) continue;
+    const wrappedTypes = collectWrappedUniformTypes(source);
     for (const match of source.matchAll(pattern)) {
       const binding = Number(match[1]);
       if (Number.isNaN(binding) || specs.has(binding)) continue;
-      const spec = parseUniformSpec(binding, match[2], match[3]);
+      const resolvedType = wrappedTypes.get(match[3]) ?? match[3];
+      const spec = parseUniformSpec(binding, match[2], resolvedType);
       if (spec) specs.set(binding, spec);
     }
   }
 
   return [...specs.values()].sort((left, right) => left.binding - right.binding);
+};
+
+const collectWrappedUniformTypes = (source: string) => {
+  const wrappedTypes = new Map<string, string>();
+  const pattern =
+    /struct\s+([A-Za-z_]\w*)\s*\{\s*(?:@align\(16\)\s*)?value:\s*([A-Za-z0-9_<>]+),\s*\};/g;
+
+  for (const match of source.matchAll(pattern)) {
+    wrappedTypes.set(match[1], match[2]);
+  }
+
+  return wrappedTypes;
 };
 
 const collectTextureSpecs = (...sources: Array<string | null>) => {
