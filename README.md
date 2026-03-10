@@ -140,8 +140,8 @@ It currently provides:
 | ADT + match typing | Implemented |
 | Dependent dimension matching | Implemented for signature / call matching |
 | Generic structs + phantom tags | Constructor inference and type checking implemented |
-| Trait / impl basis | Minimal parser + constraint registry |
-| WGSL HIR / MIR staging | Thin wrapper layers in place |
+| Trait / impl basis | Static impl dispatch, Self-aware impl checking, constrained specialization |
+| WGSL HIR / MIR staging | Distinct staged IR modules with binding allocation |
 | LSP server | Source-aware diagnostics / hover / completion / goto-definition |
 | Playground | Monaco + worker diagnostics + wasm compiler bridge |
 

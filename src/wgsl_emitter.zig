@@ -1,7 +1,7 @@
 const std = @import("std");
 const ast = @import("ast.zig");
 const glsl_emitter = @import("glsl_emitter.zig");
-const ir = @import("ir.zig");
+const mir = @import("mir.zig");
 const token = @import("token.zig");
 const types = @import("types.zig");
 
@@ -20,7 +20,7 @@ pub const EmitError = error{
     UnsupportedTextureSource,
 };
 
-pub fn emit(allocator: std.mem.Allocator, module: *const ir.Module, options: EmitOptions) anyerror!Output {
+pub fn emit(allocator: std.mem.Allocator, module: *const mir.Module, options: EmitOptions) anyerror!Output {
     return .{
         .vertex = if (module.vertex) |stage| try emitStage(allocator, module, stage, options) else null,
         .fragment = if (module.fragment) |stage| try emitStage(allocator, module, stage, options) else null,
@@ -28,14 +28,14 @@ pub fn emit(allocator: std.mem.Allocator, module: *const ir.Module, options: Emi
     };
 }
 
-fn emitStage(allocator: std.mem.Allocator, module: *const ir.Module, stage: ir.Stage, options: EmitOptions) anyerror![]const u8 {
+fn emitStage(allocator: std.mem.Allocator, module: *const mir.Module, stage: mir.Stage, options: EmitOptions) anyerror![]const u8 {
     var buffer = try std.ArrayList(u8).initCapacity(allocator, 0);
     const writer = buffer.writer(allocator);
 
     if (stage.stage != .compute) {
         try emitStageInterfaceStructs(writer, module, stage);
     }
-    try emitUniforms(writer, module.uniforms);
+    try emitBindings(writer, module.bindings);
     try emitPrivateGlobals(writer, stage);
 
     for (module.structs) |struct_decl| {
@@ -60,7 +60,7 @@ fn emitStage(allocator: std.mem.Allocator, module: *const ir.Module, stage: ir.S
     return compactOutput(allocator, output);
 }
 
-fn emitStageInterfaceStructs(writer: anytype, module: *const ir.Module, stage: ir.Stage) !void {
+fn emitStageInterfaceStructs(writer: anytype, module: *const mir.Module, stage: mir.Stage) !void {
     switch (stage.stage) {
         .vertex => {
             if (stage.inputs.len > 0) {
@@ -102,34 +102,32 @@ fn emitStageInterfaceStructs(writer: anytype, module: *const ir.Module, stage: i
     }
 }
 
-fn emitUniforms(writer: anytype, uniforms: []const ir.Global) !void {
-    var binding_index: u32 = 0;
-    for (uniforms) |uniform| {
-        if (uniform.ty.isSampler()) {
-            try writer.print("@group(0) @binding({d}) var {s}_texture: {s};\n", .{
-                binding_index,
-                uniform.name,
-                samplerTextureType(uniform.ty) orelse return error.UnsupportedSamplerType,
-            });
-            try writer.print("@group(0) @binding({d}) var {s}_sampler: sampler;\n", .{
-                binding_index + 1,
-                uniform.name,
-            });
-            binding_index += 2;
-            continue;
+fn emitBindings(writer: anytype, bindings: []const mir.Binding) !void {
+    for (bindings) |binding| {
+        switch (binding.kind) {
+            .uniform => try writer.print("@group({d}) @binding({d}) var<uniform> {s}: {s};\n", .{
+                binding.group,
+                binding.binding,
+                binding.name,
+                binding.ty.wgslName(),
+            }),
+            .texture => try writer.print("@group({d}) @binding({d}) var {s}_texture: {s};\n", .{
+                binding.group,
+                binding.binding,
+                binding.name,
+                samplerTextureType(binding.ty) orelse return error.UnsupportedSamplerType,
+            }),
+            .sampler => try writer.print("@group({d}) @binding({d}) var {s}_sampler: sampler;\n", .{
+                binding.group,
+                binding.binding,
+                binding.name,
+            }),
         }
-
-        try writer.print("@group(0) @binding({d}) var<uniform> {s}: {s};\n", .{
-            binding_index,
-            uniform.name,
-            uniform.ty.wgslName(),
-        });
-        binding_index += 1;
     }
-    if (uniforms.len > 0) try writer.writeByte('\n');
+    if (bindings.len > 0) try writer.writeByte('\n');
 }
 
-fn emitPrivateGlobals(writer: anytype, stage: ir.Stage) !void {
+fn emitPrivateGlobals(writer: anytype, stage: mir.Stage) !void {
     switch (stage.stage) {
         .vertex => {
             try writer.writeAll("var<private> gl_Position: vec4f;\n");
@@ -163,7 +161,7 @@ fn emitPrivateGlobals(writer: anytype, stage: ir.Stage) !void {
     }
 }
 
-fn emitUserStruct(writer: anytype, struct_decl: ir.StructDecl) !void {
+fn emitUserStruct(writer: anytype, struct_decl: mir.StructDecl) !void {
     try writer.print("struct {s} {{\n", .{struct_decl.name});
     for (struct_decl.fields) |field| {
         try writer.print("    {s}: {s},\n", .{ field.name, field.ty.wgslName() });
@@ -171,7 +169,7 @@ fn emitUserStruct(writer: anytype, struct_decl: ir.StructDecl) !void {
     try writer.writeAll("};\n");
 }
 
-fn emitFunction(writer: anytype, function: ir.Function, options: EmitOptions, stage: ?ast.Stage, uniforms: []const ir.Global) anyerror!void {
+fn emitFunction(writer: anytype, function: mir.Function, options: EmitOptions, stage: ?ast.Stage, uniforms: []const mir.Global) anyerror!void {
     for (function.params) |param| {
         if (param.is_inout) return error.UnsupportedInOutParams;
     }
@@ -193,7 +191,7 @@ fn emitFunction(writer: anytype, function: ir.Function, options: EmitOptions, st
     try writer.writeAll("}\n");
 }
 
-fn emitEntryPoint(writer: anytype, module: *const ir.Module, stage: ir.Stage) !void {
+fn emitEntryPoint(writer: anytype, module: *const mir.Module, stage: mir.Stage) !void {
     switch (stage.stage) {
         .vertex => {
             try writer.writeAll("@vertex\n");
@@ -262,7 +260,7 @@ fn emitEntryPoint(writer: anytype, module: *const ir.Module, stage: ir.Stage) !v
     }
 }
 
-fn emitStatements(writer: anytype, statements: []const ir.Statement, indent: usize, options: EmitOptions, uniforms: []const ir.Global) anyerror!void {
+fn emitStatements(writer: anytype, statements: []const mir.Statement, indent: usize, options: EmitOptions, uniforms: []const mir.Global) anyerror!void {
     for (statements) |statement| {
         try emitDebugComment(writer, options, statement.source_line, indent);
         try writeIndent(writer, indent);
@@ -318,7 +316,7 @@ fn emitStatements(writer: anytype, statements: []const ir.Statement, indent: usi
     }
 }
 
-fn emitExpr(writer: anytype, expr: *const ir.Expr, parent_precedence: u8, uniforms: []const ir.Global) anyerror!void {
+fn emitExpr(writer: anytype, expr: *const mir.Expr, parent_precedence: u8, uniforms: []const mir.Global) anyerror!void {
     const precedence = exprPrecedence(expr);
     const wrap = precedence < parent_precedence;
     if (wrap) try writer.writeByte('(');
@@ -366,7 +364,7 @@ fn emitExpr(writer: anytype, expr: *const ir.Expr, parent_precedence: u8, unifor
     if (wrap) try writer.writeByte(')');
 }
 
-fn emitTextureCall(writer: anytype, call: ir.Expr.Call, uniforms: []const ir.Global) anyerror!void {
+fn emitTextureCall(writer: anytype, call: mir.Expr.Call, uniforms: []const mir.Global) anyerror!void {
     if (call.args.len != 2) return error.UnsupportedTextureBuiltin;
     const sampler_name = switch (call.args[0].data) {
         .identifier => |name| name,
@@ -381,7 +379,7 @@ fn emitTextureCall(writer: anytype, call: ir.Expr.Call, uniforms: []const ir.Glo
     try writer.writeByte(')');
 }
 
-fn findUniform(uniforms: []const ir.Global, name: []const u8) ?ir.Global {
+fn findUniform(uniforms: []const mir.Global, name: []const u8) ?mir.Global {
     for (uniforms) |uniform| {
         if (std.mem.eql(u8, uniform.name, name)) return uniform;
     }
@@ -400,7 +398,7 @@ fn samplerTextureType(ty: types.Type) ?[]const u8 {
     };
 }
 
-fn varyingLocation(module: *const ir.Module, name: []const u8) u32 {
+fn varyingLocation(module: *const mir.Module, name: []const u8) u32 {
     if (module.vertex) |stage| {
         for (stage.varyings, 0..) |varying, index| {
             if (std.mem.eql(u8, varying.name, name)) return @intCast(index);
@@ -414,7 +412,7 @@ fn varyingLocation(module: *const ir.Module, name: []const u8) u32 {
     return 0;
 }
 
-fn declLocation(decl: ir.Global, index: usize) u32 {
+fn declLocation(decl: mir.Global, index: usize) u32 {
     return decl.location orelse @intCast(index);
 }
 
@@ -459,7 +457,7 @@ fn callName(name: []const u8, ty: types.Type) []const u8 {
     return name;
 }
 
-fn exprPrecedence(expr: *const ir.Expr) u8 {
+fn exprPrecedence(expr: *const mir.Expr) u8 {
     return switch (expr.data) {
         .integer, .float, .bool, .identifier => 9,
         .call, .field, .index => 8,
