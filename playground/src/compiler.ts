@@ -55,6 +55,13 @@ export const createCompiler = async () => {
   return compilerPromise;
 };
 
+const stageSources = (result: Pick<CompileResult, "vertex" | "fragment" | "compute">) =>
+  [
+    ["vertex", result.vertex],
+    ["fragment", result.fragment],
+    ["compute", result.compute],
+  ] as const;
+
 const createLoadedCompiler = async () => {
   const exports = await loadWasmExports();
   if (!exports) {
@@ -112,10 +119,9 @@ const createLoadedCompiler = async () => {
           const diagnostics = readDiagnostics(exports.memory, diagnosticsPtr, diagnosticsLen);
 
           return {
-            wgsl: [vertex, fragment, compute]
-              .filter((part): part is string => Boolean(part))
-              .map((part, index) => {
-                const stage = index === 0 ? "vertex" : index === 1 ? "fragment" : "compute";
+            wgsl: stageSources({ vertex, fragment, compute })
+              .filter((entry): entry is readonly [string, string] => typeof entry[1] === "string")
+              .map(([stage, part]) => {
                 return `// ${stage}\n${part}`;
               })
               .join("\n\n"),
