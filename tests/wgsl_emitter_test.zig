@@ -131,6 +131,38 @@ test "compiler emits WGSL for ADT match fixtures" {
     );
 }
 
+test "compiler lowers symbol match patterns for WGSL" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const source =
+        \\compute do
+        \\  def shade(mode: Symbol) -> Float
+        \\    match mode
+        \\    when :phong
+        \\      1.0
+        \\    when :flat
+        \\      0.5
+        \\    end
+        \\  end
+        \\
+        \\  def main
+        \\    let mode = :phong
+        \\    value: Float = shade(mode)
+        \\  end
+        \\end
+    ;
+
+    const output = try zwgsl.compiler.compile(arena.allocator(), source, .{
+        .target = .wgsl,
+    });
+
+    try std.testing.expectEqual(@as(usize, 0), output.errors.len);
+    try std.testing.expect(output.compute_source != null);
+    try std.testing.expect(std.mem.indexOf(u8, output.compute_source.?, "mode: i32 = ") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output.compute_source.?, "if (__match_value ==") != null);
+}
+
 test "compiler rejects compute shaders for GLSL ES 3.00" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

@@ -1235,7 +1235,7 @@ const Analyzer = struct {
             .float => types.builtinType(.float),
             .bool => types.builtinType(.bool),
             .string => types.builtinType(.error_type),
-            .symbol => types.builtinType(.error_type),
+            .symbol => types.builtinType(.symbol),
             .identifier => |name| blk: {
                 const symbol = scope.get(name) orelse {
                     try self.report(expr.position, "use of undeclared symbol '{s}'", .{name});
@@ -1581,7 +1581,13 @@ const Analyzer = struct {
                 }
                 break :blk .{ .matches_all = false, .constructor_name = null };
             },
-            .symbol => .{ .matches_all = false, .constructor_name = null },
+            .symbol => |value| blk: {
+                _ = value;
+                if (!expected_type.isBuiltin(.symbol)) {
+                    try self.report(position, "symbol pattern expects Symbol", .{});
+                }
+                break :blk .{ .matches_all = false, .constructor_name = null };
+            },
             .constructor => |constructor| blk: {
                 const info = self.constructors.get(constructor.name) orelse {
                     try self.report(position, "unknown constructor '{s}'", .{constructor.name});

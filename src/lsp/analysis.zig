@@ -1183,6 +1183,7 @@ fn writeType(writer: anytype, ty: types.Type) !void {
             .int => "Int",
             .uint => "UInt",
             .bool => "Bool",
+            .symbol => "Symbol",
             .vec2 => "Vec2",
             .vec3 => "Vec3",
             .vec4 => "Vec4",

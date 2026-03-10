@@ -451,6 +451,7 @@ fn callName(name: []const u8, ty: types.Type) []const u8 {
                 .int => "i32",
                 .uint => "u32",
                 .bool => "bool",
+                .symbol => "i32",
                 .vec2 => "vec2f",
                 .vec3 => "vec3f",
                 .vec4 => "vec4f",

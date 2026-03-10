@@ -562,6 +562,7 @@ const Builder = struct {
             .integer => |value| self.makeExpr(try self.resolvedExprType(expr, context), .{ .integer = value }),
             .float => |value| self.makeExpr(try self.resolvedExprType(expr, context), .{ .float = value }),
             .bool => |value| self.makeExpr(try self.resolvedExprType(expr, context), .{ .bool = value }),
+            .symbol => |value| self.makeExpr(try self.resolvedExprType(expr, context), .{ .integer = symbolId(value) }),
             .identifier => |name| blk: {
                 if (context.loop_bindings.get(name)) |binding| {
                     break :blk switch (binding) {
@@ -954,7 +955,13 @@ const Builder = struct {
                     .rhs = try self.makeExpr(types.builtinType(.bool), .{ .bool = value }),
                 },
             }),
-            .symbol => return error.UnsupportedPatternSymbol,
+            .symbol => |value| try self.makeExpr(types.builtinType(.bool), .{
+                .binary = .{
+                    .operator = .eq,
+                    .lhs = target,
+                    .rhs = try self.makeExpr(types.builtinType(.symbol), .{ .integer = symbolId(value) }),
+                },
+            }),
             .constructor => |constructor| blk: {
                 const info = self.typed.constructor(constructor.name) orelse return error.UnknownConstructor;
 
@@ -1005,6 +1012,7 @@ const Builder = struct {
                 .int => try self.makeExpr(ty, .{ .integer = 0 }),
                 .uint => try self.makeExpr(ty, .{ .integer = 0 }),
                 .bool => try self.makeExpr(ty, .{ .bool = false }),
+                .symbol => try self.makeExpr(ty, .{ .integer = 0 }),
                 .vec2,
                 .vec3,
                 .vec4,
@@ -1355,6 +1363,7 @@ fn appendTypeMangle(writer: anytype, ty: types.Type) !void {
             .int => "Int",
             .uint => "UInt",
             .bool => "Bool",
+            .symbol => "Symbol",
             .vec2 => "Vec2",
             .vec3 => "Vec3",
             .vec4 => "Vec4",
@@ -1405,6 +1414,7 @@ fn constructorNameForType(ty: types.Type) ?[]const u8 {
             .int => "int",
             .uint => "uint",
             .bool => "bool",
+            .symbol => "int",
             .vec2 => "vec2",
             .vec3 => "vec3",
             .vec4 => "vec4",
@@ -1441,4 +1451,8 @@ fn constructorNameForType(ty: types.Type) ?[]const u8 {
         } else null,
         else => null,
     };
+}
+
+fn symbolId(name: []const u8) i64 {
+    return @intCast(std.hash.Fnv1a_32.hash(name) & 0x7fff_ffff);
 }

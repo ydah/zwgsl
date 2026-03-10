@@ -6,6 +6,7 @@ pub const Builtin = enum {
     int,
     uint,
     bool,
+    symbol,
     vec2,
     vec3,
     vec4,
@@ -112,6 +113,7 @@ pub const Type = union(enum) {
                 .int => "int",
                 .uint => "uint",
                 .bool => "bool",
+                .symbol => "int",
                 .vec2 => "vec2",
                 .vec3 => "vec3",
                 .vec4 => "vec4",
@@ -148,6 +150,7 @@ pub const Type = union(enum) {
                 .int => "i32",
                 .uint => "u32",
                 .bool => "bool",
+                .symbol => "i32",
                 .vec2 => "vec2f",
                 .vec3 => "vec3f",
                 .vec4 => "vec4f",
@@ -256,7 +259,7 @@ pub const Type = union(enum) {
     pub fn isScalar(self: Type) bool {
         return switch (self) {
             .builtin => |builtin| switch (builtin) {
-                .float, .int, .uint, .bool => true,
+                .float, .int, .uint, .bool, .symbol => true,
                 else => false,
             },
             else => false,
@@ -386,6 +389,7 @@ fn mapName(name: []const u8, title_case: bool) ?Type {
             .{ "Int", builtinType(.int) },
             .{ "UInt", builtinType(.uint) },
             .{ "Bool", builtinType(.bool) },
+            .{ "Symbol", builtinType(.symbol) },
             .{ "Sca", builtinType(.float) },
             .{ "Vec2", builtinType(.vec2) },
             .{ "Vec3", builtinType(.vec3) },
@@ -413,6 +417,7 @@ fn mapName(name: []const u8, title_case: bool) ?Type {
             .{ "int", builtinType(.int) },
             .{ "uint", builtinType(.uint) },
             .{ "bool", builtinType(.bool) },
+            .{ "symbol", builtinType(.symbol) },
             .{ "vec2", builtinType(.vec2) },
             .{ "vec3", builtinType(.vec3) },
             .{ "vec4", builtinType(.vec4) },

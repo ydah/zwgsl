@@ -347,6 +347,30 @@ test "sema warns about non-exhaustive matches" {
     try std.testing.expect(found_warning);
 }
 
+test "sema type-checks symbol literals and symbol match patterns" {
+    var analyzed = try analyzeSource(
+        \\def shade(mode: Symbol) -> Float
+        \\  match mode
+        \\  when :phong
+        \\    1.0
+        \\  when :flat
+        \\    0.5
+        \\  end
+        \\end
+        \\
+        \\def main
+        \\  let mode = :phong
+        \\  shade(mode)
+        \\end
+    );
+    defer analyzed.arena.deinit();
+
+    try std.testing.expectEqual(@as(usize, 0), analyzed.diagnostics.items.items.len);
+    const function = analyzed.program.items[1].function;
+    const let_expr = function.body[0].data.let_binding.value;
+    try std.testing.expect(analyzed.typed.exprType(let_expr).eql(zwgsl.types.builtinType(.symbol)));
+}
+
 test "sema resolves dependent vector dimensions through function calls" {
     var analyzed = try analyzeSource(
         \\def same_dim(a: Vec(N), b: Vec(N)) -> Float

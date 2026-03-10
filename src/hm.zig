@@ -47,6 +47,7 @@ pub const Engine = struct {
             .integer => types.builtinType(.int),
             .float => types.builtinType(.float),
             .bool => types.builtinType(.bool),
+            .symbol => types.builtinType(.symbol),
             .identifier => |name| blk: {
                 const scheme = env.get(name) orelse return error.UnknownIdentifier;
                 break :blk try self.instantiate(scheme);
