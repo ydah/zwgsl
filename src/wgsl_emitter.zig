@@ -28,11 +28,13 @@ const SamplerAlias = struct {
 const EmitFunctionContext = struct {
     definitions: std.StringHashMap(*const mir.Instruction),
     use_counts: std.StringHashMap(usize),
+    local_names: std.StringHashMap(void),
 
     fn init(allocator: std.mem.Allocator) EmitFunctionContext {
         return .{
             .definitions = std.StringHashMap(*const mir.Instruction).init(allocator),
             .use_counts = std.StringHashMap(usize).init(allocator),
+            .local_names = std.StringHashMap(void).init(allocator),
         };
     }
 
@@ -41,7 +43,12 @@ const EmitFunctionContext = struct {
 
         for (function.blocks) |*block| {
             for (block.instructions) |*instruction| {
+                switch (instruction.data) {
+                    .local_alloc => |alloc| try context.local_names.put(alloc.name, {}),
+                    else => {},
+                }
                 if (instruction.result) |result| {
+                    try context.local_names.put(result.name, {});
                     if (isTemporaryValue(result.name)) {
                         try context.definitions.put(result.name, instruction);
                     }
@@ -62,6 +69,7 @@ const EmitFunctionContext = struct {
     fn deinit(self: *EmitFunctionContext) void {
         self.definitions.deinit();
         self.use_counts.deinit();
+        self.local_names.deinit();
     }
 
     fn definition(self: *const EmitFunctionContext, name: []const u8) ?*const mir.Instruction {
@@ -70,6 +78,10 @@ const EmitFunctionContext = struct {
 
     fn useCount(self: *const EmitFunctionContext, name: []const u8) usize {
         return self.use_counts.get(name) orelse 0;
+    }
+
+    fn isLocalName(self: *const EmitFunctionContext, name: []const u8) bool {
+        return self.local_names.contains(name);
     }
 
     fn recordInstructionUses(self: *EmitFunctionContext, instruction: mir.Instruction) !void {
@@ -247,12 +259,26 @@ fn emitStageInterfaceStructs(writer: anytype, module: *const mir.Module, entry_p
 fn emitBindings(writer: anytype, bindings: []const mir.Binding) !void {
     for (bindings) |binding| {
         switch (binding.kind) {
-            .uniform => try writer.print("@group({d}) @binding({d}) var<uniform> {s}: {s};\n", .{
-                binding.group,
-                binding.binding,
-                binding.name,
-                binding.ty.wgslName(),
-            }),
+            .uniform => {
+                if (uniformRequiresWrapper(binding.ty)) {
+                    try writer.print("struct __zwgsl_uniform_{s} {{\n", .{binding.name});
+                    try writer.print("    @align(16) value: {s},\n", .{binding.ty.wgslName()});
+                    try writer.writeAll("};\n");
+                    try writer.print("@group({d}) @binding({d}) var<uniform> {s}: __zwgsl_uniform_{s};\n", .{
+                        binding.group,
+                        binding.binding,
+                        binding.name,
+                        binding.name,
+                    });
+                } else {
+                    try writer.print("@group({d}) @binding({d}) var<uniform> {s}: {s};\n", .{
+                        binding.group,
+                        binding.binding,
+                        binding.name,
+                        binding.ty.wgslName(),
+                    });
+                }
+            },
             .texture => try writer.print("@group({d}) @binding({d}) var {s}_texture: {s};\n", .{
                 binding.group,
                 binding.binding,
@@ -784,6 +810,14 @@ fn emitValueInner(
             if (resolveSamplerName(uniforms, current_params, sampler_aliases, name) != null) return error.UnsupportedSamplerValue;
             if (isInoutParam(current_params, name)) {
                 try writer.print("(*{s})", .{name});
+            } else if (!function_context.isLocalName(name)) {
+                if (findUniform(uniforms, name)) |uniform| {
+                    if (uniformRequiresWrapper(uniform.ty)) {
+                        try writer.print("{s}.value", .{name});
+                        return;
+                    }
+                }
+                try writer.writeAll(name);
             } else {
                 try writer.writeAll(name);
             }
@@ -823,6 +857,14 @@ fn emitPlaceInner(
         .identifier => |name| {
             if (isInoutParam(current_params, name)) {
                 try writer.print("(*{s})", .{name});
+            } else if (!function_context.isLocalName(name)) {
+                if (findUniform(uniforms, name)) |uniform| {
+                    if (uniformRequiresWrapper(uniform.ty)) {
+                        try writer.print("{s}.value", .{name});
+                        return;
+                    }
+                }
+                try writer.writeAll(name);
             } else {
                 try writer.writeAll(name);
             }
@@ -1320,6 +1362,11 @@ fn findUniform(uniforms: []const mir.Global, name: []const u8) ?mir.Global {
         if (std.mem.eql(u8, uniform.name, name)) return uniform;
     }
     return null;
+}
+
+fn uniformRequiresWrapper(ty: types.Type) bool {
+    if (ty.isScalar()) return true;
+    return ty.vectorLen() == 2;
 }
 
 fn findFunction(functions: []const mir.Function, name: []const u8) ?mir.Function {

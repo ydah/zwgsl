@@ -70,6 +70,36 @@ test "compiler emits WGSL for a shared uniform fixture" {
     );
 }
 
+test "compiler wraps scalar and vec2 uniforms for WGSL" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const source =
+        \\uniform :time, Float
+        \\uniform :resolution, Vec2
+        \\
+        \\vertex do
+        \\  input :position, Vec3, location: 0
+        \\  def main
+        \\    gl_Position = vec4(position * time, 1.0)
+        \\  end
+        \\end
+    ;
+
+    const output = try zwgsl.compiler.compile(arena.allocator(), source, .{
+        .target = .wgsl,
+    });
+
+    try std.testing.expectEqual(@as(usize, 0), output.errors.len);
+    try std.testing.expect(output.vertex_source != null);
+    try std.testing.expect(std.mem.indexOf(u8, output.vertex_source.?, "struct __zwgsl_uniform_time") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output.vertex_source.?, "@align(16) value: f32") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output.vertex_source.?, "var<uniform> time: __zwgsl_uniform_time;") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output.vertex_source.?, "struct __zwgsl_uniform_resolution") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output.vertex_source.?, "@align(16) value: vec2f") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output.vertex_source.?, "position * time.value") != null);
+}
+
 test "compiler emits WGSL compute output" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
