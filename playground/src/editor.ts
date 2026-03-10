@@ -1,6 +1,30 @@
 import * as monaco from "monaco-editor";
 import { registerLanguage } from "./language";
 
+type Diagnostic = {
+  message: string;
+  line: number;
+  column: number;
+  severity: number;
+};
+
+type HoverResult = {
+  detail: string;
+  documentation?: string;
+} | null;
+
+type CompletionResult = Array<{
+  label: string;
+  kind: number;
+  detail?: string;
+}>;
+
+type DefinitionResult = {
+  line: number;
+  column: number;
+  length: number;
+} | null;
+
 export const createEditor = async (element: HTMLElement, value: string) => {
   registerLanguage(monaco);
   const worker = new Worker(new URL("./lsp-worker.ts", import.meta.url), { type: "module" });
@@ -37,9 +61,7 @@ export const createEditor = async (element: HTMLElement, value: string) => {
     });
 
   const pushDiagnostics = async () => {
-    const diagnostics = await request<
-      Array<{ message: string; line: number; column: number; severity: number }>
-    >("diagnostics", { source: model.getValue() });
+    const diagnostics = await request<Diagnostic[]>("diagnostics", { source: model.getValue() });
 
     monaco.editor.setModelMarkers(
       model,
@@ -66,7 +88,7 @@ export const createEditor = async (element: HTMLElement, value: string) => {
 
   monaco.languages.registerHoverProvider("zwgsl", {
     async provideHover(activeModel, position) {
-      const result = await request<{ detail: string; documentation?: string } | null>("hover", {
+      const result = await request<HoverResult>("hover", {
         source: activeModel.getValue(),
         line: position.lineNumber - 1,
         character: position.column - 1,
@@ -82,9 +104,9 @@ export const createEditor = async (element: HTMLElement, value: string) => {
   });
 
   monaco.languages.registerCompletionItemProvider("zwgsl", {
-    triggerCharacters: ["."],
+    triggerCharacters: [".", ":"],
     async provideCompletionItems(activeModel, position) {
-      const items = await request<Array<{ label: string; kind: number; detail?: string }>>("completion", {
+      const items = await request<CompletionResult>("completion", {
         source: activeModel.getValue(),
         line: position.lineNumber - 1,
         character: position.column - 1,
@@ -98,6 +120,28 @@ export const createEditor = async (element: HTMLElement, value: string) => {
           insertText: item.label,
           range: undefined,
         })),
+      };
+    },
+  });
+
+  monaco.languages.registerDefinitionProvider("zwgsl", {
+    async provideDefinition(activeModel, position) {
+      const result = await request<DefinitionResult>("definition", {
+        source: activeModel.getValue(),
+        line: position.lineNumber - 1,
+        character: position.column - 1,
+      });
+
+      if (!result) return null;
+
+      return {
+        uri: activeModel.uri,
+        range: new monaco.Range(
+          Math.max(1, result.line + 1),
+          Math.max(1, result.column),
+          Math.max(1, result.line + 1),
+          Math.max(1, result.column + result.length),
+        ),
       };
     },
   });

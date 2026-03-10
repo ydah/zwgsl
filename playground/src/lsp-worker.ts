@@ -2,11 +2,31 @@ import { createCompiler } from "./compiler";
 
 type WorkerRequest = {
   id: number;
-  method: "diagnostics" | "hover" | "completion";
+  method: "diagnostics" | "hover" | "completion" | "definition";
   source: string;
   line?: number;
   character?: number;
 };
+
+type SymbolInfo = {
+  name: string;
+  detail: string;
+  line: number;
+  column: number;
+  kind: number;
+};
+
+type CompletionItem = {
+  label: string;
+  kind: number;
+  detail: string;
+};
+
+type DefinitionResult = {
+  line: number;
+  column: number;
+  length: number;
+} | null;
 
 const compilerPromise = createCompiler();
 
@@ -51,6 +71,14 @@ const methodItems = [
   { label: "clamp", kind: 2, detail: "method" },
 ];
 
+const blockSnippets: CompletionItem[] = [
+  { label: "def", kind: 15, detail: "def name ... end" },
+  { label: "match", kind: 15, detail: "match value ... when ... end" },
+  { label: "trait", kind: 15, detail: "trait Name ... end" },
+  { label: "impl", kind: 15, detail: "impl Trait for Type ... end" },
+  { label: "where", kind: 15, detail: "where clause" },
+];
+
 const swizzles = [
   { label: "x", kind: 5, detail: "swizzle" },
   { label: "y", kind: 5, detail: "swizzle" },
@@ -61,11 +89,22 @@ const swizzles = [
   { label: "rgba", kind: 5, detail: "swizzle" },
 ];
 
-const findDefinitions = (source: string) => {
-  const definitions = [];
+const findDefinitions = (source: string): SymbolInfo[] => {
+  const definitions: SymbolInfo[] = [];
   const lines = source.split(/\r?\n/);
 
   lines.forEach((line, index) => {
+    const typeMatch = line.match(/^\s*(?:type|struct|trait)\s+([A-Z][A-Za-z0-9_]*)/);
+    if (typeMatch) {
+      definitions.push({
+        name: typeMatch[1],
+        detail: line.trim(),
+        line: index,
+        column: line.indexOf(typeMatch[1]) + 1,
+        kind: 7,
+      });
+    }
+
     const functionMatch = line.match(/^\s*def\s+([A-Za-z_]\w*)/);
     if (functionMatch) {
       definitions.push({
@@ -74,6 +113,17 @@ const findDefinitions = (source: string) => {
         line: index,
         column: line.indexOf(functionMatch[1]) + 1,
         kind: 3,
+      });
+    }
+
+    const implMatch = line.match(/^\s*impl\s+([A-Z][A-Za-z0-9_]*)\s+for\s+([A-Z][A-Za-z0-9_]*(?:\([^)]*\))?)/);
+    if (implMatch) {
+      definitions.push({
+        name: `${implMatch[1]}::${implMatch[2]}`,
+        detail: line.trim(),
+        line: index,
+        column: line.indexOf(implMatch[1]) + 1,
+        kind: 8,
       });
     }
 
@@ -120,6 +170,20 @@ const memberCompletion = (source: string, line: number, character: number) => {
   const prefix = text.slice(0, character);
   if (!/\.\w*$/.test(prefix) && !/\.$/.test(prefix)) return null;
   return [...swizzles, ...methodItems];
+};
+
+const findDefinition = (source: string, line: number, character: number): DefinitionResult => {
+  const word = wordAt(source, line, character);
+  if (!word) return null;
+
+  const definition = [...findDefinitions(source)].reverse().find((item) => item.name === word);
+  if (!definition) return null;
+
+  return {
+    line: definition.line,
+    column: definition.column,
+    length: definition.name.length,
+  };
 };
 
 self.addEventListener("message", async (event: MessageEvent<WorkerRequest>) => {
@@ -170,11 +234,17 @@ self.addEventListener("message", async (event: MessageEvent<WorkerRequest>) => {
     const definitions = findDefinitions(source);
     const result = [
       ...definitions.map((item) => ({ label: item.name, kind: item.kind, detail: item.detail })),
+      ...blockSnippets,
       ...[...keywordDocs.entries()].map(([label, info]) => ({ label, kind: 14, detail: info.detail })),
       ...[...builtinDocs.entries()].map(([label, info]) => ({ label, kind: 3, detail: info.detail })),
       ...builtinTypes.map((label) => ({ label, kind: 7, detail: "type" })),
     ];
     self.postMessage({ id, result });
+    return;
+  }
+
+  if (method === "definition") {
+    self.postMessage({ id, result: findDefinition(source, line, character) });
   }
 });
 

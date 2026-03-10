@@ -13,3 +13,5 @@ docgen_tmp/
 *.DS_Store
 *.vscode/
 playground/public/zwgsl.wasm
+playground/dist/
+playground/node_modules/
