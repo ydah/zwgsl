@@ -11,7 +11,7 @@ fn analyzeSource(source: []const u8) !struct {
     errdefer arena.deinit();
 
     const allocator = arena.allocator();
-    const tokens = try zwgsl.lexer.Lexer.tokenize(allocator, source);
+    const tokens = try zwgsl.lexer.Lexer.tokenizeResolved(allocator, source);
     var diagnostic_list = zwgsl.diagnostics.DiagnosticList.init(allocator);
     var parser = zwgsl.parser.Parser.init(allocator, source, tokens, &diagnostic_list);
     const program = try parser.parseProgram();

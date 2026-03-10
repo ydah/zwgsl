@@ -1,4 +1,5 @@
 const std = @import("std");
+const layout = @import("layout.zig");
 const string_pool = @import("string_pool.zig");
 const token = @import("token.zig");
 
@@ -22,10 +23,11 @@ pub const Lexer = struct {
         while (self.pos < self.source.len) {
             const ch = self.source[self.pos];
             switch (ch) {
-                ' ', '\t', '\r' => {
+                ' ', '\r' => {
                     self.advanceChar();
                     continue;
                 },
+                '\t' => return self.lexInvalid(),
                 '\n' => {
                     const start = self.pos;
                     const line = self.line;
@@ -132,6 +134,28 @@ pub const Lexer = struct {
         pool: ?*string_pool.StringPool,
         source: []const u8,
     ) ![]token.Token {
+        return tokenizeRawWithPool(allocator, pool, source);
+    }
+
+    pub fn tokenizeResolved(allocator: std.mem.Allocator, source: []const u8) ![]token.Token {
+        return tokenizeResolvedWithPool(allocator, null, source);
+    }
+
+    pub fn tokenizeResolvedWithPool(
+        allocator: std.mem.Allocator,
+        pool: ?*string_pool.StringPool,
+        source: []const u8,
+    ) ![]token.Token {
+        const raw_tokens = try tokenizeRawWithPool(allocator, pool, source);
+        defer allocator.free(raw_tokens);
+        return try layout.LayoutResolver.tokenize(allocator, raw_tokens);
+    }
+
+    fn tokenizeRawWithPool(
+        allocator: std.mem.Allocator,
+        pool: ?*string_pool.StringPool,
+        source: []const u8,
+    ) ![]token.Token {
         var lexer = Lexer.init(source);
         var items: std.ArrayListUnmanaged(token.Token) = .{};
         defer items.deinit(allocator);
@@ -174,9 +198,7 @@ pub const Lexer = struct {
             .comma,
             .lparen,
             .lbracket,
-            .pipe,
             .arrow,
-            .kw_do,
             => true,
             else => false,
         };

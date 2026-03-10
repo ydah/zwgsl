@@ -5,7 +5,7 @@ test "compiler emits WGSL for a basic vertex and fragment shader" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
 
-    const output = try zwgsl.compiler.compile(arena.allocator(), @embedFile("fixtures/basic_shader.zwgsl"), .{
+    const output = try zwgsl.compiler.compile(arena.allocator(), @embedFile("fixtures/basic_shader.zw"), .{
         .target = .wgsl,
     });
 
@@ -51,7 +51,7 @@ test "compiler lowers sampler uniforms and texture sampling for WGSL" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
 
-    const source = try std.fs.cwd().readFileAlloc(arena.allocator(), "examples/postprocess.zwgsl", 1 << 20);
+    const source = try std.fs.cwd().readFileAlloc(arena.allocator(), "examples/postprocess.zw", 1 << 20);
     const output = try zwgsl.compiler.compile(arena.allocator(), source, .{
         .target = .wgsl,
     });

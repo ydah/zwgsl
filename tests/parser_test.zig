@@ -10,7 +10,7 @@ fn parseProgram(source: []const u8) !struct {
     errdefer arena.deinit();
 
     const allocator = arena.allocator();
-    const tokens = try zwgsl.lexer.Lexer.tokenize(allocator, source);
+    const tokens = try zwgsl.lexer.Lexer.tokenizeResolved(allocator, source);
     var diagnostic_list = zwgsl.diagnostics.DiagnosticList.init(allocator);
     errdefer diagnostic_list.deinit();
 
@@ -36,7 +36,7 @@ fn parseProgramWithPool(source: []const u8) !struct {
     var pool = zwgsl.string_pool.StringPool.init(allocator);
     errdefer pool.deinit();
 
-    const tokens = try zwgsl.lexer.Lexer.tokenizeWithPool(allocator, &pool, source);
+    const tokens = try zwgsl.lexer.Lexer.tokenizeResolvedWithPool(allocator, &pool, source);
     var diagnostic_list = zwgsl.diagnostics.DiagnosticList.init(allocator);
     errdefer diagnostic_list.deinit();
 

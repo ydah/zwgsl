@@ -64,6 +64,9 @@ pub const TokenTag = enum {
     arrow,
     pipe,
     newline,
+    virtual_indent,
+    virtual_dedent,
+    virtual_semi,
 
     comment,
     eof,

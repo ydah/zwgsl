@@ -54,7 +54,7 @@ pub fn compile(allocator: std.mem.Allocator, source: []const u8, options: Option
     var pool = string_pool.StringPool.init(allocator);
     defer pool.deinit();
 
-    const tokens = try lexer.Lexer.tokenizeWithPool(allocator, &pool, source);
+    const tokens = try lexer.Lexer.tokenizeResolvedWithPool(allocator, &pool, source);
     var diagnostic_list = diagnostics.DiagnosticList.init(allocator);
     var syntax_parser = parser.Parser.initWithPool(allocator, &pool, source, tokens, &diagnostic_list);
     const program = try syntax_parser.parseProgram();

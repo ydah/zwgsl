@@ -12,7 +12,7 @@ test "compiler emits expected GLSL for the basic fixture" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
 
-    const output = try zwgsl.compiler.compile(arena.allocator(), @embedFile("fixtures/basic_shader.zwgsl"), .{});
+    const output = try zwgsl.compiler.compile(arena.allocator(), @embedFile("fixtures/basic_shader.zw"), .{});
     try std.testing.expectEqual(@as(usize, 0), output.errors.len);
     try std.testing.expectEqualStrings(@embedFile("fixtures/basic_shader.vertex.glsl"), output.vertex_source.?);
     try std.testing.expectEqualStrings(@embedFile("fixtures/basic_shader.fragment.glsl"), output.fragment_source.?);
@@ -22,7 +22,7 @@ test "compiler lowers helper functions and method chains" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
 
-    const output = try zwgsl.compiler.compile(arena.allocator(), @embedFile("fixtures/method_chain.zwgsl"), .{});
+    const output = try zwgsl.compiler.compile(arena.allocator(), @embedFile("fixtures/method_chain.zw"), .{});
     try std.testing.expectEqual(@as(usize, 0), output.errors.len);
     try std.testing.expectEqualStrings(@embedFile("fixtures/method_chain.vertex.glsl"), output.vertex_source.?);
     try std.testing.expectEqualStrings(@embedFile("fixtures/method_chain.fragment.glsl"), output.fragment_source.?);
@@ -32,7 +32,7 @@ test "compiler emits debug comments with source lines" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
 
-    const output = try zwgsl.compiler.compile(arena.allocator(), @embedFile("fixtures/basic_shader.zwgsl"), .{
+    const output = try zwgsl.compiler.compile(arena.allocator(), @embedFile("fixtures/basic_shader.zw"), .{
         .emit_debug_comments = 1,
     });
     try std.testing.expectEqual(@as(usize, 0), output.errors.len);
@@ -45,8 +45,8 @@ test "compiler optimizes output formatting when requested" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
 
-    const baseline = try zwgsl.compiler.compile(arena.allocator(), @embedFile("fixtures/basic_shader.zwgsl"), .{});
-    const optimized = try zwgsl.compiler.compile(arena.allocator(), @embedFile("fixtures/basic_shader.zwgsl"), .{
+    const baseline = try zwgsl.compiler.compile(arena.allocator(), @embedFile("fixtures/basic_shader.zw"), .{});
+    const optimized = try zwgsl.compiler.compile(arena.allocator(), @embedFile("fixtures/basic_shader.zw"), .{
         .optimize_output = 1,
     });
 

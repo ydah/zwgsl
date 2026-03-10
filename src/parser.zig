@@ -359,7 +359,7 @@ pub const Parser = struct {
 
     fn parseReturnStatement(self: *Parser) anyerror!*ast.Stmt {
         const start = try self.expect(.kw_return, "return");
-        const value: ?*ast.Expr = if (self.check(.newline) or self.currentIsOneOf(&.{ .kw_end, .kw_else, .kw_elsif, .eof }))
+        const value: ?*ast.Expr = if (self.currentStartsBoundary())
             null
         else
             try self.parseExpression(0);
@@ -694,7 +694,9 @@ pub const Parser = struct {
     }
 
     fn consumeNewlines(self: *Parser) void {
-        while (self.match(.newline)) {}
+        while (isSeparatorTag(self.current().tag)) {
+            _ = self.advance();
+        }
     }
 
     fn isAtEnd(self: *Parser) bool {
@@ -723,10 +725,18 @@ pub const Parser = struct {
 
     fn synchronize(self: *Parser) void {
         while (!self.isAtEnd()) {
-            if (self.match(.newline)) return;
+            if (isSeparatorTag(self.current().tag)) {
+                self.consumeNewlines();
+                return;
+            }
             if (self.check(.kw_end) or self.check(.kw_else) or self.check(.kw_elsif)) return;
             _ = self.advance();
         }
+    }
+
+    fn currentStartsBoundary(self: *Parser) bool {
+        return isSeparatorTag(self.current().tag) or
+            self.currentIsOneOf(&.{ .kw_end, .kw_else, .kw_elsif, .eof });
     }
 
     fn intern(self: *Parser, value: []const u8) anyerror![]const u8 {
@@ -757,4 +767,15 @@ fn unquote(value: []const u8) []const u8 {
         return value[1 .. value.len - 1];
     }
     return value;
+}
+
+fn isSeparatorTag(tag: token.TokenTag) bool {
+    return switch (tag) {
+        .newline,
+        .virtual_indent,
+        .virtual_dedent,
+        .virtual_semi,
+        => true,
+        else => false,
+    };
 }

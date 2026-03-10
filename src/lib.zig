@@ -8,6 +8,7 @@ pub const compiler = compiler_api;
 pub const glsl_emitter = @import("glsl_emitter.zig");
 pub const ir = @import("ir.zig");
 pub const ir_builder = @import("ir_builder.zig");
+pub const layout = @import("layout.zig");
 pub const lexer = @import("lexer.zig");
 pub const parser = @import("parser.zig");
 pub const sema = @import("sema.zig");
