@@ -435,6 +435,13 @@ const autoUniform = (name: string): UniformSpec["auto"] => {
 const sliderRange = (name: string, isFloat: boolean) => {
   if (/matrix|transform|projection|view|model|mvp/i.test(name)) return null;
   if (/time|resolution/i.test(name)) return null;
+  if (/metallic|roughness|smoothness|occlusion|ao/i.test(name)) {
+    return {
+      min: 0,
+      max: 1,
+      step: isFloat ? 0.01 : 1,
+    };
+  }
   if (/color|tint|albedo|base/i.test(name)) {
     return {
       min: 0,
@@ -477,6 +484,18 @@ const initialValues = (spec: UniformSpec, canvas: HTMLCanvasElement) => {
 
   if (/light/i.test(spec.name)) {
     return fillValues(spec.length, [0.4, 0.6, 1.2, 1]);
+  }
+
+  if (/metallic/i.test(spec.name)) {
+    return fillValues(spec.length, [0.15, 0.15, 0.15, 0.15]);
+  }
+
+  if (/roughness|smoothness/i.test(spec.name)) {
+    return fillValues(spec.length, [0.35, 0.35, 0.35, 0.35]);
+  }
+
+  if (/occlusion|ao/i.test(spec.name)) {
+    return fillValues(spec.length, [1, 1, 1, 1]);
   }
 
   if (spec.kind === "u32") {
@@ -734,7 +753,7 @@ const previewAttributeValues = (
     return uvs[vertexIndex].slice(0, attribute.componentCount);
   }
   if (name.includes("normal")) {
-    return [0, 0, 1, 0].slice(0, attribute.componentCount);
+    return [0, 1, 0, 0].slice(0, attribute.componentCount);
   }
   if (name.includes("color") || name.includes("colour") || name.includes("tint")) {
     return previewColors[vertexIndex].slice(0, attribute.componentCount);
