@@ -923,6 +923,19 @@ fn emitCallExpr(
         try emitModCall(writer, module, function_context, call, uniforms, current_functions, current_params, sampler_aliases);
         return;
     }
+    if (try emitMatrixConstructorCast(
+        writer,
+        module,
+        function_context,
+        call,
+        result_type,
+        uniforms,
+        current_functions,
+        current_params,
+        sampler_aliases,
+    )) {
+        return;
+    }
 
     try writer.print("{s}(", .{callName(call.name, result_type orelse types.builtinType(.void))});
     for (call.args, 0..) |arg, index| {
@@ -942,6 +955,165 @@ fn emitCallExpr(
         try emitValue(writer, module, function_context, arg, 0, uniforms, current_functions, current_params, sampler_aliases);
     }
     try writer.writeByte(')');
+}
+
+fn emitMatrixConstructorCast(
+    writer: anytype,
+    module: *const mir.Module,
+    function_context: *const EmitFunctionContext,
+    call: mir.Call,
+    result_type: ?types.Type,
+    uniforms: []const mir.Global,
+    current_functions: []const mir.Function,
+    current_params: []const mir.Param,
+    sampler_aliases: []const SamplerAlias,
+) anyerror!bool {
+    if (call.args.len != 1) return false;
+    if (types.fromConstructorName(call.name) == null) return false;
+
+    const target_type = result_type orelse return false;
+    const target_cols = target_type.matrixCols() orelse return false;
+    const target_rows = target_type.matrixRows() orelse return false;
+    const source = call.args[0];
+    const source_cols = source.ty.matrixCols() orelse return false;
+    const source_rows = source.ty.matrixRows() orelse return false;
+
+    if (target_cols == source_cols and target_rows == source_rows) {
+        try emitValue(writer, module, function_context, source, 0, uniforms, current_functions, current_params, sampler_aliases);
+        return true;
+    }
+
+    try writer.print("{s}(", .{target_type.wgslName()});
+    for (0..target_cols) |column_index| {
+        if (column_index > 0) try writer.writeAll(", ");
+        try emitMatrixConstructorColumn(
+            writer,
+            module,
+            function_context,
+            source,
+            @intCast(column_index),
+            target_rows,
+            source_cols,
+            source_rows,
+            uniforms,
+            current_functions,
+            current_params,
+            sampler_aliases,
+        );
+    }
+    try writer.writeByte(')');
+    return true;
+}
+
+fn emitMatrixConstructorColumn(
+    writer: anytype,
+    module: *const mir.Module,
+    function_context: *const EmitFunctionContext,
+    source: *const mir.Value,
+    column_index: u8,
+    target_rows: u8,
+    source_cols: u8,
+    source_rows: u8,
+    uniforms: []const mir.Global,
+    current_functions: []const mir.Function,
+    current_params: []const mir.Param,
+    sampler_aliases: []const SamplerAlias,
+) anyerror!void {
+    if (column_index >= source_cols) {
+        try emitIdentityColumn(writer, target_rows, column_index);
+        return;
+    }
+
+    if (target_rows == source_rows) {
+        try emitMatrixSourceColumn(
+            writer,
+            module,
+            function_context,
+            source,
+            column_index,
+            uniforms,
+            current_functions,
+            current_params,
+            sampler_aliases,
+        );
+        return;
+    }
+
+    if (target_rows < source_rows) {
+        try emitMatrixSourceColumn(
+            writer,
+            module,
+            function_context,
+            source,
+            column_index,
+            uniforms,
+            current_functions,
+            current_params,
+            sampler_aliases,
+        );
+        try writer.print(".{s}", .{vectorSwizzle(target_rows)});
+        return;
+    }
+
+    try writer.print("vec{d}f(", .{target_rows});
+    try emitMatrixSourceColumn(
+        writer,
+        module,
+        function_context,
+        source,
+        column_index,
+        uniforms,
+        current_functions,
+        current_params,
+        sampler_aliases,
+    );
+    for (source_rows..target_rows) |_| {
+        try writer.writeAll(", 0.0");
+    }
+    try writer.writeByte(')');
+}
+
+fn emitMatrixSourceColumn(
+    writer: anytype,
+    module: *const mir.Module,
+    function_context: *const EmitFunctionContext,
+    source: *const mir.Value,
+    column_index: u8,
+    uniforms: []const mir.Global,
+    current_functions: []const mir.Function,
+    current_params: []const mir.Param,
+    sampler_aliases: []const SamplerAlias,
+) anyerror!void {
+    try emitValue(
+        writer,
+        module,
+        function_context,
+        source,
+        fieldPrecedence(),
+        uniforms,
+        current_functions,
+        current_params,
+        sampler_aliases,
+    );
+    try writer.print("[{d}]", .{column_index});
+}
+
+fn emitIdentityColumn(writer: anytype, rows: u8, column_index: u8) anyerror!void {
+    try writer.print("vec{d}f(", .{rows});
+    for (0..rows) |row_index| {
+        if (row_index > 0) try writer.writeAll(", ");
+        try writer.writeAll(if (row_index == column_index) "1.0" else "0.0");
+    }
+    try writer.writeByte(')');
+}
+
+fn vectorSwizzle(len: u8) []const u8 {
+    return switch (len) {
+        2 => "xy",
+        3 => "xyz",
+        4 => "xyzw",
+        else => unreachable,
+    };
 }
 
 fn emitTextureCall(
