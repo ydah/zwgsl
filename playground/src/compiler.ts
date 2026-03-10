@@ -1,3 +1,5 @@
+import wasmUrl from "./generated/zwgsl.wasm?url";
+
 export type CompileResult = {
   wgsl: string;
   vertex: string | null;
@@ -150,8 +152,6 @@ const createLoadedCompiler = async () => {
 };
 
 const loadWasmExports = async (): Promise<WasmExports | null> => {
-  const wasmUrl = `${import.meta.env.BASE_URL}zwgsl.wasm`;
-
   try {
     const response = await fetch(wasmUrl);
     if (!response.ok) return null;
