@@ -2,6 +2,7 @@ const std = @import("std");
 const ast = @import("ast.zig");
 const builtins = @import("builtins.zig");
 const diagnostics = @import("diagnostics.zig");
+const hm = @import("hm.zig");
 const string_pool = @import("string_pool.zig");
 const types = @import("types.zig");
 
@@ -24,6 +25,7 @@ const SymbolInfo = struct {
     ty: types.Type,
     kind: SymbolKind,
     mutable: bool,
+    scheme: ?hm.TypeScheme = null,
 };
 
 const Scope = struct {
@@ -441,12 +443,16 @@ const Analyzer = struct {
             }
         }
 
+        var hm_engine = hm.Engine.init(self.allocator);
+        defer hm_engine.deinit();
+
         var context = FunctionContext{
             .analyzer = self,
             .signature = signature,
             .stage = stage,
             .stage_scope = stage_scope,
             .stage_functions = stage_functions,
+            .hm_engine = &hm_engine,
         };
 
         if (function.where_clause) |where_clause| {
@@ -620,7 +626,8 @@ const Analyzer = struct {
         immutable: bool,
         context: *FunctionContext,
     ) anyerror!void {
-        const value_type = try self.analyzeExpr(scope, binding.value, context);
+        const scheme = try self.inferLetScheme(scope, binding, context);
+        const value_type = scheme.ty;
         const target_type = if (binding.type_name) |type_name| blk: {
             const annotated = try self.resolveTypeName(type_name, binding.position);
             if (!types.isAssignable(annotated, value_type)) {
@@ -633,6 +640,7 @@ const Analyzer = struct {
             .ty = target_type,
             .kind = .local,
             .mutable = !immutable,
+            .scheme = if (binding.type_name == null) scheme else hm.Engine.monomorphic(target_type),
         })) {
             try self.report(binding.position, "redefinition of local '{s}'", .{binding.name});
         }
@@ -712,6 +720,57 @@ const Analyzer = struct {
         try ordered.append(self.allocator, binding);
     }
 
+    fn inferLetScheme(
+        self: *Analyzer,
+        scope: *const Scope,
+        binding: ast.LetBinding,
+        context: *FunctionContext,
+    ) anyerror!hm.TypeScheme {
+        if (binding.value.data != .lambda) {
+            const value_type = try self.analyzeExpr(@constCast(scope), binding.value, context);
+            return hm.Engine.monomorphic(value_type);
+        }
+
+        var env = try self.buildHmEnv(scope);
+        defer env.deinit();
+
+        const inferred = context.hm_engine.inferExpr(&env, binding.value) catch {
+            try self.report(binding.position, "failed to infer let binding '{s}'", .{binding.name});
+            return hm.Engine.monomorphic(types.builtinType(.error_type));
+        };
+        return try context.hm_engine.generalize(&env, inferred);
+    }
+
+    fn buildHmEnv(self: *Analyzer, scope: *const Scope) anyerror!hm.TypeEnv {
+        var env = hm.TypeEnv.init(self.allocator);
+        try self.populateHmEnv(scope, &env);
+        return env;
+    }
+
+    fn populateHmEnv(self: *Analyzer, scope: *const Scope, env: *hm.TypeEnv) anyerror!void {
+        if (scope.parent) |parent| {
+            try self.populateHmEnv(parent, env);
+        }
+
+        var iterator = scope.symbols.iterator();
+        while (iterator.next()) |entry| {
+            try env.put(entry.key_ptr.*, entry.value_ptr.scheme orelse hm.Engine.monomorphic(entry.value_ptr.ty));
+        }
+    }
+
+    fn resolveInferredCall(
+        self: *Analyzer,
+        position: ast.Position,
+        callable: types.Type,
+        arg_types: []const types.Type,
+        context: *FunctionContext,
+    ) anyerror!types.Type {
+        return context.hm_engine.resolveCallable(callable, arg_types) catch {
+            try self.report(position, "call has incompatible argument types", .{});
+            return types.builtinType(.error_type);
+        };
+    }
+
     fn analyzeAssignment(
         self: *Analyzer,
         scope: *Scope,
@@ -787,6 +846,9 @@ const Analyzer = struct {
                     try self.report(expr.position, "use of undeclared symbol '{s}'", .{name});
                     break :blk types.builtinType(.error_type);
                 };
+                if (symbol.scheme) |scheme| {
+                    break :blk context.hm_engine.instantiate(scheme) catch symbol.ty;
+                }
                 break :blk symbol.ty;
             },
             .self_ref => blk: {
@@ -861,6 +923,15 @@ const Analyzer = struct {
 
                 switch (call.callee.data) {
                     .identifier => |name| {
+                        if (scope.get(name)) |symbol| {
+                            const callable = if (symbol.scheme) |scheme|
+                                context.hm_engine.instantiate(scheme) catch symbol.ty
+                            else
+                                symbol.ty;
+                            if (callable == .function) {
+                                break :blk try self.resolveInferredCall(expr.position, callable, arg_types.items, context);
+                            }
+                        }
                         if (builtins.resolve(name, arg_types.items)) |resolution| {
                             break :blk resolution.return_type;
                         }
@@ -882,6 +953,10 @@ const Analyzer = struct {
                         break :blk types.builtinType(.error_type);
                     },
                     else => {
+                        const callee_type = try self.analyzeExpr(scope, call.callee, context);
+                        if (callee_type == .function) {
+                            break :blk try self.resolveInferredCall(expr.position, callee_type, arg_types.items, context);
+                        }
                         try self.report(expr.position, "expression is not callable", .{});
                         break :blk types.builtinType(.error_type);
                     },
@@ -899,6 +974,14 @@ const Analyzer = struct {
                 }
                 try self.report(expr.position, "indexing is only supported on vectors in phase 1", .{});
                 break :blk types.builtinType(.error_type);
+            },
+            .lambda => blk: {
+                var env = try self.buildHmEnv(scope);
+                defer env.deinit();
+                break :blk context.hm_engine.inferExpr(&env, expr) catch {
+                    try self.report(expr.position, "failed to infer lambda type", .{});
+                    break :blk types.builtinType(.error_type);
+                };
             },
         };
 
@@ -951,6 +1034,7 @@ const FunctionContext = struct {
     stage: ?ast.Stage,
     stage_scope: *const Scope,
     stage_functions: []const *ast.FunctionDef,
+    hm_engine: *hm.Engine,
     return_types: std.ArrayListUnmanaged(types.Type) = .{},
 };
 
@@ -991,6 +1075,7 @@ fn collectExprIdentifiers(
             try collectExprIdentifiers(allocator, index_expr.target, names);
             try collectExprIdentifiers(allocator, index_expr.index, names);
         },
+        .lambda => |lambda| try collectExprIdentifiers(allocator, lambda.body, names),
         else => {},
     }
 }

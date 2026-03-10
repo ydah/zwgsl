@@ -28,9 +28,16 @@ pub const Builtin = enum {
     error_type,
 };
 
+pub const Function = struct {
+    params: []const Type,
+    return_type: *const Type,
+};
+
 pub const Type = union(enum) {
     builtin: Builtin,
     struct_type: []const u8,
+    function: Function,
+    type_var: u32,
 
     pub fn eql(a: Type, b: Type) bool {
         return switch (a) {
@@ -40,6 +47,20 @@ pub const Type = union(enum) {
             },
             .struct_type => |left| switch (b) {
                 .struct_type => |right| std.mem.eql(u8, left, right),
+                else => false,
+            },
+            .function => |left| switch (b) {
+                .function => |right| blk: {
+                    if (left.params.len != right.params.len) break :blk false;
+                    for (left.params, right.params) |lhs_param, rhs_param| {
+                        if (!lhs_param.eql(rhs_param)) break :blk false;
+                    }
+                    break :blk left.return_type.*.eql(right.return_type.*);
+                },
+                else => false,
+            },
+            .type_var => |left| switch (b) {
+                .type_var => |right| left == right,
                 else => false,
             },
         };
@@ -89,6 +110,8 @@ pub const Type = union(enum) {
                 .error_type => "__error__",
             },
             .struct_type => |name| name,
+            .function => "__fn__",
+            .type_var => "__tvar__",
         };
     }
 
@@ -121,6 +144,8 @@ pub const Type = union(enum) {
                 .error_type => "__error__",
             },
             .struct_type => |name| name,
+            .function => "__fn__",
+            .type_var => "__tvar__",
         };
     }
 
@@ -173,6 +198,10 @@ pub const Type = union(enum) {
             },
             else => false,
         };
+    }
+
+    pub fn isFunction(self: Type) bool {
+        return self == .function;
     }
 
     pub fn isVector(self: Type) bool {
@@ -231,6 +260,10 @@ pub const Type = union(enum) {
 
 pub fn builtinType(value: Builtin) Type {
     return .{ .builtin = value };
+}
+
+pub fn typeVar(id: u32) Type {
+    return .{ .type_var = id };
 }
 
 pub fn fromName(name: []const u8) ?Type {

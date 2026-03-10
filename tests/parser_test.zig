@@ -226,6 +226,21 @@ test "parser handles where clauses" {
     try std.testing.expectEqualStrings("ambient", function.where_clause.?.bindings[1].name);
 }
 
+test "parser handles lambda expressions" {
+    var parsed = try parseProgram(
+        \\def main
+        \\  let id = |x| x
+        \\end
+    );
+    defer parsed.arena.deinit();
+
+    const stmt = parsed.program.items[0].function.body[0];
+    try std.testing.expectEqual(.let_binding, std.meta.activeTag(stmt.data));
+    try std.testing.expectEqual(.lambda, std.meta.activeTag(stmt.data.let_binding.value.data));
+    try std.testing.expectEqual(@as(usize, 1), stmt.data.let_binding.value.data.lambda.params.len);
+    try std.testing.expectEqualStrings("x", stmt.data.let_binding.value.data.lambda.params[0]);
+}
+
 test "parser reuses interned identifier slices with a shared string pool" {
     var parsed = try parseProgramWithPool(
         \\def main(value: Float) -> Float

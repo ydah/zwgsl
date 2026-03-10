@@ -604,11 +604,34 @@ pub const Parser = struct {
                 _ = try self.expect(.rparen, "')' after expression");
                 return expr;
             },
+            .pipe => return try self.parseLambda(),
             else => {
                 try self.reportUnexpected(tok, "expression");
                 return error.ParseFailed;
             },
         }
+    }
+
+    fn parseLambda(self: *Parser) anyerror!*ast.Expr {
+        const start = try self.expect(.pipe, "'|' to start lambda");
+        var params: std.ArrayListUnmanaged([]const u8) = .{};
+        defer params.deinit(self.allocator);
+
+        if (!self.check(.pipe)) {
+            while (true) {
+                try params.append(self.allocator, try self.expectIdentifier("lambda parameter"));
+                if (!self.match(.comma)) break;
+            }
+        }
+
+        _ = try self.expect(.pipe, "'|' to end lambda parameters");
+        const body = try self.parseExpression(0);
+        return try self.makeExpr(positionOf(start), .{
+            .lambda = .{
+                .params = try params.toOwnedSlice(self.allocator),
+                .body = body,
+            },
+        });
     }
 
     fn finishCall(self: *Parser, callee: *ast.Expr) anyerror!*ast.Expr {

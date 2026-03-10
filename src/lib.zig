@@ -6,6 +6,7 @@ pub const diagnostics = @import("diagnostics.zig");
 pub const builtins = @import("builtins.zig");
 pub const compiler = compiler_api;
 pub const glsl_emitter = @import("glsl_emitter.zig");
+pub const hm = @import("hm.zig");
 pub const ir = @import("ir.zig");
 pub const ir_builder = @import("ir_builder.zig");
 pub const layout = @import("layout.zig");
@@ -15,6 +16,7 @@ pub const sema = @import("sema.zig");
 pub const string_pool = @import("string_pool.zig");
 pub const token = @import("token.zig");
 pub const types = @import("types.zig");
+pub const unify = @import("unify.zig");
 pub const wgsl_emitter = @import("wgsl_emitter.zig");
 
 pub const ZwgslTarget = compiler_api.Target;

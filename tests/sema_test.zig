@@ -227,3 +227,28 @@ test "sema reports circular where dependencies" {
     }
     try std.testing.expect(found_cycle);
 }
+
+test "sema infers polymorphic let identity functions" {
+    var analyzed = try analyzeSource(
+        \\def main
+        \\  let id = |x| x
+        \\  a = id(1)
+        \\  b = id(vec3(1.0))
+        \\end
+    );
+    defer analyzed.arena.deinit();
+
+    try std.testing.expectEqual(@as(usize, 0), analyzed.diagnostics.items.items.len);
+}
+
+test "sema infers lambda numeric arguments from use sites" {
+    var analyzed = try analyzeSource(
+        \\def main
+        \\  let increment = |x| x + 1
+        \\  value = increment(2)
+        \\end
+    );
+    defer analyzed.arena.deinit();
+
+    try std.testing.expectEqual(@as(usize, 0), analyzed.diagnostics.items.items.len);
+}

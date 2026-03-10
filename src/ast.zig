@@ -178,6 +178,7 @@ pub const Expr = struct {
         member: Member,
         call: Call,
         index: Index,
+        lambda: Lambda,
     };
 
     pub const Unary = struct {
@@ -204,5 +205,10 @@ pub const Expr = struct {
     pub const Index = struct {
         target: *Expr,
         index: *Expr,
+    };
+
+    pub const Lambda = struct {
+        params: []const []const u8,
+        body: *Expr,
     };
 };
