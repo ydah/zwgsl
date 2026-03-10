@@ -125,3 +125,41 @@ test "compiler lowers where bindings before function bodies" {
     try std.testing.expect(light_dir_index < diffuse_index);
     try std.testing.expect(diffuse_index < return_index);
 }
+
+test "compiler lowers ADT matches to switch statements in GLSL" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const source =
+        \\type Shape
+        \\  Circle(radius: Float)
+        \\  Rect(width: Float, height: Float)
+        \\  Point
+        \\end
+        \\
+        \\def area(shape: Shape) -> Float
+        \\  match shape
+        \\  when Circle(radius)
+        \\    3.14159 * radius * radius
+        \\  when Rect(width, height)
+        \\    width * height
+        \\  when Point
+        \\    0.0
+        \\  end
+        \\end
+        \\
+        \\fragment do
+        \\  output :frag_color, Vec4, location: 0
+        \\  def main
+        \\    frag_color = vec4(area(Circle(2.0)))
+        \\  end
+        \\end
+    ;
+
+    const output = try zwgsl.compiler.compile(arena.allocator(), source, .{});
+    try std.testing.expectEqual(@as(usize, 0), output.errors.len);
+    try std.testing.expect(output.fragment_source != null);
+    try std.testing.expect(std.mem.indexOf(u8, output.fragment_source.?, "switch (__match_value.tag)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output.fragment_source.?, "case 0:") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output.fragment_source.?, "case 1:") != null);
+}

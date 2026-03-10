@@ -81,6 +81,7 @@ pub const Statement = struct {
         assign: Assign,
         expr: *Expr,
         if_stmt: IfStmt,
+        switch_stmt: SwitchStmt,
         return_stmt: ?*Expr,
         discard: void,
     };
@@ -103,6 +104,17 @@ pub const IfStmt = struct {
     condition: *Expr,
     then_body: []const Statement,
     else_body: []const Statement,
+};
+
+pub const SwitchCase = struct {
+    value: i64,
+    body: []const Statement,
+};
+
+pub const SwitchStmt = struct {
+    selector: *Expr,
+    cases: []const SwitchCase,
+    default_body: []const Statement,
 };
 
 pub const Expr = struct {

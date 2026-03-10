@@ -138,10 +138,28 @@ const Builder = struct {
                         .else_body = try self.cloneStatements(if_stmt.else_body),
                     },
                 },
+                .switch_stmt => |switch_stmt| .{
+                    .switch_stmt = .{
+                        .selector = try self.cloneExpr(switch_stmt.selector),
+                        .cases = try self.cloneSwitchCases(switch_stmt.cases),
+                        .default_body = try self.cloneStatements(switch_stmt.default_body),
+                    },
+                },
                 .return_stmt => |expr| .{ .return_stmt = if (expr) |value| try self.cloneExpr(value) else null },
                 .discard => .{ .discard = {} },
             },
         };
+    }
+
+    fn cloneSwitchCases(self: *Builder, cases: []const ir.SwitchCase) ![]const hir.SwitchCase {
+        const cloned = try self.allocator.alloc(hir.SwitchCase, cases.len);
+        for (cases, 0..) |case_stmt, index| {
+            cloned[index] = .{
+                .value = case_stmt.value,
+                .body = try self.cloneStatements(case_stmt.body),
+            };
+        }
+        return cloned;
     }
 
     fn cloneExpr(self: *Builder, expr: *const ir.Expr) anyerror!*hir.Expr {

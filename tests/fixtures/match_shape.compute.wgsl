@@ -33,17 +33,30 @@ fn Point() -> Shape {
 }
 
 fn __match_0(__match_value: Shape) -> f32 {
-    if (__match_value.tag == 0 && true) {
-        return 3.14159 * __match_value.__Circle_radius * __match_value.__Circle_radius;
-    } else {
-        if (__match_value.tag == 1 && true && true) {
-            return __match_value.__Rect_width * __match_value.__Rect_height;
-        } else {
+    switch (__match_value.tag) {
+        case 0: {
+            if (__match_value.tag == 0 && true) {
+                return 3.14159 * __match_value.__Circle_radius * __match_value.__Circle_radius;
+            } else {
+                return 0.0;
+            }
+        }
+        case 1: {
+            if (__match_value.tag == 1 && true && true) {
+                return __match_value.__Rect_width * __match_value.__Rect_height;
+            } else {
+                return 0.0;
+            }
+        }
+        case 2: {
             if (__match_value.tag == 2) {
                 return 0.0;
             } else {
                 return 0.0;
             }
+        }
+        default: {
+            return 0.0;
         }
     }
     return 0.0;

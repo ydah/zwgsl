@@ -720,8 +720,12 @@ const Builder = struct {
         var body = std.ArrayListUnmanaged(ir.Statement){};
         defer body.deinit(self.allocator);
 
-        const helper_if = try self.lowerMatchArms(match_expr.arms, 0, value_type, result_type, &helper_context);
-        try body.append(self.allocator, helper_if);
+        if (try self.lowerMatchSwitch(match_expr.arms, value_type, result_type, &helper_context)) |helper_switch| {
+            try body.append(self.allocator, helper_switch);
+        } else {
+            const helper_if = try self.lowerMatchArms(match_expr.arms, 0, value_type, result_type, &helper_context);
+            try body.append(self.allocator, helper_if);
+        }
         if (!result_type.isVoid()) {
             try body.append(self.allocator, self.makeStatement(expr.position.line, .{
                 .return_stmt = try self.defaultValueExpr(result_type),
@@ -749,6 +753,44 @@ const Builder = struct {
             .call = .{
                 .name = helper_name,
                 .args = args,
+            },
+        });
+    }
+
+    fn lowerMatchSwitch(
+        self: *Builder,
+        arms: []const ast.MatchArm,
+        value_type: types.Type,
+        result_type: types.Type,
+        context: *FunctionContext,
+    ) anyerror!?ir.Statement {
+        const type_info = self.typeInfoFor(value_type) orelse return null;
+
+        for (arms) |arm| {
+            if (!self.patternCanUseSwitch(arm.pattern, type_info.name)) return null;
+        }
+
+        const selector = try self.makeExpr(types.builtinType(.int), .{
+            .field = .{
+                .target = try self.makeExpr(value_type, .{ .identifier = "__match_value" }),
+                .name = "tag",
+            },
+        });
+
+        var cases = std.ArrayListUnmanaged(ir.SwitchCase){};
+        defer cases.deinit(self.allocator);
+        for (type_info.variants) |variant| {
+            try cases.append(self.allocator, .{
+                .value = @intCast(variant.tag),
+                .body = try self.lowerMatchCaseBody(arms, type_info.name, variant.tag, value_type, result_type, context),
+            });
+        }
+
+        return self.makeStatement(null, .{
+            .switch_stmt = .{
+                .selector = selector,
+                .cases = try cases.toOwnedSlice(self.allocator),
+                .default_body = try self.matchDefaultBody(result_type),
             },
         });
     }
@@ -805,6 +847,63 @@ const Builder = struct {
                 .else_body = else_body,
             },
         });
+    }
+
+    fn lowerMatchCaseBody(
+        self: *Builder,
+        arms: []const ast.MatchArm,
+        parent_name: []const u8,
+        tag: u32,
+        value_type: types.Type,
+        result_type: types.Type,
+        context: *FunctionContext,
+    ) anyerror![]const ir.Statement {
+        var filtered = std.ArrayListUnmanaged(ast.MatchArm){};
+        defer filtered.deinit(self.allocator);
+        for (arms) |arm| {
+            if (self.patternMatchesTag(arm.pattern, parent_name, tag)) {
+                try filtered.append(self.allocator, arm);
+            }
+        }
+
+        if (filtered.items.len == 0) return try self.matchDefaultBody(result_type);
+
+        const statement = try self.lowerMatchArms(filtered.items, 0, value_type, result_type, context);
+        const body = try self.allocator.alloc(ir.Statement, 1);
+        body[0] = statement;
+        return body;
+    }
+
+    fn matchDefaultBody(self: *Builder, result_type: types.Type) anyerror![]const ir.Statement {
+        if (result_type.isVoid()) return &.{};
+
+        const body = try self.allocator.alloc(ir.Statement, 1);
+        body[0] = self.makeStatement(null, .{
+            .return_stmt = try self.defaultValueExpr(result_type),
+        });
+        return body;
+    }
+
+    fn patternCanUseSwitch(self: *Builder, pattern: ast.Pattern, parent_name: []const u8) bool {
+        return switch (pattern) {
+            .wildcard, .binding => true,
+            .constructor => |constructor| blk: {
+                const info = self.typed.constructor(constructor.name) orelse break :blk false;
+                break :blk std.mem.eql(u8, info.parent_name, parent_name);
+            },
+            else => false,
+        };
+    }
+
+    fn patternMatchesTag(self: *Builder, pattern: ast.Pattern, parent_name: []const u8, tag: u32) bool {
+        return switch (pattern) {
+            .wildcard, .binding => true,
+            .constructor => |constructor| blk: {
+                const info = self.typed.constructor(constructor.name) orelse break :blk false;
+                break :blk std.mem.eql(u8, info.parent_name, parent_name) and info.tag == tag;
+            },
+            else => false,
+        };
     }
 
     fn finalizeImplicitReturn(
@@ -1117,6 +1216,14 @@ const Builder = struct {
             return try std.fmt.allocPrint(self.allocator, "__{s}_{s}", .{ variant_name, field_name });
         }
         return try std.fmt.allocPrint(self.allocator, "__{s}_{d}", .{ variant_name, index });
+    }
+
+    fn typeInfoFor(self: *Builder, ty: types.Type) ?sema.TypeDefInfo {
+        return switch (ty) {
+            .struct_type => |name| self.typed.typeDef(name),
+            .type_app => |app_ty| self.typed.typeDef(app_ty.name),
+            else => null,
+        };
     }
 
     fn findPrecision(self: *Builder, stage: ast.Stage) ?[]const u8 {

@@ -312,6 +312,25 @@ fn emitStatements(writer: anytype, statements: []const mir.Statement, indent: us
                 }
                 try writer.writeByte('\n');
             },
+            .switch_stmt => |switch_stmt| {
+                try writer.writeAll("switch (");
+                try emitExpr(writer, switch_stmt.selector, 0, uniforms);
+                try writer.writeAll(") {\n");
+                for (switch_stmt.cases) |case_stmt| {
+                    try writeIndent(writer, indent + 1);
+                    try writer.print("case {d}: {{\n", .{case_stmt.value});
+                    try emitStatements(writer, case_stmt.body, indent + 2, options, uniforms);
+                    try writeIndent(writer, indent + 1);
+                    try writer.writeAll("}\n");
+                }
+                try writeIndent(writer, indent + 1);
+                try writer.writeAll("default: {\n");
+                try emitStatements(writer, switch_stmt.default_body, indent + 2, options, uniforms);
+                try writeIndent(writer, indent + 1);
+                try writer.writeAll("}\n");
+                try writeIndent(writer, indent);
+                try writer.writeAll("}\n");
+            },
         }
     }
 }

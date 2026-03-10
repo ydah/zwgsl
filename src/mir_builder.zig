@@ -171,10 +171,28 @@ const Builder = struct {
                         .else_body = try self.lowerStatements(if_stmt.else_body),
                     },
                 },
+                .switch_stmt => |switch_stmt| .{
+                    .switch_stmt = .{
+                        .selector = try self.lowerExpr(switch_stmt.selector),
+                        .cases = try self.lowerSwitchCases(switch_stmt.cases),
+                        .default_body = try self.lowerStatements(switch_stmt.default_body),
+                    },
+                },
                 .return_stmt => |expr| .{ .return_stmt = if (expr) |value| try self.lowerExpr(value) else null },
                 .discard => .{ .discard = {} },
             },
         };
+    }
+
+    fn lowerSwitchCases(self: *Builder, cases: []const hir.SwitchCase) ![]const mir.SwitchCase {
+        const lowered = try self.allocator.alloc(mir.SwitchCase, cases.len);
+        for (cases, 0..) |case_stmt, index| {
+            lowered[index] = .{
+                .value = case_stmt.value,
+                .body = try self.lowerStatements(case_stmt.body),
+            };
+        }
+        return lowered;
     }
 
     fn lowerExpr(self: *Builder, expr: *const hir.Expr) anyerror!*mir.Expr {

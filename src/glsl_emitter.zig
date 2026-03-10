@@ -156,8 +156,55 @@ fn emitStatements(writer: anytype, statements: []const ir.Statement, indent: usi
                 }
                 try writer.writeByte('\n');
             },
+            .switch_stmt => |switch_stmt| {
+                try writer.writeAll("switch (");
+                try emitExpr(writer, switch_stmt.selector, 0);
+                try writer.writeAll(") {\n");
+                for (switch_stmt.cases) |case_stmt| {
+                    try writeIndent(writer, indent + 1);
+                    try writer.print("case {d}: {{\n", .{case_stmt.value});
+                    try emitStatements(writer, case_stmt.body, indent + 2, options);
+                    if (!bodyTerminates(case_stmt.body)) {
+                        try writeIndent(writer, indent + 2);
+                        try writer.writeAll("break;\n");
+                    }
+                    try writeIndent(writer, indent + 1);
+                    try writer.writeAll("}\n");
+                }
+                try writeIndent(writer, indent + 1);
+                try writer.writeAll("default: {\n");
+                try emitStatements(writer, switch_stmt.default_body, indent + 2, options);
+                if (!bodyTerminates(switch_stmt.default_body)) {
+                    try writeIndent(writer, indent + 2);
+                    try writer.writeAll("break;\n");
+                }
+                try writeIndent(writer, indent + 1);
+                try writer.writeAll("}\n");
+                try writeIndent(writer, indent);
+                try writer.writeAll("}\n");
+            },
         }
     }
+}
+
+fn bodyTerminates(statements: []const ir.Statement) bool {
+    if (statements.len == 0) return false;
+    return statementTerminates(statements[statements.len - 1]);
+}
+
+fn statementTerminates(statement: ir.Statement) bool {
+    return switch (statement.data) {
+        .return_stmt, .discard => true,
+        .if_stmt => |if_stmt| bodyTerminates(if_stmt.then_body) and bodyTerminates(if_stmt.else_body),
+        .switch_stmt => |switch_stmt| blk: {
+            if (!bodyTerminates(switch_stmt.default_body)) break :blk false;
+            for (switch_stmt.cases) |case_stmt| {
+                if (!bodyTerminates(case_stmt.body)) break :blk false;
+            }
+            break :blk switch_stmt.cases.len > 0;
+        },
+        else => false,
+    };
 }
 
 fn emitExpr(writer: anytype, expr: *const ir.Expr, parent_precedence: u8) anyerror!void {
