@@ -336,26 +336,24 @@ Current capabilities:
 
 ## Architecture
 
-```text
-Source (.zw)
-  │
-  ▼
-Lexer -> Layout Resolver -> Parser -> AST
-                                    │
-                                    ▼
-                            HM Inference + Sema
-                                    │
-                                    ▼
-                                Typed AST
-                               /        \
-                              /          \
-                           HIR            IR
-                            │             │
-                            ▼             ▼
-                           MIR       GLSL Emitter
-                            │             │
-                            ▼             ▼
-                      WGSL Emitter      GLSL ES 3.0
+```mermaid
+flowchart TD
+    Source["Source (.zw)"] --> Lexer
+    Lexer --> LayoutResolver["Layout Resolver"]
+    LayoutResolver --> Parser
+    Parser --> AST
+
+    AST --> HM["HM Inference + Sema"]
+    HM --> TypedAST["Typed AST"]
+
+    TypedAST --> HIR
+    TypedAST --> IR
+
+    HIR --> MIR
+    MIR --> WGSLEmitter["WGSL Emitter"]
+
+    IR --> GLSLEmitter["GLSL Emitter"]
+    GLSLEmitter --> GLSL["GLSL ES 3.0"]
 ```
 
 ## Project Status
