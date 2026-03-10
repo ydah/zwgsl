@@ -651,3 +651,43 @@ test "HIR and MIR preserve entry points and CFG structure" {
     }
     try std.testing.expect(saw_if_term);
 }
+
+test "HIR builder unrolls vector loops directly from typed AST" {
+    var analyzed = try analyzeSource(
+        \\vertex do
+        \\  input :position, Vec3, location: 0
+        \\  varying :v_sum, Float
+        \\  def main
+        \\    total: Float = 0.0
+        \\    position.each do |component|
+        \\      total += component
+        \\    end
+        \\    self.v_sum = total
+        \\    gl_Position = vec4(position, 1.0)
+        \\  end
+        \\end
+        \\
+        \\fragment do
+        \\  varying :v_sum, Float
+        \\  output :frag_color, Vec4, location: 0
+        \\  def main
+        \\    frag_color = vec4(v_sum)
+        \\  end
+        \\end
+    );
+    defer analyzed.arena.deinit();
+
+    try std.testing.expectEqual(@as(usize, 0), analyzed.diagnostics.items.items.len);
+
+    const hir_module = try zwgsl.hir_builder.build(analyzed.arena.allocator(), analyzed.typed);
+    const vertex_entry = hir_module.entryPoint(.vertex).?;
+    const function = vertex_entry.mainFunction();
+
+    try std.testing.expectEqual(@as(usize, 6), function.body.len);
+    try std.testing.expectEqual(.var_decl, std.meta.activeTag(function.body[0].data));
+    try std.testing.expectEqual(.assign, std.meta.activeTag(function.body[1].data));
+    try std.testing.expectEqual(.assign, std.meta.activeTag(function.body[2].data));
+    try std.testing.expectEqual(.assign, std.meta.activeTag(function.body[3].data));
+    try std.testing.expectEqual(.assign, std.meta.activeTag(function.body[4].data));
+    try std.testing.expectEqual(.assign, std.meta.activeTag(function.body[5].data));
+}
