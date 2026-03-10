@@ -59,7 +59,6 @@ fn __match_0(__match_value: Shape) -> f32 {
             return 0.0;
         }
     }
-    return 0.0;
 }
 
 fn area(shape: Shape) -> f32 {
@@ -67,7 +66,7 @@ fn area(shape: Shape) -> f32 {
 }
 
 fn __zwgsl_compute_main() {
-    var value: f32 = area(Circle(2.0));
+    let value: f32 = area(Circle(2.0));
 }
 
 @compute @workgroup_size(1)

@@ -74,6 +74,11 @@ const EmitFunctionContext = struct {
 
     fn recordInstructionUses(self: *EmitFunctionContext, instruction: mir.Instruction) !void {
         switch (instruction.data) {
+            .phi => |phi| {
+                for (phi.incomings) |incoming| {
+                    try self.recordValueUse(incoming.value);
+                }
+            },
             .local_alloc => |alloc| {
                 if (alloc.init) |value| try self.recordValueUse(value);
             },
@@ -169,11 +174,13 @@ fn emitStage(allocator: std.mem.Allocator, module: *const mir.Module, entry_poin
     }
 
     for (module.global_functions) |function| {
+        if (isInlineTraitFunction(function)) continue;
         try emitFunction(writer, allocator, module, function, options, null, false, module.uniforms, module.global_functions);
         try writer.writeByte('\n');
     }
 
     for (entry_point.functions, 0..) |function, index| {
+        if (isInlineTraitFunction(function)) continue;
         try emitFunction(
             writer,
             allocator,
@@ -422,6 +429,53 @@ fn emitEntryPoint(writer: anytype, module: *const mir.Module, entry_point: mir.E
     }
 }
 
+fn emitPhiDeclarations(
+    writer: anytype,
+    function: mir.Function,
+    merge_label: []const u8,
+    indent: usize,
+) !void {
+    const merge_block = findBlock(function.blocks, merge_label) orelse return error.InvalidBlockGraph;
+    for (phiInstructions(merge_block)) |instruction| {
+        const result = instruction.result orelse return error.InvalidMirInstruction;
+        try writeIndent(writer, indent);
+        try writer.print("var {s}: {s};\n", .{ result.name, result.ty.wgslName() });
+    }
+}
+
+fn emitPhiAssignments(
+    writer: anytype,
+    module: *const mir.Module,
+    function_context: *const EmitFunctionContext,
+    function: mir.Function,
+    predecessor_label: []const u8,
+    merge_label: []const u8,
+    indent: usize,
+    options: EmitOptions,
+    uniforms: []const mir.Global,
+    current_functions: []const mir.Function,
+    current_params: []const mir.Param,
+    sampler_aliases: []const SamplerAlias,
+) anyerror!void {
+    const merge_block = findBlock(function.blocks, merge_label) orelse return;
+    for (phiInstructions(merge_block)) |instruction| {
+        const result = instruction.result orelse return error.InvalidMirInstruction;
+        const phi = switch (instruction.data) {
+            .phi => |phi| phi,
+            else => continue,
+        };
+        for (phi.incomings) |incoming| {
+            if (!std.mem.eql(u8, incoming.label, predecessor_label)) continue;
+            try emitDebugComment(writer, options, instruction.source_line, indent);
+            try writeIndent(writer, indent);
+            try writer.print("{s} = ", .{result.name});
+            try emitValue(writer, module, function_context, incoming.value, 0, uniforms, current_functions, current_params, sampler_aliases);
+            try writer.writeAll(";\n");
+            break;
+        }
+    }
+}
+
 fn emitBlockRegion(
     writer: anytype,
     allocator: std.mem.Allocator,
@@ -445,12 +499,29 @@ fn emitBlockRegion(
 
         const block = findBlock(function.blocks, label) orelse return error.InvalidBlockGraph;
         for (block.instructions) |instruction| {
+            if (instruction.data == .phi) continue;
             try emitInstruction(writer, allocator, module, instruction, function_context, indent, options, uniforms, current_functions, current_params, sampler_aliases);
         }
 
         switch (block.terminator) {
             .none => return,
-            .jump => |target| current = target,
+            .jump => |target| {
+                try emitPhiAssignments(
+                    writer,
+                    module,
+                    function_context,
+                    function,
+                    label,
+                    target,
+                    indent,
+                    options,
+                    uniforms,
+                    current_functions,
+                    current_params,
+                    sampler_aliases.items,
+                );
+                current = target;
+            },
             .return_stmt => |value| {
                 try emitDebugComment(writer, options, block.source_line, indent);
                 try writeIndent(writer, indent);
@@ -470,6 +541,7 @@ fn emitBlockRegion(
                 return;
             },
             .if_term => |if_term| {
+                try emitPhiDeclarations(writer, function, if_term.merge_block, indent);
                 try emitDebugComment(writer, options, block.source_line, indent);
                 try writeIndent(writer, indent);
                 try writer.writeAll("if (");
@@ -487,6 +559,7 @@ fn emitBlockRegion(
                 current = if_term.merge_block;
             },
             .switch_term => |switch_term| {
+                try emitPhiDeclarations(writer, function, switch_term.merge_block, indent);
                 try emitDebugComment(writer, options, block.source_line, indent);
                 try writeIndent(writer, indent);
                 try writer.writeAll("switch (");
@@ -530,6 +603,7 @@ fn emitInstruction(
     sampler_aliases: *std.ArrayListUnmanaged(SamplerAlias),
 ) anyerror!void {
     switch (instruction.data) {
+        .phi => {},
         .local_alloc => |alloc| {
             if (alloc.ty.isSampler()) return error.UnsupportedSamplerValue;
             try emitDebugComment(writer, options, instruction.source_line, indent);
@@ -777,6 +851,24 @@ fn emitCallExpr(
     current_params: []const mir.Param,
     sampler_aliases: []const SamplerAlias,
 ) anyerror!void {
+    const callee = findFunction(current_functions, call.name) orelse findFunction(module.global_functions, call.name);
+    if (callee) |function| {
+        if (isInlineTraitFunction(function)) {
+            try emitInlineTraitCall(
+                writer,
+                module,
+                function_context,
+                function,
+                call.args,
+                uniforms,
+                current_functions,
+                current_params,
+                sampler_aliases,
+            );
+            return;
+        }
+    }
+
     if (std.mem.eql(u8, call.name, "texture")) {
         try emitTextureCall(writer, module, function_context, call, uniforms, current_functions, current_params, sampler_aliases);
         return;
@@ -787,7 +879,6 @@ fn emitCallExpr(
     }
 
     try writer.print("{s}(", .{callName(call.name, result_type orelse types.builtinType(.void))});
-    const callee = findFunction(current_functions, call.name) orelse findFunction(module.global_functions, call.name);
     for (call.args, 0..) |arg, index| {
         if (callee) |function| {
             if (index < function.params.len and function.params[index].ty.isSampler()) {
@@ -841,6 +932,147 @@ fn emitModCall(
     try emitValue(writer, module, function_context, call.args[1], binaryPrecedence(.percent) + 1, uniforms, current_functions, current_params, sampler_aliases);
 }
 
+fn emitInlineTraitCall(
+    writer: anytype,
+    module: *const mir.Module,
+    function_context: *const EmitFunctionContext,
+    callee: mir.Function,
+    args: []const *mir.Value,
+    uniforms: []const mir.Global,
+    current_functions: []const mir.Function,
+    current_params: []const mir.Param,
+    sampler_aliases: []const SamplerAlias,
+) anyerror!void {
+    const block = if (callee.blocks.len == 1) callee.blocks[0] else return error.InvalidMirInstruction;
+    const returned = switch (block.terminator) {
+        .return_stmt => |value| value orelse return error.InvalidMirInstruction,
+        else => return error.InvalidMirInstruction,
+    };
+
+    try emitInlineTraitValue(
+        writer,
+        module,
+        function_context,
+        callee,
+        args,
+        returned,
+        0,
+        uniforms,
+        current_functions,
+        current_params,
+        sampler_aliases,
+    );
+}
+
+fn emitInlineTraitValue(
+    writer: anytype,
+    module: *const mir.Module,
+    function_context: *const EmitFunctionContext,
+    callee: mir.Function,
+    args: []const *mir.Value,
+    value: *const mir.Value,
+    parent_precedence: u8,
+    uniforms: []const mir.Global,
+    current_functions: []const mir.Function,
+    current_params: []const mir.Param,
+    sampler_aliases: []const SamplerAlias,
+) anyerror!void {
+    switch (value.data) {
+        .integer, .float, .bool => {
+            try emitValue(writer, module, function_context, value, parent_precedence, uniforms, current_functions, current_params, sampler_aliases);
+        },
+        .identifier => |name| {
+            if (inlineTraitParamIndex(callee.params, name)) |param_index| {
+                try emitValue(writer, module, function_context, args[param_index], parent_precedence, uniforms, current_functions, current_params, sampler_aliases);
+                return;
+            }
+            if (findInlineInstruction(callee, name)) |instruction| {
+                try emitInlineTraitInstruction(
+                    writer,
+                    module,
+                    function_context,
+                    callee,
+                    args,
+                    instruction.*,
+                    parent_precedence,
+                    uniforms,
+                    current_functions,
+                    current_params,
+                    sampler_aliases,
+                );
+                return;
+            }
+            try emitValue(writer, module, function_context, value, parent_precedence, uniforms, current_functions, current_params, sampler_aliases);
+        },
+    }
+}
+
+fn emitInlineTraitInstruction(
+    writer: anytype,
+    module: *const mir.Module,
+    function_context: *const EmitFunctionContext,
+    callee: mir.Function,
+    args: []const *mir.Value,
+    instruction: mir.Instruction,
+    parent_precedence: u8,
+    uniforms: []const mir.Global,
+    current_functions: []const mir.Function,
+    current_params: []const mir.Param,
+    sampler_aliases: []const SamplerAlias,
+) anyerror!void {
+    switch (instruction.data) {
+        .copy => |copy| try emitInlineTraitValue(writer, module, function_context, callee, args, copy.value, parent_precedence, uniforms, current_functions, current_params, sampler_aliases),
+        .unary => |unary| {
+            const precedence = unaryPrecedence();
+            const wrap = precedence < parent_precedence;
+            if (wrap) try writer.writeByte('(');
+            try writer.print("{s}", .{unaryOp(unary.operator)});
+            try emitInlineTraitValue(writer, module, function_context, callee, args, unary.operand, precedence, uniforms, current_functions, current_params, sampler_aliases);
+            if (wrap) try writer.writeByte(')');
+        },
+        .binary => |binary| {
+            const precedence = binaryPrecedence(binary.operator);
+            const wrap = precedence < parent_precedence;
+            if (wrap) try writer.writeByte('(');
+            try emitInlineTraitValue(writer, module, function_context, callee, args, binary.lhs, precedence, uniforms, current_functions, current_params, sampler_aliases);
+            try writer.print(" {s} ", .{binaryOp(binary.operator)});
+            try emitInlineTraitValue(writer, module, function_context, callee, args, binary.rhs, precedence + 1, uniforms, current_functions, current_params, sampler_aliases);
+            if (wrap) try writer.writeByte(')');
+        },
+        .field => |field| {
+            const precedence = fieldPrecedence();
+            const wrap = precedence < parent_precedence;
+            if (wrap) try writer.writeByte('(');
+            try emitInlineTraitValue(writer, module, function_context, callee, args, field.target, precedence, uniforms, current_functions, current_params, sampler_aliases);
+            try writer.print(".{s}", .{field.name});
+            if (wrap) try writer.writeByte(')');
+        },
+        .index => |index_expr| {
+            const precedence = fieldPrecedence();
+            const wrap = precedence < parent_precedence;
+            if (wrap) try writer.writeByte('(');
+            try emitInlineTraitValue(writer, module, function_context, callee, args, index_expr.target, precedence, uniforms, current_functions, current_params, sampler_aliases);
+            try writer.writeByte('[');
+            try emitInlineTraitValue(writer, module, function_context, callee, args, index_expr.index, 0, uniforms, current_functions, current_params, sampler_aliases);
+            try writer.writeByte(']');
+            if (wrap) try writer.writeByte(')');
+        },
+        .call => |call| {
+            const precedence = fieldPrecedence();
+            const wrap = precedence < parent_precedence;
+            if (wrap) try writer.writeByte('(');
+            try writer.print("{s}(", .{call.name});
+            for (call.args, 0..) |arg, index| {
+                if (index > 0) try writer.writeAll(", ");
+                try emitInlineTraitValue(writer, module, function_context, callee, args, arg, 0, uniforms, current_functions, current_params, sampler_aliases);
+            }
+            try writer.writeByte(')');
+            if (wrap) try writer.writeByte(')');
+        },
+        .phi, .local_alloc, .load, .store => return error.InvalidMirInstruction,
+    }
+}
+
 fn emitInoutArg(
     writer: anytype,
     module: *const mir.Module,
@@ -883,6 +1115,7 @@ fn emitInstructionExpr(
     sampler_aliases: []const SamplerAlias,
 ) anyerror!void {
     switch (instruction.data) {
+        .phi => return error.InvalidMirInstruction,
         .copy => |copy| try emitValue(writer, module, function_context, copy.value, parent_precedence, uniforms, current_functions, current_params, sampler_aliases),
         .load => |place| try emitPlace(writer, module, function_context, place, parent_precedence, uniforms, current_functions, current_params, sampler_aliases),
         .unary => |unary| {
@@ -923,7 +1156,7 @@ fn shouldInlineInstruction(
     return switch (instruction.data) {
         .copy, .load, .unary, .binary, .field, .index => true,
         .call => |call| canInlineCall(module, current_functions, call),
-        .local_alloc, .store => false,
+        .phi, .local_alloc, .store => false,
     };
 }
 
@@ -1002,7 +1235,7 @@ fn instructionPrecedence(instruction: mir.Instruction) u8 {
         .unary => unaryPrecedence(),
         .binary => |binary| binaryPrecedence(binary.operator),
         .call, .field, .index => fieldPrecedence(),
-        .local_alloc, .store => 0,
+        .phi, .local_alloc, .store => 0,
     };
 }
 
@@ -1096,11 +1329,52 @@ fn findFunction(functions: []const mir.Function, name: []const u8) ?mir.Function
     return null;
 }
 
+fn isInlineTraitFunction(function: mir.Function) bool {
+    if (!std.mem.startsWith(u8, function.name, "__trait_")) return false;
+    if (function.blocks.len != 1) return false;
+    const block = function.blocks[0];
+    for (block.instructions) |instruction| {
+        switch (instruction.data) {
+            .copy, .unary, .binary, .call, .field, .index => {},
+            .phi, .local_alloc, .load, .store => return false,
+        }
+    }
+    return switch (block.terminator) {
+        .return_stmt => |value| value != null,
+        else => false,
+    };
+}
+
+fn inlineTraitParamIndex(params: []const mir.Param, name: []const u8) ?usize {
+    for (params, 0..) |param, index| {
+        if (std.mem.eql(u8, param.name, name)) return index;
+    }
+    return null;
+}
+
+fn findInlineInstruction(function: mir.Function, name: []const u8) ?*const mir.Instruction {
+    for (function.blocks) |*block| {
+        for (block.instructions) |*instruction| {
+            const result = instruction.result orelse continue;
+            if (std.mem.eql(u8, result.name, name)) return instruction;
+        }
+    }
+    return null;
+}
+
 fn findBlock(blocks: []const mir.BasicBlock, label: []const u8) ?*const mir.BasicBlock {
     for (blocks) |*block| {
         if (std.mem.eql(u8, block.label, label)) return block;
     }
     return null;
+}
+
+fn phiInstructions(block: *const mir.BasicBlock) []const mir.Instruction {
+    var count: usize = 0;
+    while (count < block.instructions.len and block.instructions[count].data == .phi) {
+        count += 1;
+    }
+    return block.instructions[0..count];
 }
 
 fn isInoutParam(params: []const mir.Param, name: []const u8) bool {

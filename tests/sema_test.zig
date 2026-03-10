@@ -652,7 +652,7 @@ test "HIR and MIR preserve entry points and CFG structure" {
     try std.testing.expect(saw_if_term);
 }
 
-test "MIR lowers expressions into SSA-style instructions" {
+test "MIR promotes simple mutable locals into SSA values" {
     var analyzed = try analyzeSource(
         \\compute do
         \\  def main
@@ -672,23 +672,48 @@ test "MIR lowers expressions into SSA-style instructions" {
     const function = mir_module.entryPoint(.compute).?.mainFunction();
     try std.testing.expectEqual(@as(usize, 1), function.blocks.len);
     const block = function.blocks[0];
-    try std.testing.expectEqual(@as(usize, 4), block.instructions.len);
+    try std.testing.expectEqual(@as(usize, 2), block.instructions.len);
+    try std.testing.expectEqual(.copy, std.meta.activeTag(block.instructions[0].data));
+    try std.testing.expectEqual(.binary, std.meta.activeTag(block.instructions[1].data));
+    try std.testing.expectEqualStrings("total", block.instructions[0].result.?.name);
+    try std.testing.expect(block.instructions[1].data.binary.lhs.data == .identifier);
+    try std.testing.expectEqualStrings("total", block.instructions[1].data.binary.lhs.data.identifier);
+}
 
-    try std.testing.expectEqual(.local_alloc, std.meta.activeTag(block.instructions[0].data));
-    try std.testing.expectEqual(.load, std.meta.activeTag(block.instructions[1].data));
-    try std.testing.expectEqual(.binary, std.meta.activeTag(block.instructions[2].data));
-    try std.testing.expectEqual(.store, std.meta.activeTag(block.instructions[3].data));
+test "MIR inserts phi nodes for promoted locals across branches" {
+    var analyzed = try analyzeSource(
+        \\compute do
+        \\  def main
+        \\    total: Float = 1.0
+        \\    if true
+        \\      total = 2.0
+        \\    else
+        \\      total = 3.0
+        \\    end
+        \\    value: Float = total
+        \\  end
+        \\end
+    );
+    defer analyzed.arena.deinit();
 
-    const loaded_value = block.instructions[1].result.?;
-    const binary_value = block.instructions[2].result.?;
-    const binary = block.instructions[2].data.binary;
-    const store = block.instructions[3].data.store;
+    try std.testing.expectEqual(@as(usize, 0), analyzed.diagnostics.items.items.len);
 
-    try std.testing.expect(store.target == block.instructions[1].data.load);
-    try std.testing.expect(binary.lhs.data == .identifier);
-    try std.testing.expect(store.value.data == .identifier);
-    try std.testing.expect(std.mem.eql(u8, binary.lhs.data.identifier, loaded_value.name));
-    try std.testing.expect(std.mem.eql(u8, store.value.data.identifier, binary_value.name));
+    const allocator = analyzed.arena.allocator();
+    const hir_module = try zwgsl.hir_builder.build(allocator, analyzed.typed);
+    const mir_module = try zwgsl.mir_builder.build(allocator, hir_module);
+    const function = mir_module.entryPoint(.compute).?.mainFunction();
+
+    var saw_phi = false;
+    for (function.blocks) |block| {
+        for (block.instructions) |instruction| {
+            if (instruction.data == .phi) {
+                saw_phi = true;
+                try std.testing.expectEqual(@as(usize, 2), instruction.data.phi.incomings.len);
+            }
+        }
+    }
+
+    try std.testing.expect(saw_phi);
 }
 
 test "HIR builder unrolls vector loops directly from typed AST" {

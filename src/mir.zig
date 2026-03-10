@@ -120,6 +120,7 @@ pub const Instruction = struct {
     };
 
     pub const Data = union(enum) {
+        phi: Phi,
         local_alloc: LocalAlloc,
         copy: Copy,
         load: *Place,
@@ -141,6 +142,15 @@ pub const LocalAlloc = struct {
 
 pub const Copy = struct {
     value: *Value,
+};
+
+pub const PhiIncoming = struct {
+    label: []const u8,
+    value: *Value,
+};
+
+pub const Phi = struct {
+    incomings: []const PhiIncoming,
 };
 
 pub const Terminator = union(enum) {

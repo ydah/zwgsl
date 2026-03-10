@@ -13,7 +13,7 @@ var<private> v_uv: vec2f;
 var<private> frag_color: vec4f;
 
 fn __zwgsl_fragment_main() {
-    var color: vec4f = textureSample(scene_tex_texture, scene_tex_sampler, v_uv);
+    let color: vec4f = textureSample(scene_tex_texture, scene_tex_sampler, v_uv);
     frag_color = vec4f(color.rgb, 1.0);
 }
 

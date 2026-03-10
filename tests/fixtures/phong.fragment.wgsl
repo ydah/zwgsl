@@ -22,8 +22,8 @@ fn phong_strength(normal: vec3f, light_dir: vec3f) -> f32 {
 }
 
 fn __zwgsl_fragment_main() {
-    var light_dir: vec3f = light_pos - v_world_pos;
-    var light: f32 = phong_strength(v_normal, light_dir);
+    let light_dir: vec3f = light_pos - v_world_pos;
+    let light: f32 = phong_strength(v_normal, light_dir);
     frag_color = vec4f(base_color.rgb * (0.2 + 0.8 * light), base_color.a);
 }
 

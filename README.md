@@ -31,7 +31,7 @@ syntax while still targeting modern GPU backends.
 - Multi-stage WGSL pipeline with entry-point-aware HIR and CFG-style MIR: `AST -> HIR -> MIR -> WGSL`
 - WGSL sampler lowering for uniforms, function parameters, and immutable local aliases
 - Source-aware LSP support: diagnostics, hover, completion, goto-definition, semantic tokens
-- Browser playground with Monaco, wasm compilation, and worker-backed diagnostics
+- Browser playground with Monaco, wasm compilation, and compiler-backed worker tooling
 - C API surface for embedding the compiler in other tools
 
 ## Quick Example
@@ -330,7 +330,7 @@ Current capabilities:
 
 - Monaco language registration for `zwgsl`
 - live WGSL compilation through `zwgsl.wasm`
-- worker-backed diagnostics, hover, completion, and goto-definition
+- compiler-backed diagnostics, hover, completion, and goto-definition from the wasm build
 - WebGPU preview surface with animated `iTime` / `iResolution` uniforms, generated controls, and sampler placeholders
 - `npm run sync-wasm` to refresh the wasm payload from `zig-out/bin/zwgsl.wasm`
 
@@ -369,8 +369,8 @@ Lexer -> Layout Resolver -> Parser -> AST
 | ADTs + pattern matching | Implemented |
 | Dependent dimensions | Implemented for `Vec(N)` / `Mat(M, N)` matching and WGSL type lowering |
 | Generic structs + phantom tags | Implemented |
-| `trait` / `impl` specialization | Implemented as compile-time static dispatch |
-| WGSL pipeline | Implemented as `AST -> HIR -> MIR -> WGSL`, with entry-point HIR and CFG-based MIR lowering |
+| `trait` / `impl` specialization | Implemented as compile-time static dispatch with inline trait methods in WGSL output |
+| WGSL pipeline | Implemented as `AST -> HIR -> MIR -> WGSL`, with entry-point HIR and SSA-style CFG-based MIR lowering |
 | GLSL ES 3.0 backend | Implemented |
 | LSP | Implemented |
 | Playground | Implemented |
