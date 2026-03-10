@@ -267,7 +267,7 @@ zig build wasm
 ```
 
 That installs `zig-out/bin/zwgsl.wasm`, which the playground syncs into
-`playground/public/zwgsl.wasm`.
+`playground/src/generated/zwgsl.wasm` so Vite can fingerprint the asset.
 
 ## Artifacts
 
@@ -336,7 +336,7 @@ Current capabilities:
 - live WGSL compilation through `zwgsl.wasm`
 - compiler-backed diagnostics, hover, completion, and goto-definition from the wasm build
 - WebGPU preview surface with animated `iTime` / `iResolution` uniforms, generated controls, and sampler placeholders
-- `npm run sync-wasm` to refresh the wasm payload from `zig-out/bin/zwgsl.wasm`
+- `npm run sync-wasm` to refresh the generated wasm asset from `zig-out/bin/zwgsl.wasm`
 
 For a GitHub Pages build, set the base path before running Vite:
 
