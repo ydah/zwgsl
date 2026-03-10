@@ -62,6 +62,7 @@ type VertexPreviewState = {
   buffer: GPUBuffer | null;
   buffers: GPUVertexBufferLayout[];
   vertexCount: number;
+  profile: "fullscreen" | "triangle";
 };
 
 type CompiledPreviewState = {
@@ -92,16 +93,28 @@ fn main() -> @location(0) vec4f {
 }
 `;
 
-const previewVertexPositions = [
+const previewFullscreenPositions = [
   [-1, -1, 0, 1],
   [3, -1, 0, 1],
   [-1, 3, 0, 1],
 ] as const;
 
-const previewUvs = [
+const previewTrianglePositions = [
+  [-0.7, -0.6, 0, 1],
+  [0.7, -0.6, 0, 1],
+  [0, 0.78, 0, 1],
+] as const;
+
+const previewFullscreenUvs = [
   [0, 0, 0, 1],
   [2, 0, 0, 1],
   [0, 2, 0, 1],
+] as const;
+
+const previewTriangleUvs = [
+  [0, 1, 0, 1],
+  [1, 1, 0, 1],
+  [0.5, 0, 0, 1],
 ] as const;
 
 const previewColors = [
@@ -162,7 +175,7 @@ export const createPreview = async (
     const uniformStates = uniformSpecs.map((spec) => createUniformState(device, spec, canvas));
     const textureSpecs = collectTextureSpecs(vertexSource, fragmentSource);
     const textureStates = textureSpecs.map((spec) => createTextureState(device, spec));
-    const vertexState = createVertexPreviewState(device, vertexSource);
+    const vertexState = createVertexPreviewState(device, vertexSource, uniformSpecs, textureSpecs);
 
     try {
       const vertexModule = device.createShaderModule({ code: vertexSource });
@@ -221,7 +234,7 @@ export const createPreview = async (
       }
 
       renderControls(controlsRoot, uniformStates, textureStates);
-      status.textContent = "live";
+      status.textContent = vertexState.profile === "triangle" ? "live • triangle" : "live • fullscreen";
       return {
         key: nextKey,
         pipeline,
@@ -548,13 +561,20 @@ const makePreviewTexture = (device: GPUDevice, spec: TextureSpec) => {
   return texture;
 };
 
-const createVertexPreviewState = (device: GPUDevice, source: string): VertexPreviewState => {
+const createVertexPreviewState = (
+  device: GPUDevice,
+  source: string,
+  uniformSpecs: UniformSpec[],
+  textureSpecs: TextureSpec[],
+): VertexPreviewState => {
   const attributes = collectVertexAttributeSpecs(source);
+  const profile = choosePreviewProfile(attributes, uniformSpecs, textureSpecs);
   if (attributes.length === 0) {
     return {
       buffer: null,
       buffers: [],
       vertexCount: 3,
+      profile,
     };
   }
 
@@ -565,7 +585,7 @@ const createVertexPreviewState = (device: GPUDevice, source: string): VertexPrev
     nextOffset += vertexFormatSize(attribute.format);
   }
 
-  const vertexCount = previewVertexPositions.length;
+  const vertexCount = previewTrianglePositions.length;
   const bytes = new ArrayBuffer(stride * vertexCount);
   const view = new DataView(bytes);
 
@@ -576,7 +596,7 @@ const createVertexPreviewState = (device: GPUDevice, source: string): VertexPrev
         view,
         baseOffset + attribute.offset,
         attribute,
-        previewAttributeValues(attribute, vertexIndex),
+        previewAttributeValues(attribute, vertexIndex, profile),
       );
     }
   }
@@ -601,7 +621,31 @@ const createVertexPreviewState = (device: GPUDevice, source: string): VertexPrev
       },
     ],
     vertexCount,
+    profile,
   };
+};
+
+const choosePreviewProfile = (
+  attributes: VertexAttributeSpec[],
+  uniformSpecs: UniformSpec[],
+  textureSpecs: TextureSpec[],
+) => {
+  if (textureSpecs.length > 0) return "fullscreen" as const;
+
+  for (const attribute of attributes) {
+    const name = attribute.name.toLowerCase();
+    if (name.includes("normal") || name.includes("color") || name.includes("colour")) {
+      return "triangle" as const;
+    }
+  }
+
+  for (const uniform of uniformSpecs) {
+    if (/matrix|projection|view|model|mvp/i.test(uniform.name)) {
+      return "triangle" as const;
+    }
+  }
+
+  return "fullscreen" as const;
 };
 
 const collectVertexAttributeSpecs = (source: string) => {
@@ -676,12 +720,18 @@ const vertexFormatSize = (format: GPUVertexFormat) => {
   }
 };
 
-const previewAttributeValues = (attribute: VertexAttributeSpec, vertexIndex: number) => {
+const previewAttributeValues = (
+  attribute: VertexAttributeSpec,
+  vertexIndex: number,
+  profile: "fullscreen" | "triangle",
+) => {
   const name = attribute.name.toLowerCase();
+  const positions = profile === "fullscreen" ? previewFullscreenPositions : previewTrianglePositions;
+  const uvs = profile === "fullscreen" ? previewFullscreenUvs : previewTriangleUvs;
 
-  if (name.includes("position")) return previewVertexPositions[vertexIndex].slice(0, attribute.componentCount);
+  if (name.includes("position")) return positions[vertexIndex].slice(0, attribute.componentCount);
   if (name === "uv" || name.endsWith("_uv") || name.includes("texcoord")) {
-    return previewUvs[vertexIndex].slice(0, attribute.componentCount);
+    return uvs[vertexIndex].slice(0, attribute.componentCount);
   }
   if (name.includes("normal")) {
     return [0, 0, 1, 0].slice(0, attribute.componentCount);
