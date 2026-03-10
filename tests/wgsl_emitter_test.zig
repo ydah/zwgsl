@@ -160,6 +160,28 @@ test "compiler lowers immutable sampler aliases for WGSL" {
     try std.testing.expect(std.mem.indexOf(u8, output.compute_source.?, "let sampler") == null);
 }
 
+test "compiler lowers mod() calls to WGSL remainder operators" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const source =
+        \\compute do
+        \\  def main
+        \\    value: Float = mod(5.0, 2.0)
+        \\  end
+        \\end
+    ;
+
+    const output = try zwgsl.compiler.compile(arena.allocator(), source, .{
+        .target = .wgsl,
+    });
+
+    try std.testing.expectEqual(@as(usize, 0), output.errors.len);
+    try std.testing.expect(output.compute_source != null);
+    try std.testing.expect(std.mem.indexOf(u8, output.compute_source.?, "var value: f32 = 5.0 % 2.0;") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output.compute_source.?, "mod(") == null);
+}
+
 test "compiler emits WGSL for the phong fixture" {
     try expectWgslFixture(
         "tests/fixtures/phong.zw",

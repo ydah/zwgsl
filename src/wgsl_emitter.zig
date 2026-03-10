@@ -488,6 +488,11 @@ fn emitExpr(
                 if (wrap) try writer.writeByte(')');
                 return;
             }
+            if (std.mem.eql(u8, call.name, "mod")) {
+                try emitModCall(writer, module, call, uniforms, current_functions, current_params, sampler_aliases);
+                if (wrap) try writer.writeByte(')');
+                return;
+            }
 
             try writer.print("{s}(", .{callName(call.name, expr.ty)});
             const callee = findFunction(current_functions, call.name) orelse findFunction(module.global_functions, call.name);
@@ -539,6 +544,21 @@ fn emitTextureCall(
     try writer.print("textureSample({s}_texture, {s}_sampler, ", .{ sampler_name, sampler_name });
     try emitExpr(writer, module, call.args[1], 0, uniforms, current_functions, current_params, sampler_aliases);
     try writer.writeByte(')');
+}
+
+fn emitModCall(
+    writer: anytype,
+    module: *const mir.Module,
+    call: mir.Expr.Call,
+    uniforms: []const mir.Global,
+    current_functions: []const mir.Function,
+    current_params: []const mir.Param,
+    sampler_aliases: []const SamplerAlias,
+) anyerror!void {
+    std.debug.assert(call.args.len == 2);
+    try emitExpr(writer, module, call.args[0], 6, uniforms, current_functions, current_params, sampler_aliases);
+    try writer.writeAll(" % ");
+    try emitExpr(writer, module, call.args[1], 7, uniforms, current_functions, current_params, sampler_aliases);
 }
 
 fn emitInoutArg(
