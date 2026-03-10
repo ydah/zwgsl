@@ -241,6 +241,43 @@ test "parser handles lambda expressions" {
     try std.testing.expectEqualStrings("x", stmt.data.let_binding.value.data.lambda.params[0]);
 }
 
+test "parser handles algebraic type definitions" {
+    var parsed = try parseProgram(
+        \\type Shape
+        \\  Circle(radius: Float)
+        \\  Point
+        \\end
+    );
+    defer parsed.arena.deinit();
+
+    const definition = parsed.program.items[0].type_def;
+    try std.testing.expectEqualStrings("Shape", definition.name);
+    try std.testing.expectEqual(@as(usize, 2), definition.variants.len);
+    try std.testing.expectEqualStrings("Circle", definition.variants[0].name);
+    try std.testing.expectEqual(@as(usize, 1), definition.variants[0].fields.len);
+    try std.testing.expectEqualStrings("Point", definition.variants[1].name);
+}
+
+test "parser handles match expressions" {
+    var parsed = try parseProgram(
+        \\def classify(value: Float) -> Float
+        \\  match value
+        \\  when positive if value > 0.0
+        \\    value
+        \\  when _
+        \\    0.0
+        \\  end
+        \\end
+    );
+    defer parsed.arena.deinit();
+
+    const expr = parsed.program.items[0].function.body[0].data.expression;
+    try std.testing.expectEqual(.match_expr, std.meta.activeTag(expr.data));
+    try std.testing.expectEqual(@as(usize, 2), expr.data.match_expr.arms.len);
+    try std.testing.expect(expr.data.match_expr.arms[0].guard != null);
+    try std.testing.expectEqual(.wildcard, std.meta.activeTag(expr.data.match_expr.arms[1].pattern));
+}
+
 test "parser reuses interned identifier slices with a shared string pool" {
     var parsed = try parseProgramWithPool(
         \\def main(value: Float) -> Float

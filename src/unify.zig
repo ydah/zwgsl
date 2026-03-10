@@ -34,6 +34,18 @@ pub const Substitution = struct {
                     },
                 };
             },
+            .type_app => |app_ty| blk: {
+                const args = try self.allocator.alloc(types.Type, app_ty.args.len);
+                for (app_ty.args, 0..) |arg, index| {
+                    args[index] = try self.apply(arg);
+                }
+                break :blk .{
+                    .type_app = .{
+                        .name = app_ty.name,
+                        .args = args,
+                    },
+                };
+            },
             else => ty,
         };
     }
@@ -51,6 +63,12 @@ pub const Substitution = struct {
                     if (try self.occurs(needle, param)) break :blk true;
                 }
                 break :blk try self.occurs(needle, function.return_type.*);
+            },
+            .type_app => |app_ty| blk: {
+                for (app_ty.args) |arg| {
+                    if (try self.occurs(needle, arg)) break :blk true;
+                }
+                break :blk false;
             },
             else => false,
         };
@@ -74,6 +92,21 @@ pub fn unify(substitution: *Substitution, lhs: types.Type, rhs: types.Type) !voi
                     try unify(substitution, left_param, right_param);
                 }
                 try unify(substitution, left_function.return_type.*, right_function.return_type.*);
+            },
+            .type_var => |id| return bindVar(substitution, id, left),
+            else => return error.TypeMismatch,
+        },
+        .type_app => |left_app| switch (right) {
+            .type_app => |right_app| {
+                if (!std.mem.eql(u8, left_app.name, right_app.name)) {
+                    return error.TypeMismatch;
+                }
+                if (left_app.args.len != right_app.args.len) {
+                    return error.TypeMismatch;
+                }
+                for (left_app.args, right_app.args) |left_arg, right_arg| {
+                    try unify(substitution, left_arg, right_arg);
+                }
             },
             .type_var => |id| return bindVar(substitution, id, left),
             else => return error.TypeMismatch,

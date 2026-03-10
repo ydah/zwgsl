@@ -5,6 +5,7 @@ const diagnostics = @import("diagnostics.zig");
 const hm = @import("hm.zig");
 const string_pool = @import("string_pool.zig");
 const types = @import("types.zig");
+const unify = @import("unify.zig");
 
 const SymbolKind = enum {
     uniform,
@@ -14,6 +15,7 @@ const SymbolKind = enum {
     local,
     param,
     builtin,
+    constructor,
 };
 
 const WhereVisitState = enum {
@@ -72,12 +74,37 @@ pub const FunctionSignature = struct {
     stage: ?ast.Stage = null,
 };
 
+pub const VariantInfo = struct {
+    name: []const u8,
+    field_names: []const []const u8,
+    field_types: []const types.Type,
+    tag: u32,
+};
+
+pub const TypeDefInfo = struct {
+    name: []const u8,
+    params: []const []const u8,
+    variants: []const VariantInfo,
+};
+
+pub const ConstructorInfo = struct {
+    name: []const u8,
+    parent_name: []const u8,
+    tag: u32,
+    field_names: []const []const u8,
+    field_types: []const types.Type,
+    return_type: types.Type,
+    scheme: hm.TypeScheme,
+};
+
 pub const TypedProgram = struct {
     allocator: std.mem.Allocator,
     program: *ast.Program,
     expr_types: std.AutoHashMap(*ast.Expr, types.Type),
     function_signatures: std.AutoHashMap(*ast.FunctionDef, FunctionSignature),
     where_bindings: std.AutoHashMap(*ast.FunctionDef, []const *const ast.LetBinding),
+    type_defs: std.StringHashMap(TypeDefInfo),
+    constructors: std.StringHashMap(ConstructorInfo),
     global_functions: []const *ast.FunctionDef = &.{},
     vertex_functions: []const *ast.FunctionDef = &.{},
     fragment_functions: []const *ast.FunctionDef = &.{},
@@ -96,6 +123,14 @@ pub const TypedProgram = struct {
 
     pub fn whereBindings(self: *const TypedProgram, function: *ast.FunctionDef) []const *const ast.LetBinding {
         return self.where_bindings.get(function) orelse &.{};
+    }
+
+    pub fn typeDef(self: *const TypedProgram, name: []const u8) ?TypeDefInfo {
+        return self.type_defs.get(name);
+    }
+
+    pub fn constructor(self: *const TypedProgram, name: []const u8) ?ConstructorInfo {
+        return self.constructors.get(name);
     }
 };
 
@@ -124,6 +159,8 @@ const Analyzer = struct {
     diagnostics: *diagnostics.DiagnosticList,
     typed: *TypedProgram,
     struct_fields: std.StringHashMap([]const ast.StructField),
+    type_defs: std.StringHashMap(TypeDefInfo),
+    constructors: std.StringHashMap(ConstructorInfo),
     global_scope: Scope,
     global_functions: std.ArrayListUnmanaged(*ast.FunctionDef) = .{},
     vertex_functions: std.ArrayListUnmanaged(*ast.FunctionDef) = .{},
@@ -143,6 +180,8 @@ const Analyzer = struct {
             .expr_types = std.AutoHashMap(*ast.Expr, types.Type).init(allocator),
             .function_signatures = std.AutoHashMap(*ast.FunctionDef, FunctionSignature).init(allocator),
             .where_bindings = std.AutoHashMap(*ast.FunctionDef, []const *const ast.LetBinding).init(allocator),
+            .type_defs = std.StringHashMap(TypeDefInfo).init(allocator),
+            .constructors = std.StringHashMap(ConstructorInfo).init(allocator),
         };
 
         return .{
@@ -152,6 +191,8 @@ const Analyzer = struct {
             .diagnostics = diagnostic_list,
             .typed = typed,
             .struct_fields = std.StringHashMap([]const ast.StructField).init(allocator),
+            .type_defs = std.StringHashMap(TypeDefInfo).init(allocator),
+            .constructors = std.StringHashMap(ConstructorInfo).init(allocator),
             .global_scope = Scope.init(allocator, null),
         };
     }
@@ -192,6 +233,7 @@ const Analyzer = struct {
                         try self.struct_fields.put(struct_def.name, struct_def.fields);
                     }
                 },
+                .type_def => |type_def| try self.registerTypeDef(type_def),
                 .function => |function| try self.global_functions.append(self.allocator, function),
                 .shader_block => |block| switch (block.stage) {
                     .vertex => {
@@ -223,6 +265,88 @@ const Analyzer = struct {
         if (self.typed.compute_block != null and (self.typed.vertex_block != null or self.typed.fragment_block != null)) {
             try self.report(self.typed.compute_block.?.position, "compute shaders cannot be combined with vertex/fragment stages", .{});
         }
+    }
+
+    fn registerTypeDef(self: *Analyzer, type_def: ast.TypeDef) anyerror!void {
+        if (self.type_defs.contains(type_def.name)) {
+            try self.report(type_def.position, "redefinition of type '{s}'", .{type_def.name});
+            return;
+        }
+
+        var variants = std.ArrayListUnmanaged(VariantInfo){};
+        defer variants.deinit(self.allocator);
+
+        const quantified = try self.allocator.alloc(u32, type_def.params.len);
+        for (type_def.params, 0..) |_, index| {
+            quantified[index] = @intCast(index);
+        }
+
+        for (type_def.variants, 0..) |variant, tag_index| {
+            const field_names = try self.allocator.alloc([]const u8, variant.fields.len);
+            const field_types = try self.allocator.alloc(types.Type, variant.fields.len);
+            for (variant.fields, 0..) |field, field_index| {
+                field_names[field_index] = field.name;
+                field_types[field_index] = try self.resolveTypeNameWithParams(field.type_name, field.position, type_def.params);
+            }
+
+            const variant_info: VariantInfo = .{
+                .name = variant.name,
+                .field_names = field_names,
+                .field_types = field_types,
+                .tag = @intCast(tag_index),
+            };
+            try variants.append(self.allocator, variant_info);
+
+            const return_type = try self.makeGenericType(type_def.name, type_def.params);
+            const symbol_type = if (field_types.len == 0) return_type else blk: {
+                const params = try self.allocator.alloc(types.Type, field_types.len);
+                @memcpy(params, field_types);
+                const return_ptr = try self.allocator.create(types.Type);
+                return_ptr.* = return_type;
+                break :blk types.Type{
+                    .function = .{
+                        .params = params,
+                        .return_type = return_ptr,
+                    },
+                };
+            };
+
+            const constructor_info: ConstructorInfo = .{
+                .name = variant.name,
+                .parent_name = type_def.name,
+                .tag = @intCast(tag_index),
+                .field_names = field_names,
+                .field_types = field_types,
+                .return_type = return_type,
+                .scheme = .{
+                    .quantified = quantified,
+                    .ty = symbol_type,
+                },
+            };
+
+            if (self.constructors.contains(variant.name)) {
+                try self.report(variant.position, "redefinition of constructor '{s}'", .{variant.name});
+            } else {
+                try self.constructors.put(variant.name, constructor_info);
+                try self.typed.constructors.put(variant.name, constructor_info);
+                if (!try self.global_scope.put(variant.name, .{
+                    .ty = symbol_type,
+                    .kind = .constructor,
+                    .mutable = false,
+                    .scheme = constructor_info.scheme,
+                })) {
+                    try self.report(variant.position, "redefinition of symbol '{s}'", .{variant.name});
+                }
+            }
+        }
+
+        const type_info: TypeDefInfo = .{
+            .name = type_def.name,
+            .params = type_def.params,
+            .variants = try variants.toOwnedSlice(self.allocator),
+        };
+        try self.type_defs.put(type_def.name, type_info);
+        try self.typed.type_defs.put(type_def.name, type_info);
     }
 
     fn registerFunctions(self: *Analyzer) anyerror!void {
@@ -726,13 +850,13 @@ const Analyzer = struct {
         binding: ast.LetBinding,
         context: *FunctionContext,
     ) anyerror!hm.TypeScheme {
-        if (binding.value.data != .lambda) {
-            const value_type = try self.analyzeExpr(@constCast(scope), binding.value, context);
-            return hm.Engine.monomorphic(value_type);
-        }
-
         var env = try self.buildHmEnv(scope);
         defer env.deinit();
+
+        if (binding.value.data != .lambda) {
+            const value_type = try self.analyzeExpr(@constCast(scope), binding.value, context);
+            return try context.hm_engine.generalize(&env, value_type);
+        }
 
         const inferred = context.hm_engine.inferExpr(&env, binding.value) catch {
             try self.report(binding.position, "failed to infer let binding '{s}'", .{binding.name});
@@ -983,10 +1107,156 @@ const Analyzer = struct {
                     break :blk types.builtinType(.error_type);
                 };
             },
+            .match_expr => try self.analyzeMatchExpr(scope, expr.data.match_expr, context, expr.position),
         };
 
         try self.rememberExprType(expr, resolved);
         return resolved;
+    }
+
+    fn analyzeMatchExpr(
+        self: *Analyzer,
+        scope: *Scope,
+        match_expr: ast.Expr.MatchExpr,
+        context: *FunctionContext,
+        position: ast.Position,
+    ) anyerror!types.Type {
+        const value_type = try self.analyzeExpr(scope, match_expr.value, context);
+        var result_type: ?types.Type = null;
+        var exhaustive = false;
+        var seen_constructors = std.StringHashMapUnmanaged(void){};
+        defer seen_constructors.deinit(self.allocator);
+
+        for (match_expr.arms) |arm| {
+            var arm_scope = Scope.init(self.allocator, scope);
+            const summary = try self.bindPattern(&arm_scope, arm.pattern, value_type, position);
+            if (summary.matches_all) exhaustive = true;
+            if (summary.constructor_name) |constructor_name| {
+                try seen_constructors.put(self.allocator, constructor_name, {});
+            }
+
+            if (arm.guard) |guard| {
+                const guard_type = try self.analyzeExpr(&arm_scope, guard, context);
+                if (!guard_type.isBuiltin(.bool)) {
+                    try self.report(guard.position, "match guard must be Bool", .{});
+                }
+            }
+
+            var arm_result: ?types.Type = null;
+            for (arm.body, 0..) |statement, index| {
+                const stmt_type = try self.analyzeStmt(&arm_scope, statement, context);
+                if (index + 1 == arm.body.len) {
+                    arm_result = stmt_type orelse types.builtinType(.void);
+                }
+            }
+
+            const body_type = arm_result orelse types.builtinType(.void);
+            if (result_type) |existing| {
+                if (!types.isAssignable(existing, body_type) and !types.isAssignable(body_type, existing)) {
+                    try self.report(position, "match arms must evaluate to compatible types", .{});
+                    result_type = types.builtinType(.error_type);
+                }
+            } else {
+                result_type = body_type;
+            }
+        }
+
+        if (!exhaustive) {
+            if (self.typeInfoFor(value_type)) |type_info| {
+                var missing = false;
+                for (type_info.variants) |variant| {
+                    if (!seen_constructors.contains(variant.name)) {
+                        missing = true;
+                        break;
+                    }
+                }
+                if (missing) {
+                    try self.diagnostics.appendFmt(
+                        .warning,
+                        position.line,
+                        position.column,
+                        "match on '{s}' is not exhaustive",
+                        .{type_info.name},
+                    );
+                }
+            }
+        }
+
+        return result_type orelse types.builtinType(.void);
+    }
+
+    fn bindPattern(
+        self: *Analyzer,
+        scope: *Scope,
+        pattern: ast.Pattern,
+        expected_type: types.Type,
+        position: ast.Position,
+    ) anyerror!struct { matches_all: bool, constructor_name: ?[]const u8 } {
+        return switch (pattern) {
+            .wildcard => .{ .matches_all = true, .constructor_name = null },
+            .binding => |name| blk: {
+                if (!try scope.put(name, .{
+                    .ty = expected_type,
+                    .kind = .local,
+                    .mutable = false,
+                })) {
+                    try self.report(position, "duplicate pattern binding '{s}'", .{name});
+                }
+                break :blk .{ .matches_all = true, .constructor_name = null };
+            },
+            .integer => blk: {
+                if (!expected_type.isBuiltin(.int)) {
+                    try self.report(position, "integer pattern expects Int", .{});
+                }
+                break :blk .{ .matches_all = false, .constructor_name = null };
+            },
+            .float => blk: {
+                if (!expected_type.isBuiltin(.float)) {
+                    try self.report(position, "float pattern expects Float", .{});
+                }
+                break :blk .{ .matches_all = false, .constructor_name = null };
+            },
+            .bool => blk: {
+                if (!expected_type.isBuiltin(.bool)) {
+                    try self.report(position, "bool pattern expects Bool", .{});
+                }
+                break :blk .{ .matches_all = false, .constructor_name = null };
+            },
+            .symbol => .{ .matches_all = false, .constructor_name = null },
+            .constructor => |constructor| blk: {
+                const info = self.constructors.get(constructor.name) orelse {
+                    try self.report(position, "unknown constructor '{s}'", .{constructor.name});
+                    break :blk .{ .matches_all = false, .constructor_name = null };
+                };
+
+                if (constructor.args.len != info.field_types.len) {
+                    try self.report(position, "constructor '{s}' expects {d} fields", .{ constructor.name, info.field_types.len });
+                    break :blk .{ .matches_all = false, .constructor_name = null };
+                }
+
+                var substitution = unify.Substitution.init(self.allocator);
+                defer substitution.deinit();
+                unify.unify(&substitution, info.return_type, expected_type) catch {
+                    try self.report(position, "constructor '{s}' does not match {s}", .{ constructor.name, expected_type.glslName() });
+                    break :blk .{ .matches_all = false, .constructor_name = null };
+                };
+
+                for (constructor.args, info.field_types) |arg_pattern, field_type| {
+                    const resolved_field_type = try substitution.apply(field_type);
+                    _ = try self.bindPattern(scope, arg_pattern, resolved_field_type, position);
+                }
+
+                break :blk .{ .matches_all = false, .constructor_name = constructor.name };
+            },
+        };
+    }
+
+    fn typeInfoFor(self: *Analyzer, ty: types.Type) ?TypeDefInfo {
+        return switch (ty) {
+            .struct_type => |name| self.type_defs.get(name),
+            .type_app => |app_ty| self.type_defs.get(app_ty.name),
+            else => null,
+        };
     }
 
     fn findFunction(
@@ -1013,10 +1283,43 @@ const Analyzer = struct {
     }
 
     fn resolveTypeName(self: *Analyzer, name: []const u8, position: ast.Position) anyerror!types.Type {
-        if (types.fromName(name)) |builtin| return builtin;
-        if (self.struct_fields.contains(name)) return .{ .struct_type = name };
-        try self.report(position, "unknown type '{s}'", .{name});
-        return types.builtinType(.error_type);
+        return try self.resolveTypeNameWithParams(name, position, &.{});
+    }
+
+    fn resolveTypeNameWithParams(
+        self: *Analyzer,
+        name: []const u8,
+        position: ast.Position,
+        params: []const []const u8,
+    ) anyerror!types.Type {
+        var parser = TypeSpecParser{
+            .analyzer = self,
+            .input = name,
+            .position = position,
+            .params = params,
+        };
+        const resolved = try parser.parseType();
+        parser.skipSpaces();
+        if (!parser.eof()) {
+            try self.report(position, "invalid type annotation '{s}'", .{name});
+            return types.builtinType(.error_type);
+        }
+        return resolved;
+    }
+
+    fn makeGenericType(self: *Analyzer, name: []const u8, params: []const []const u8) anyerror!types.Type {
+        if (params.len == 0) return .{ .struct_type = name };
+
+        const args = try self.allocator.alloc(types.Type, params.len);
+        for (params, 0..) |_, index| {
+            args[index] = types.typeVar(@intCast(index));
+        }
+        return .{
+            .type_app = .{
+                .name = name,
+                .args = args,
+            },
+        };
     }
 
     fn rememberExprType(self: *Analyzer, expr: *ast.Expr, ty: types.Type) anyerror!void {
@@ -1025,6 +1328,121 @@ const Analyzer = struct {
 
     fn report(self: *Analyzer, position: ast.Position, comptime fmt: []const u8, args: anytype) anyerror!void {
         try self.diagnostics.appendFmt(.@"error", position.line, position.column, fmt, args);
+    }
+};
+
+const TypeSpecParser = struct {
+    analyzer: *Analyzer,
+    input: []const u8,
+    index: usize = 0,
+    position: ast.Position,
+    params: []const []const u8,
+
+    fn parseType(self: *TypeSpecParser) anyerror!types.Type {
+        self.skipSpaces();
+        if (self.eof()) return error.ParseFailed;
+
+        if (std.ascii.isDigit(self.input[self.index])) {
+            return .{ .nat = try self.parseNat() };
+        }
+
+        const name = try self.parseIdentifier();
+        self.skipSpaces();
+        if (self.matchChar('(')) {
+            var args = std.ArrayListUnmanaged(types.Type){};
+            defer args.deinit(self.analyzer.allocator);
+
+            self.skipSpaces();
+            if (!self.matchChar(')')) {
+                while (true) {
+                    try args.append(self.analyzer.allocator, try self.parseType());
+                    self.skipSpaces();
+                    if (self.matchChar(',')) {
+                        self.skipSpaces();
+                        continue;
+                    }
+                    if (!self.matchChar(')')) return error.ParseFailed;
+                    break;
+                }
+            }
+            return try self.finishApplication(name, args.items);
+        }
+
+        if (types.fromName(name)) |builtin| return builtin;
+        if (self.paramIndex(name)) |id| return types.typeVar(id);
+        if (self.analyzer.struct_fields.contains(name) or self.analyzer.type_defs.contains(name)) {
+            return .{ .struct_type = name };
+        }
+        try self.analyzer.report(self.position, "unknown type '{s}'", .{name});
+        return types.builtinType(.error_type);
+    }
+
+    fn finishApplication(self: *TypeSpecParser, name: []const u8, args: []const types.Type) anyerror!types.Type {
+        if (std.mem.eql(u8, name, "Vec") and args.len == 1 and args[0] == .nat) {
+            return switch (args[0].nat) {
+                2 => types.builtinType(.vec2),
+                3 => types.builtinType(.vec3),
+                4 => types.builtinType(.vec4),
+                else => try types.typeApp(self.analyzer.allocator, name, args),
+            };
+        }
+
+        if (std.mem.eql(u8, name, "Mat") and args.len == 2 and args[0] == .nat and args[1] == .nat and args[0].nat == args[1].nat) {
+            return switch (args[0].nat) {
+                2 => types.builtinType(.mat2),
+                3 => types.builtinType(.mat3),
+                4 => types.builtinType(.mat4),
+                else => try types.typeApp(self.analyzer.allocator, name, args),
+            };
+        }
+
+        if (!self.analyzer.struct_fields.contains(name) and !self.analyzer.type_defs.contains(name) and !std.mem.eql(u8, name, "Vec") and !std.mem.eql(u8, name, "Mat") and !std.mem.eql(u8, name, "Ten") and !std.mem.eql(u8, name, "Tensor")) {
+            try self.analyzer.report(self.position, "unknown type '{s}'", .{name});
+            return types.builtinType(.error_type);
+        }
+        return try types.typeApp(self.analyzer.allocator, name, args);
+    }
+
+    fn parseIdentifier(self: *TypeSpecParser) anyerror![]const u8 {
+        const start = self.index;
+        while (!self.eof()) {
+            const ch = self.input[self.index];
+            if (std.ascii.isAlphanumeric(ch) or ch == '_') {
+                self.index += 1;
+            } else {
+                break;
+            }
+        }
+        if (start == self.index) return error.ParseFailed;
+        return self.input[start..self.index];
+    }
+
+    fn parseNat(self: *TypeSpecParser) anyerror!u32 {
+        const start = self.index;
+        while (!self.eof() and std.ascii.isDigit(self.input[self.index])) : (self.index += 1) {}
+        return try std.fmt.parseInt(u32, self.input[start..self.index], 10);
+    }
+
+    fn paramIndex(self: *TypeSpecParser, name: []const u8) ?u32 {
+        for (self.params, 0..) |param, index| {
+            if (sameName(param, name)) return @intCast(index);
+        }
+        return null;
+    }
+
+    fn matchChar(self: *TypeSpecParser, ch: u8) bool {
+        self.skipSpaces();
+        if (self.eof() or self.input[self.index] != ch) return false;
+        self.index += 1;
+        return true;
+    }
+
+    fn skipSpaces(self: *TypeSpecParser) void {
+        while (!self.eof() and std.ascii.isWhitespace(self.input[self.index])) : (self.index += 1) {}
+    }
+
+    fn eof(self: *TypeSpecParser) bool {
+        return self.index >= self.input.len;
     }
 };
 
@@ -1076,6 +1494,19 @@ fn collectExprIdentifiers(
             try collectExprIdentifiers(allocator, index_expr.index, names);
         },
         .lambda => |lambda| try collectExprIdentifiers(allocator, lambda.body, names),
+        .match_expr => |match_expr| {
+            try collectExprIdentifiers(allocator, match_expr.value, names);
+            for (match_expr.arms) |arm| {
+                if (arm.guard) |guard| {
+                    try collectExprIdentifiers(allocator, guard, names);
+                }
+                for (arm.body) |stmt| {
+                    if (stmt.data == .expression) {
+                        try collectExprIdentifiers(allocator, stmt.data.expression, names);
+                    }
+                }
+            }
+        },
         else => {},
     }
 }

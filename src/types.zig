@@ -33,11 +33,18 @@ pub const Function = struct {
     return_type: *const Type,
 };
 
+pub const TypeApp = struct {
+    name: []const u8,
+    args: []const Type,
+};
+
 pub const Type = union(enum) {
     builtin: Builtin,
     struct_type: []const u8,
     function: Function,
     type_var: u32,
+    type_app: TypeApp,
+    nat: u32,
 
     pub fn eql(a: Type, b: Type) bool {
         return switch (a) {
@@ -61,6 +68,21 @@ pub const Type = union(enum) {
             },
             .type_var => |left| switch (b) {
                 .type_var => |right| left == right,
+                else => false,
+            },
+            .type_app => |left| switch (b) {
+                .type_app => |right| blk: {
+                    if (!std.mem.eql(u8, left.name, right.name)) break :blk false;
+                    if (left.args.len != right.args.len) break :blk false;
+                    for (left.args, right.args) |lhs_arg, rhs_arg| {
+                        if (!lhs_arg.eql(rhs_arg)) break :blk false;
+                    }
+                    break :blk true;
+                },
+                else => false,
+            },
+            .nat => |left| switch (b) {
+                .nat => |right| left == right,
                 else => false,
             },
         };
@@ -112,6 +134,8 @@ pub const Type = union(enum) {
             .struct_type => |name| name,
             .function => "__fn__",
             .type_var => "__tvar__",
+            .type_app => |app_ty| builtinAppName(app_ty, .glsl) orelse app_ty.name,
+            .nat => "__nat__",
         };
     }
 
@@ -146,6 +170,8 @@ pub const Type = union(enum) {
             .struct_type => |name| name,
             .function => "__fn__",
             .type_var => "__tvar__",
+            .type_app => |app_ty| builtinAppName(app_ty, .wgsl) orelse app_ty.name,
+            .nat => "__nat__",
         };
     }
 
@@ -162,6 +188,7 @@ pub const Type = union(enum) {
                 .bvec2, .bvec3, .bvec4 => builtinType(.bool),
                 else => null,
             },
+            .type_app => |app_ty| componentTypeForApp(app_ty),
             else => null,
         };
     }
@@ -174,6 +201,7 @@ pub const Type = union(enum) {
                 .vec4, .ivec4, .uvec4, .bvec4 => 4,
                 else => null,
             },
+            .type_app => |app_ty| vectorLenForApp(app_ty),
             else => null,
         };
     }
@@ -186,6 +214,39 @@ pub const Type = union(enum) {
                 .mat4 => 4,
                 else => null,
             },
+            .type_app => |app_ty| matrixLenForApp(app_ty),
+            else => null,
+        };
+    }
+
+    pub fn matrixCols(self: Type) ?u8 {
+        return switch (self) {
+            .builtin => |builtin| switch (builtin) {
+                .mat2 => 2,
+                .mat3 => 3,
+                .mat4 => 4,
+                else => null,
+            },
+            .type_app => |app_ty| if (std.mem.eql(u8, app_ty.name, "Mat") and app_ty.args.len == 2)
+                natLen(app_ty.args[1])
+            else
+                null,
+            else => null,
+        };
+    }
+
+    pub fn matrixRows(self: Type) ?u8 {
+        return switch (self) {
+            .builtin => |builtin| switch (builtin) {
+                .mat2 => 2,
+                .mat3 => 3,
+                .mat4 => 4,
+                else => null,
+            },
+            .type_app => |app_ty| if (std.mem.eql(u8, app_ty.name, "Mat") and app_ty.args.len == 2)
+                natLen(app_ty.args[0])
+            else
+                null,
             else => null,
         };
     }
@@ -205,11 +266,24 @@ pub const Type = union(enum) {
     }
 
     pub fn isVector(self: Type) bool {
-        return self.vectorLen() != null;
+        return switch (self) {
+            .type_app => |app_ty| std.mem.eql(u8, app_ty.name, "Vec") and app_ty.args.len == 1,
+            else => self.vectorLen() != null,
+        };
     }
 
     pub fn isMatrix(self: Type) bool {
-        return self.matrixLen() != null;
+        return switch (self) {
+            .type_app => |app_ty| std.mem.eql(u8, app_ty.name, "Mat") and app_ty.args.len == 2,
+            else => self.matrixLen() != null,
+        };
+    }
+
+    pub fn isTensor(self: Type) bool {
+        return switch (self) {
+            .type_app => |app_ty| std.mem.eql(u8, app_ty.name, "Ten") or std.mem.eql(u8, app_ty.name, "Tensor"),
+            else => false,
+        };
     }
 
     pub fn isSampler(self: Type) bool {
@@ -243,6 +317,7 @@ pub const Type = union(enum) {
                 => true,
                 else => false,
             },
+            .type_app => |app_ty| std.mem.eql(u8, app_ty.name, "Vec") or std.mem.eql(u8, app_ty.name, "Mat"),
             else => false,
         };
     }
@@ -253,6 +328,7 @@ pub const Type = union(enum) {
                 .float, .vec2, .vec3, .vec4, .mat2, .mat3, .mat4 => true,
                 else => false,
             },
+            .type_app => |app_ty| std.mem.eql(u8, app_ty.name, "Vec") or std.mem.eql(u8, app_ty.name, "Mat") or std.mem.eql(u8, app_ty.name, "Sca"),
             else => false,
         };
     }
@@ -264,6 +340,21 @@ pub fn builtinType(value: Builtin) Type {
 
 pub fn typeVar(id: u32) Type {
     return .{ .type_var = id };
+}
+
+pub fn natType(value: u32) Type {
+    return .{ .nat = value };
+}
+
+pub fn typeApp(allocator: std.mem.Allocator, name: []const u8, args: []const Type) !Type {
+    const owned_args = try allocator.alloc(Type, args.len);
+    @memcpy(owned_args, args);
+    return .{
+        .type_app = .{
+            .name = name,
+            .args = owned_args,
+        },
+    };
 }
 
 pub fn fromName(name: []const u8) ?Type {
@@ -281,6 +372,7 @@ fn mapName(name: []const u8, title_case: bool) ?Type {
             .{ "Int", builtinType(.int) },
             .{ "UInt", builtinType(.uint) },
             .{ "Bool", builtinType(.bool) },
+            .{ "Sca", builtinType(.float) },
             .{ "Vec2", builtinType(.vec2) },
             .{ "Vec3", builtinType(.vec3) },
             .{ "Vec4", builtinType(.vec4) },
@@ -390,10 +482,16 @@ pub fn resolveOp(op: token.TokenTag, lhs: Type, rhs: Type) ?Type {
             if (rhs.isVector() and lhs.isScalar() and rhs.componentType().?.eql(lhs)) return rhs;
             if (lhs.isMatrix() and rhs.isScalar() and lhs.componentType().?.eql(rhs)) return lhs;
             if (rhs.isMatrix() and lhs.isScalar() and rhs.componentType().?.eql(lhs)) return rhs;
-            if (op == .star and lhs.isMatrix() and rhs.isVector() and lhs.componentType().?.eql(rhs.componentType().?) and lhs.matrixLen() == rhs.vectorLen()) {
-                return rhs;
+            if (op == .star and lhs.isMatrix() and rhs.isVector() and lhs.componentType().?.eql(rhs.componentType().?)) {
+                const cols = lhs.matrixCols() orelse return null;
+                const len = rhs.vectorLen() orelse return null;
+                if (cols == len) return rhs;
             }
-            if (op == .star and lhs.isMatrix() and rhs.isMatrix() and lhs.eql(rhs)) return lhs;
+            if (op == .star and lhs.isMatrix() and rhs.isMatrix()) {
+                const lhs_cols = lhs.matrixCols() orelse return null;
+                const rhs_rows = rhs.matrixRows() orelse return null;
+                if (lhs_cols == rhs_rows) return rhs;
+            }
             return null;
         },
         .percent => {
@@ -433,6 +531,74 @@ pub fn vectorTypeForComponent(component: Type, len: u8) ?Type {
             },
             else => null,
         },
+        else => null,
+    };
+}
+
+fn builtinAppName(app_ty: TypeApp, target: enum { glsl, wgsl }) ?[]const u8 {
+    if (std.mem.eql(u8, app_ty.name, "Vec") and app_ty.args.len == 1) {
+        const len = natLen(app_ty.args[0]) orelse return null;
+        return switch (target) {
+            .glsl => switch (len) {
+                2 => "vec2",
+                3 => "vec3",
+                4 => "vec4",
+                else => null,
+            },
+            .wgsl => switch (len) {
+                2 => "vec2f",
+                3 => "vec3f",
+                4 => "vec4f",
+                else => null,
+            },
+        };
+    }
+
+    if (std.mem.eql(u8, app_ty.name, "Mat") and app_ty.args.len == 2) {
+        const rows = natLen(app_ty.args[0]) orelse return null;
+        const cols = natLen(app_ty.args[1]) orelse return null;
+        if (rows != cols) return null;
+        return switch (target) {
+            .glsl => switch (rows) {
+                2 => "mat2",
+                3 => "mat3",
+                4 => "mat4",
+                else => null,
+            },
+            .wgsl => switch (rows) {
+                2 => "mat2x2f",
+                3 => "mat3x3f",
+                4 => "mat4x4f",
+                else => null,
+            },
+        };
+    }
+
+    return null;
+}
+
+fn componentTypeForApp(app_ty: TypeApp) ?Type {
+    if (std.mem.eql(u8, app_ty.name, "Vec") and app_ty.args.len == 1) return builtinType(.float);
+    if (std.mem.eql(u8, app_ty.name, "Mat") and app_ty.args.len == 2) return builtinType(.float);
+    return null;
+}
+
+fn vectorLenForApp(app_ty: TypeApp) ?u8 {
+    if (!std.mem.eql(u8, app_ty.name, "Vec") or app_ty.args.len != 1) return null;
+    return natLen(app_ty.args[0]);
+}
+
+fn matrixLenForApp(app_ty: TypeApp) ?u8 {
+    if (!std.mem.eql(u8, app_ty.name, "Mat") or app_ty.args.len != 2) return null;
+    const rows = natLen(app_ty.args[0]) orelse return null;
+    const cols = natLen(app_ty.args[1]) orelse return null;
+    if (rows != cols) return null;
+    return rows;
+}
+
+fn natLen(ty: Type) ?u8 {
+    return switch (ty) {
+        .nat => |value| std.math.cast(u8, value),
         else => null,
     };
 }

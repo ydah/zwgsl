@@ -210,6 +210,12 @@ fn containsTypeVar(ty: types.Type) bool {
             }
             break :blk containsTypeVar(function.return_type.*);
         },
+        .type_app => |app_ty| blk: {
+            for (app_ty.args) |arg| {
+                if (containsTypeVar(arg)) break :blk true;
+            }
+            break :blk false;
+        },
         else => false,
     };
 }
@@ -235,6 +241,18 @@ fn instantiateType(
                 },
             };
         },
+        .type_app => |app_ty| blk: {
+            const args = try allocator.alloc(types.Type, app_ty.args.len);
+            for (app_ty.args, 0..) |arg, index| {
+                args[index] = try instantiateType(allocator, arg, replacements);
+            }
+            break :blk .{
+                .type_app = .{
+                    .name = app_ty.name,
+                    .args = args,
+                },
+            };
+        },
         else => ty,
     };
 }
@@ -247,6 +265,11 @@ fn collectFreeTypeVars(ty: types.Type, vars: *std.AutoHashMap(u32, void)) !void 
                 try collectFreeTypeVars(param, vars);
             }
             try collectFreeTypeVars(function.return_type.*, vars);
+        },
+        .type_app => |app_ty| {
+            for (app_ty.args) |arg| {
+                try collectFreeTypeVars(arg, vars);
+            }
         },
         else => {},
     }

@@ -252,3 +252,97 @@ test "sema infers lambda numeric arguments from use sites" {
 
     try std.testing.expectEqual(@as(usize, 0), analyzed.diagnostics.items.items.len);
 }
+
+test "sema registers algebraic data constructors" {
+    var analyzed = try analyzeSource(
+        \\type Shape
+        \\  Circle(radius: Float)
+        \\  Point
+        \\end
+        \\
+        \\def main
+        \\  let shape = Circle(1.0)
+        \\  shape
+        \\end
+    );
+    defer analyzed.arena.deinit();
+
+    try std.testing.expectEqual(@as(usize, 0), analyzed.diagnostics.items.items.len);
+    try std.testing.expect(analyzed.typed.constructor("Circle") != null);
+}
+
+test "sema accepts generic ADT constructors" {
+    var analyzed = try analyzeSource(
+        \\type Option(a)
+        \\  Some(value: a)
+        \\  None
+        \\end
+        \\
+        \\def unwrap(value: Option(Float)) -> Float
+        \\  match value
+        \\  when Some(inner)
+        \\    inner
+        \\  when None
+        \\    0.0
+        \\  end
+        \\end
+        \\
+        \\def main
+        \\  let value = Some(1.0)
+        \\  unwrap(value)
+        \\end
+    );
+    defer analyzed.arena.deinit();
+
+    try std.testing.expectEqual(@as(usize, 0), analyzed.diagnostics.items.items.len);
+}
+
+test "sema type-checks match expressions over ADTs" {
+    var analyzed = try analyzeSource(
+        \\type Shape
+        \\  Circle(radius: Float)
+        \\  Rect(width: Float, height: Float)
+        \\  Point
+        \\end
+        \\
+        \\def area(shape: Shape) -> Float
+        \\  match shape
+        \\  when Circle(radius)
+        \\    radius * radius
+        \\  when Rect(width, height)
+        \\    width * height
+        \\  when Point
+        \\    0.0
+        \\  end
+        \\end
+    );
+    defer analyzed.arena.deinit();
+
+    try std.testing.expectEqual(@as(usize, 0), analyzed.diagnostics.items.items.len);
+}
+
+test "sema warns about non-exhaustive matches" {
+    var analyzed = try analyzeSource(
+        \\type Shape
+        \\  Circle(radius: Float)
+        \\  Point
+        \\end
+        \\
+        \\def area(shape: Shape) -> Float
+        \\  match shape
+        \\  when Circle(radius)
+        \\    radius
+        \\  end
+        \\end
+    );
+    defer analyzed.arena.deinit();
+
+    var found_warning = false;
+    for (analyzed.diagnostics.items.items) |diagnostic| {
+        if (diagnostic.kind == .warning and std.mem.indexOf(u8, diagnostic.message, "not exhaustive") != null) {
+            found_warning = true;
+            break;
+        }
+    }
+    try std.testing.expect(found_warning);
+}

@@ -48,7 +48,11 @@ pub const Parser = struct {
         while (!self.isAtEnd()) {
             const item = self.parseTopLevelItem() catch |err| switch (err) {
                 error.ParseFailed => {
+                    const before = self.index;
                     self.synchronize();
+                    if (self.index == before and !self.isAtEnd()) {
+                        _ = self.advance();
+                    }
                     self.consumeNewlines();
                     continue;
                 },
@@ -71,6 +75,7 @@ pub const Parser = struct {
             .kw_precision => .{ .precision = try self.parsePrecisionDecl() },
             .kw_uniform => .{ .uniform = try self.parseUniformDecl() },
             .kw_struct => .{ .struct_def = try self.parseStructDef() },
+            .kw_type => .{ .type_def = try self.parseTypeDef() },
             .kw_def => .{ .function = try self.parseFunctionDef() },
             .kw_vertex, .kw_fragment, .kw_compute => .{ .shader_block = try self.parseShaderBlock() },
             else => {
@@ -106,7 +111,7 @@ pub const Parser = struct {
         const start = try self.expect(.kw_uniform, "uniform");
         const name = try self.parseSymbolName("uniform name");
         _ = try self.expect(.comma, "',' after uniform name");
-        const type_name = try self.expectIdentifier("uniform type");
+        const type_name = try self.expectTypeSpec("uniform type");
         return .{
             .position = positionOf(start),
             .name = name,
@@ -125,7 +130,7 @@ pub const Parser = struct {
         while (!self.check(.kw_end) and !self.isAtEnd()) {
             const field_name_tok = try self.expect(.identifier, "struct field name");
             _ = try self.expect(.colon, "':' after field name");
-            const type_name = try self.expectIdentifier("field type");
+            const type_name = try self.expectTypeSpec("field type");
             try fields.append(self.allocator, .{
                 .position = positionOf(field_name_tok),
                 .name = try self.identifierValue(field_name_tok),
@@ -186,7 +191,7 @@ pub const Parser = struct {
         const start = try self.expect(kind, "shader I/O declaration");
         const name = try self.parseSymbolName("shader variable name");
         _ = try self.expect(.comma, "',' after shader variable name");
-        const type_name = try self.expectIdentifier("shader variable type");
+        const type_name = try self.expectTypeSpec("shader variable type");
         var location: ?u32 = null;
 
         while (self.match(.comma)) {
@@ -233,7 +238,7 @@ pub const Parser = struct {
 
         var return_type: ?[]const u8 = null;
         if (self.match(.arrow)) {
-            return_type = try self.expectIdentifier("return type");
+            return_type = try self.expectTypeSpec("return type");
         }
 
         self.consumeNewlines();
@@ -254,6 +259,70 @@ pub const Parser = struct {
             .where_clause = where_clause,
         };
         return function;
+    }
+
+    fn parseTypeDef(self: *Parser) anyerror!ast.TypeDef {
+        const start = try self.expect(.kw_type, "type definition");
+        const name = try self.expectIdentifier("type name");
+        var params: std.ArrayListUnmanaged([]const u8) = .{};
+        defer params.deinit(self.allocator);
+        if (self.match(.lparen)) {
+            if (!self.check(.rparen)) {
+                while (true) {
+                    try params.append(self.allocator, try self.expectIdentifier("type parameter"));
+                    if (!self.match(.comma)) break;
+                }
+            }
+            _ = try self.expect(.rparen, "')' after type parameters");
+        }
+
+        var variants: std.ArrayListUnmanaged(ast.Variant) = .{};
+        defer variants.deinit(self.allocator);
+
+        self.consumeNewlines();
+        while (!self.isAtEnd() and !self.check(.kw_end)) {
+            try variants.append(self.allocator, try self.parseVariant());
+            self.consumeNewlines();
+        }
+
+        _ = try self.expect(.kw_end, "'end' to close type definition");
+        return .{
+            .position = positionOf(start),
+            .name = name,
+            .params = try params.toOwnedSlice(self.allocator),
+            .variants = try variants.toOwnedSlice(self.allocator),
+        };
+    }
+
+    fn parseVariant(self: *Parser) anyerror!ast.Variant {
+        const start = self.current();
+        const name = try self.expectIdentifier("variant name");
+        var fields: std.ArrayListUnmanaged(ast.VariantField) = .{};
+        defer fields.deinit(self.allocator);
+
+        if (self.match(.lparen)) {
+            if (!self.check(.rparen)) {
+                while (true) {
+                    const field_start = self.current();
+                    const field_name = try self.expectIdentifier("variant field name");
+                    _ = try self.expect(.colon, "':' after variant field");
+                    const type_name = try self.expectTypeSpec("variant field type");
+                    try fields.append(self.allocator, .{
+                        .position = positionOf(field_start),
+                        .name = field_name,
+                        .type_name = type_name,
+                    });
+                    if (!self.match(.comma)) break;
+                }
+            }
+            _ = try self.expect(.rparen, "')' after variant fields");
+        }
+
+        return .{
+            .position = positionOf(start),
+            .name = name,
+            .fields = try fields.toOwnedSlice(self.allocator),
+        };
     }
 
     fn parseWhereClause(self: *Parser) anyerror!ast.WhereClause {
@@ -278,7 +347,7 @@ pub const Parser = struct {
         const is_inout = self.match(.kw_inout);
         const name = try self.expectIdentifier("parameter name");
         _ = try self.expect(.colon, "':' after parameter name");
-        const type_name = try self.expectIdentifier("parameter type");
+        const type_name = try self.expectTypeSpec("parameter type");
         return .{
             .position = positionOf(start),
             .name = name,
@@ -405,7 +474,7 @@ pub const Parser = struct {
         if (self.looksLikeTypedAssignment()) {
             const name_tok = try self.expect(.identifier, "typed assignment name");
             _ = try self.expect(.colon, "':' after variable name");
-            const type_name = try self.expectIdentifier("typed assignment type");
+            const type_name = try self.expectTypeSpec("typed assignment type");
             _ = try self.expect(.assign, "'=' after type annotation");
             const value = try self.parseExpression(0);
             return try self.makeStmt(positionOf(name_tok), .{
@@ -454,7 +523,7 @@ pub const Parser = struct {
         const name_tok = try self.expect(.identifier, name_label);
         var type_name: ?[]const u8 = null;
         if (self.match(.colon)) {
-            type_name = try self.expectIdentifier("binding type");
+            type_name = try self.expectTypeSpec("binding type");
         }
         _ = try self.expect(.assign, "'=' after binding");
         return .{
@@ -605,6 +674,7 @@ pub const Parser = struct {
                 return expr;
             },
             .pipe => return try self.parseLambda(),
+            .kw_match => return try self.parseMatchExpr(),
             else => {
                 try self.reportUnexpected(tok, "expression");
                 return error.ParseFailed;
@@ -632,6 +702,90 @@ pub const Parser = struct {
                 .body = body,
             },
         });
+    }
+
+    fn parseMatchExpr(self: *Parser) anyerror!*ast.Expr {
+        const start = try self.expect(.kw_match, "match expression");
+        const value = try self.parseExpression(0);
+        var arms: std.ArrayListUnmanaged(ast.MatchArm) = .{};
+        defer arms.deinit(self.allocator);
+
+        self.consumeNewlines();
+        while (self.match(.kw_when)) {
+            const pattern = try self.parsePattern();
+            const guard = if (self.match(.kw_if)) try self.parseExpression(0) else null;
+            self.consumeNewlines();
+            try arms.append(self.allocator, .{
+                .pattern = pattern,
+                .guard = guard,
+                .body = try self.parseStatementList(&.{ .kw_when, .kw_end }),
+            });
+        }
+
+        _ = try self.expect(.kw_end, "'end' to close match expression");
+        return try self.makeExpr(positionOf(start), .{
+            .match_expr = .{
+                .value = value,
+                .arms = try arms.toOwnedSlice(self.allocator),
+            },
+        });
+    }
+
+    fn parsePattern(self: *Parser) anyerror!ast.Pattern {
+        const tok = self.current();
+        return switch (tok.tag) {
+            .symbol => blk: {
+                _ = self.advance();
+                break :blk .{ .symbol = try self.symbolValue(tok) };
+            },
+            .integer_literal => blk: {
+                _ = self.advance();
+                break :blk .{ .integer = try std.fmt.parseInt(i64, tok.lexeme(self.source), 10) };
+            },
+            .float_literal => blk: {
+                _ = self.advance();
+                break :blk .{ .float = try std.fmt.parseFloat(f64, tok.lexeme(self.source)) };
+            },
+            .kw_true => {
+                _ = self.advance();
+                return .{ .bool = true };
+            },
+            .kw_false => {
+                _ = self.advance();
+                return .{ .bool = false };
+            },
+            .identifier => {
+                _ = self.advance();
+                const name = try self.identifierValue(tok);
+                if (std.mem.eql(u8, name, "_")) {
+                    return .{ .wildcard = {} };
+                }
+                if (std.ascii.isUpper(name[0])) {
+                    var args: std.ArrayListUnmanaged(ast.Pattern) = .{};
+                    defer args.deinit(self.allocator);
+                    if (self.match(.lparen)) {
+                        if (!self.check(.rparen)) {
+                            while (true) {
+                                try args.append(self.allocator, try self.parsePattern());
+                                if (!self.match(.comma)) break;
+                            }
+                        }
+                        _ = try self.expect(.rparen, "')' after constructor pattern");
+                    }
+                    return .{
+                        .constructor = .{
+                            .name = name,
+                            .args = try args.toOwnedSlice(self.allocator),
+                        },
+                    };
+                }
+                return .{ .binding = name };
+            },
+            else => {
+                try self.reportUnexpected(tok, "pattern");
+                return error.ParseFailed;
+            },
+        };
     }
 
     fn finishCall(self: *Parser, callee: *ast.Expr) anyerror!*ast.Expr {
@@ -705,6 +859,38 @@ pub const Parser = struct {
     fn expectIdentifier(self: *Parser, what: []const u8) anyerror![]const u8 {
         const ident = try self.expect(.identifier, what);
         return try self.identifierValue(ident);
+    }
+
+    fn expectTypeSpec(self: *Parser, what: []const u8) anyerror![]const u8 {
+        const start = try self.expect(.identifier, what);
+        var end = start;
+
+        if (self.match(.lparen)) {
+            end = self.previous();
+            var depth: usize = 1;
+            while (depth > 0) {
+                const tok = self.current();
+                switch (tok.tag) {
+                    .identifier, .integer_literal, .comma => {
+                        end = self.advance();
+                    },
+                    .lparen => {
+                        depth += 1;
+                        end = self.advance();
+                    },
+                    .rparen => {
+                        depth -= 1;
+                        end = self.advance();
+                    },
+                    else => {
+                        try self.reportUnexpected(tok, what);
+                        return error.ParseFailed;
+                    },
+                }
+            }
+        }
+
+        return try self.intern(self.source[start.start..end.end]);
     }
 
     fn expect(self: *Parser, tag: token.TokenTag, what: []const u8) anyerror!token.Token {
@@ -783,10 +969,31 @@ pub const Parser = struct {
     }
 
     fn looksLikeTypedAssignment(self: *Parser) bool {
-        return self.peek(0) == .identifier and
-            self.peek(1) == .colon and
-            self.peek(2) == .identifier and
-            self.peek(3) == .assign;
+        if (self.peek(0) != .identifier or self.peek(1) != .colon or self.peek(2) != .identifier) {
+            return false;
+        }
+
+        var offset: usize = 3;
+        if (self.peek(offset) == .lparen) {
+            var depth: usize = 1;
+            offset += 1;
+            while (depth > 0) {
+                switch (self.peek(offset)) {
+                    .identifier, .integer_literal, .comma => offset += 1,
+                    .lparen => {
+                        depth += 1;
+                        offset += 1;
+                    },
+                    .rparen => {
+                        depth -= 1;
+                        offset += 1;
+                    },
+                    else => return false,
+                }
+            }
+        }
+
+        return self.peek(offset) == .assign;
     }
 
     fn peek(self: *Parser, offset: usize) token.TokenTag {
@@ -801,14 +1008,14 @@ pub const Parser = struct {
                 self.consumeNewlines();
                 return;
             }
-            if (self.check(.kw_end) or self.check(.kw_else) or self.check(.kw_elsif) or self.check(.kw_where)) return;
+            if (self.check(.kw_end) or self.check(.kw_else) or self.check(.kw_elsif) or self.check(.kw_where) or self.check(.kw_when)) return;
             _ = self.advance();
         }
     }
 
     fn currentStartsBoundary(self: *Parser) bool {
         return isSeparatorTag(self.current().tag) or
-            self.currentIsOneOf(&.{ .kw_end, .kw_else, .kw_elsif, .kw_where, .eof });
+            self.currentIsOneOf(&.{ .kw_end, .kw_else, .kw_elsif, .kw_where, .kw_when, .eof });
     }
 
     fn intern(self: *Parser, value: []const u8) anyerror![]const u8 {

@@ -452,7 +452,8 @@ fn callName(name: []const u8, ty: types.Type) []const u8 {
                 else => name,
             },
             .struct_type => |struct_name| struct_name,
-            .function, .type_var => name,
+            .function, .type_var, .nat => name,
+            .type_app => ty.wgslName(),
         };
     }
     return name;

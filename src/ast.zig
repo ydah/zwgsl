@@ -51,6 +51,25 @@ pub const StructDef = struct {
     fields: []const StructField,
 };
 
+pub const VariantField = struct {
+    position: Position,
+    name: []const u8,
+    type_name: []const u8,
+};
+
+pub const Variant = struct {
+    position: Position,
+    name: []const u8,
+    fields: []const VariantField,
+};
+
+pub const TypeDef = struct {
+    position: Position,
+    name: []const u8,
+    params: []const []const u8,
+    variants: []const Variant,
+};
+
 pub const Param = struct {
     position: Position,
     name: []const u8,
@@ -90,6 +109,7 @@ pub const Item = union(enum) {
     precision: PrecisionDecl,
     uniform: UniformDecl,
     struct_def: StructDef,
+    type_def: TypeDef,
     function: *FunctionDef,
     shader_block: *ShaderBlock,
 };
@@ -179,6 +199,7 @@ pub const Expr = struct {
         call: Call,
         index: Index,
         lambda: Lambda,
+        match_expr: MatchExpr,
     };
 
     pub const Unary = struct {
@@ -211,4 +232,30 @@ pub const Expr = struct {
         params: []const []const u8,
         body: *Expr,
     };
+
+    pub const MatchExpr = struct {
+        value: *Expr,
+        arms: []const MatchArm,
+    };
+};
+
+pub const MatchArm = struct {
+    pattern: Pattern,
+    guard: ?*Expr = null,
+    body: []const *Stmt,
+};
+
+pub const Pattern = union(enum) {
+    constructor: ConstructorPattern,
+    wildcard: void,
+    binding: []const u8,
+    integer: i64,
+    float: f64,
+    bool: bool,
+    symbol: []const u8,
+};
+
+pub const ConstructorPattern = struct {
+    name: []const u8,
+    args: []const Pattern,
 };
