@@ -1,12 +1,12 @@
 struct VertexInput {
     @location(0) position: vec3f,
     @location(1) uv: vec2f,
-};
+}
 
 struct VertexOutput {
     @builtin(position) gl_Position: vec4f,
     @location(0) v_uv: vec2f,
-};
+}
 
 @group(0) @binding(0) var scene_tex_texture: texture_2d<f32>;
 @group(0) @binding(1) var scene_tex_sampler: sampler;

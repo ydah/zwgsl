@@ -9,7 +9,7 @@ struct Shape {
     __Circle_radius: f32,
     __Rect_width: f32,
     __Rect_height: f32,
-};
+}
 
 fn Circle(arg_0: f32) -> Shape {
     var __result: Shape;
