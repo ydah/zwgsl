@@ -1054,9 +1054,44 @@ fn emitCallExpr(
             }
         }
         if (index > 0) try writer.writeAll(", ");
+        if (builtinSplatType(call, index)) |splat_type| {
+            try writer.print("{s}(", .{splat_type.wgslName()});
+            try emitValue(writer, module, function_context, arg, 0, uniforms, current_functions, current_params, sampler_aliases);
+            try writer.writeByte(')');
+            continue;
+        }
         try emitValue(writer, module, function_context, arg, 0, uniforms, current_functions, current_params, sampler_aliases);
     }
     try writer.writeByte(')');
+}
+
+fn builtinSplatType(call: mir.Call, arg_index: usize) ?types.Type {
+    if (std.mem.eql(u8, call.name, "clamp")) {
+        if (call.args.len == 3 and call.args[0].ty.isVector() and arg_index > 0 and call.args[arg_index].ty.isScalar()) {
+            return call.args[0].ty;
+        }
+        return null;
+    }
+
+    if (std.mem.eql(u8, call.name, "min") or
+        std.mem.eql(u8, call.name, "max") or
+        std.mem.eql(u8, call.name, "mod") or
+        std.mem.eql(u8, call.name, "step"))
+    {
+        if (call.args.len == 2 and call.args[0].ty.isVector() and arg_index == 1 and call.args[1].ty.isScalar()) {
+            return call.args[0].ty;
+        }
+        return null;
+    }
+
+    if (std.mem.eql(u8, call.name, "smoothstep")) {
+        if (call.args.len == 3 and call.args[1].ty.isVector() and call.args[2].ty.isVector() and arg_index == 0 and call.args[0].ty.isScalar()) {
+            return call.args[1].ty;
+        }
+        return null;
+    }
+
+    return null;
 }
 
 fn emitMatrixConstructorCast(
