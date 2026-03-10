@@ -92,8 +92,7 @@ body {
 }
 
 #editor,
-#wgsl-output,
-#preview-canvas {
+#wgsl-output {
   min-height: 0;
   height: 100%;
 }
@@ -107,7 +106,82 @@ body {
 
 #preview-canvas {
   width: 100%;
-  aspect-ratio: 16 / 9;
+  height: 100%;
+  min-height: 260px;
+  border-right: 1px solid var(--edge);
+}
+
+.preview-panel {
+  min-height: 360px;
+}
+
+.preview-shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(220px, 0.8fr);
+  min-height: 0;
+  height: 100%;
+}
+
+.uniforms {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  padding: 14px;
+  overflow: auto;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.35), rgba(255, 255, 255, 0.08));
+}
+
+.uniform-empty,
+.uniform-live {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.92rem;
+  line-height: 1.5;
+}
+
+.uniform-card {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(29, 26, 22, 0.08);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.64);
+}
+
+.uniform-card-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.uniform-card-header strong {
+  font-size: 0.95rem;
+}
+
+.uniform-card-header span {
+  color: var(--muted);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.uniform-field {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) 52px;
+  gap: 10px;
+  align-items: center;
+  font-size: 0.84rem;
+}
+
+.uniform-field input {
+  width: 100%;
+}
+
+.uniform-field output {
+  text-align: right;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  color: var(--muted);
 }
 
 button {
@@ -122,5 +196,14 @@ button {
 @media (max-width: 960px) {
   .grid {
     grid-template-columns: 1fr;
+  }
+
+  .preview-shell {
+    grid-template-columns: 1fr;
+  }
+
+  #preview-canvas {
+    border-right: 0;
+    border-bottom: 1px solid var(--edge);
   }
 }
