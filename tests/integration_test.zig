@@ -68,10 +68,10 @@ test "hello triangle example compiles to WGSL" {
 
 test "phong example compiles to WGSL" {
     try expectCompilesPathToWgsl("examples/phong.zw", &.{
-        "fn phong_strength(normal: vec3f, light_dir: vec3f) -> f32",
         "v_normal = mat3x3f(model_matrix[0].xyz, model_matrix[1].xyz, model_matrix[2].xyz) * normal;",
         "gl_Position = projection_matrix * view_matrix * world_pos;",
     }, &.{
+        "fn phong_strength(normal: vec3f, light_dir: vec3f) -> f32",
         "let light: f32 = phong_strength(v_normal, light_dir);",
         "frag_color = vec4f(base_color.rgb * (0.2 + 0.8 * light), base_color.a);",
     });
@@ -99,13 +99,25 @@ test "postprocess example compiles to WGSL" {
 }
 
 test "utah teapot example compiles to WGSL" {
-    try expectCompilesPathToWgsl("examples/utah_teapot.zw", &.{
-        "struct _zwgsl_uniform_time",
-        "struct _zwgsl_uniform_resolution",
-        "gl_Position = vec4f(position, 1.0);",
-    }, &.{
-        "fn scene_distance(p: vec3f) -> f32",
-        "let color: vec3f = shade(v_uv);",
-        "frag_color = vec4f(color, 1.0);",
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const source = try std.fs.cwd().readFileAlloc(arena.allocator(), "examples/utah_teapot.zw", 1 << 20);
+    const output = try zwgsl.compiler.compile(arena.allocator(), source, .{
+        .target = .wgsl,
     });
+
+    try std.testing.expectEqual(@as(usize, 0), output.errors.len);
+    try std.testing.expect(output.vertex_source != null);
+    try std.testing.expect(output.fragment_source != null);
+
+    try std.testing.expect(std.mem.indexOf(u8, output.vertex_source.?, "struct _zwgsl_uniform_time") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output.vertex_source.?, "struct _zwgsl_uniform_resolution") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output.vertex_source.?, "gl_Position = vec4f(position, 1.0);") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output.vertex_source.?, "fn shade(") == null);
+    try std.testing.expect(std.mem.indexOf(u8, output.vertex_source.?, "fn scene_distance(") == null);
+
+    try std.testing.expect(std.mem.indexOf(u8, output.fragment_source.?, "fn scene_distance(p: vec3f) -> f32") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output.fragment_source.?, "let color: vec3f = shade(v_uv);") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output.fragment_source.?, "frag_color = vec4f(color, 1.0);") != null);
 }

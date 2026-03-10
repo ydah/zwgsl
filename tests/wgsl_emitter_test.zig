@@ -221,6 +221,50 @@ test "compiler emits WGSL for the phong fixture" {
     );
 }
 
+test "compiler omits fragment-only global helpers from vertex WGSL" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const source =
+        \\def vertex_scale(pos: Vec3) -> Vec4
+        \\  vec4(pos * 0.5, 1.0)
+        \\end
+        \\
+        \\def fragment_color(uv: Vec2) -> Vec4
+        \\  vec4(uv, 0.0, 1.0)
+        \\end
+        \\
+        \\vertex do
+        \\  input :position, Vec3, location: 0
+        \\  varying :v_uv, Vec2
+        \\  def main
+        \\    self.v_uv = vec2(0.5, 0.5)
+        \\    gl_Position = vertex_scale(position)
+        \\  end
+        \\end
+        \\
+        \\fragment do
+        \\  varying :v_uv, Vec2
+        \\  output :frag_color, Vec4, location: 0
+        \\  def main
+        \\    frag_color = fragment_color(v_uv)
+        \\  end
+        \\end
+    ;
+
+    const output = try zwgsl.compiler.compile(arena.allocator(), source, .{
+        .target = .wgsl,
+    });
+
+    try std.testing.expectEqual(@as(usize, 0), output.errors.len);
+    try std.testing.expect(output.vertex_source != null);
+    try std.testing.expect(output.fragment_source != null);
+    try std.testing.expect(std.mem.indexOf(u8, output.vertex_source.?, "fn vertex_scale") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output.vertex_source.?, "fn fragment_color") == null);
+    try std.testing.expect(std.mem.indexOf(u8, output.fragment_source.?, "fn fragment_color") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output.fragment_source.?, "fn vertex_scale") == null);
+}
+
 test "compiler emits WGSL for dependent dimension fixtures" {
     try expectWgslFixture(
         "tests/fixtures/dependent_dim.zw",

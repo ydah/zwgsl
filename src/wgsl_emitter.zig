@@ -173,6 +173,8 @@ pub fn emit(allocator: std.mem.Allocator, module: *const mir.Module, options: Em
 fn emitStage(allocator: std.mem.Allocator, module: *const mir.Module, entry_point: mir.EntryPoint, options: EmitOptions) anyerror![]const u8 {
     var buffer = try std.ArrayList(u8).initCapacity(allocator, 0);
     const writer = buffer.writer(allocator);
+    const reachable = try collectReachableFunctions(allocator, module, entry_point);
+    defer reachable.deinit(allocator);
 
     if (entry_point.stage != .compute) {
         try emitStageInterfaceStructs(writer, module, entry_point);
@@ -185,13 +187,15 @@ fn emitStage(allocator: std.mem.Allocator, module: *const mir.Module, entry_poin
         try writer.writeByte('\n');
     }
 
-    for (module.global_functions) |function| {
+    for (module.global_functions, 0..) |function, index| {
+        if (!reachable.global_marks[index]) continue;
         if (isInlineTraitFunction(function)) continue;
         try emitFunction(writer, allocator, module, function, options, null, false, module.uniforms, module.global_functions);
         try writer.writeByte('\n');
     }
 
     for (entry_point.functions, 0..) |function, index| {
+        if (!reachable.stage_marks[index]) continue;
         if (isInlineTraitFunction(function)) continue;
         try emitFunction(
             writer,
@@ -216,6 +220,104 @@ fn emitStage(allocator: std.mem.Allocator, module: *const mir.Module, entry_poin
     if (!options.optimize_output) return sanitized;
     defer allocator.free(sanitized);
     return compactOutput(allocator, sanitized);
+}
+
+const ReachableFunctions = struct {
+    global_marks: []bool,
+    stage_marks: []bool,
+
+    fn deinit(self: ReachableFunctions, allocator: std.mem.Allocator) void {
+        allocator.free(self.global_marks);
+        allocator.free(self.stage_marks);
+    }
+};
+
+const FunctionWorkItem = union(enum) {
+    global: usize,
+    stage: usize,
+};
+
+fn collectReachableFunctions(allocator: std.mem.Allocator, module: *const mir.Module, entry_point: mir.EntryPoint) !ReachableFunctions {
+    const global_marks = try allocator.alloc(bool, module.global_functions.len);
+    errdefer allocator.free(global_marks);
+    @memset(global_marks, false);
+
+    const stage_marks = try allocator.alloc(bool, entry_point.functions.len);
+    errdefer allocator.free(stage_marks);
+    @memset(stage_marks, false);
+
+    var worklist = std.ArrayListUnmanaged(FunctionWorkItem){};
+    defer worklist.deinit(allocator);
+
+    if (entry_point.functions.len > 0) {
+        try enqueueStageFunction(allocator, &worklist, stage_marks, entry_point.main_function_index);
+    }
+
+    while (worklist.items.len > 0) {
+        const item = worklist.pop().?;
+        switch (item) {
+            .global => |index| try collectCalledFunctions(allocator, &worklist, module, entry_point, module.global_functions[index], .global, global_marks, stage_marks),
+            .stage => |index| try collectCalledFunctions(allocator, &worklist, module, entry_point, entry_point.functions[index], .stage, global_marks, stage_marks),
+        }
+    }
+
+    return .{
+        .global_marks = global_marks,
+        .stage_marks = stage_marks,
+    };
+}
+
+fn enqueueStageFunction(
+    allocator: std.mem.Allocator,
+    worklist: *std.ArrayListUnmanaged(FunctionWorkItem),
+    stage_marks: []bool,
+    index: usize,
+) !void {
+    if (index >= stage_marks.len or stage_marks[index]) return;
+    stage_marks[index] = true;
+    try worklist.append(allocator, .{ .stage = index });
+}
+
+fn enqueueGlobalFunction(
+    allocator: std.mem.Allocator,
+    worklist: *std.ArrayListUnmanaged(FunctionWorkItem),
+    global_marks: []bool,
+    index: usize,
+) !void {
+    if (index >= global_marks.len or global_marks[index]) return;
+    global_marks[index] = true;
+    try worklist.append(allocator, .{ .global = index });
+}
+
+fn collectCalledFunctions(
+    allocator: std.mem.Allocator,
+    worklist: *std.ArrayListUnmanaged(FunctionWorkItem),
+    module: *const mir.Module,
+    entry_point: mir.EntryPoint,
+    function: mir.Function,
+    scope: std.meta.Tag(FunctionWorkItem),
+    global_marks: []bool,
+    stage_marks: []bool,
+) !void {
+    for (function.blocks) |block| {
+        for (block.instructions) |instruction| {
+            const call = switch (instruction.data) {
+                .call => |value| value,
+                else => continue,
+            };
+
+            if (scope == .stage) {
+                if (findFunctionIndex(entry_point.functions, call.name)) |index| {
+                    try enqueueStageFunction(allocator, worklist, stage_marks, index);
+                    continue;
+                }
+            }
+
+            if (findFunctionIndex(module.global_functions, call.name)) |index| {
+                try enqueueGlobalFunction(allocator, worklist, global_marks, index);
+            }
+        }
+    }
 }
 
 fn emitStageInterfaceStructs(writer: anytype, module: *const mir.Module, entry_point: mir.EntryPoint) !void {
@@ -1548,6 +1650,13 @@ fn uniformRequiresWrapper(ty: types.Type) bool {
 fn findFunction(functions: []const mir.Function, name: []const u8) ?mir.Function {
     for (functions) |function| {
         if (std.mem.eql(u8, function.name, name)) return function;
+    }
+    return null;
+}
+
+fn findFunctionIndex(functions: []const mir.Function, name: []const u8) ?usize {
+    for (functions, 0..) |function, index| {
+        if (std.mem.eql(u8, function.name, name)) return index;
     }
     return null;
 }
