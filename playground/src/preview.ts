@@ -29,11 +29,29 @@ type UniformState = {
   valueLabels: HTMLOutputElement[];
 };
 
+type TextureDimension = "2d" | "3d" | "cube";
+
+type TextureSpec = {
+  textureBinding: number;
+  samplerBinding: number;
+  name: string;
+  typeName: string;
+  dimension: TextureDimension;
+};
+
+type TextureState = {
+  spec: TextureSpec;
+  texture: GPUTexture;
+  view: GPUTextureView;
+  sampler: GPUSampler;
+};
+
 type CompiledPreviewState = {
   key: string;
   pipeline: GPURenderPipeline;
   bindGroup: GPUBindGroup | null;
   uniforms: UniformState[];
+  textures: TextureState[];
 };
 
 const fallbackVertexShader = `
@@ -95,12 +113,6 @@ export const createPreview = async (
       return activeState;
     }
 
-    if (result.wgsl.includes("_texture:") || result.wgsl.includes("_sampler: sampler")) {
-      status.textContent = "textures unsupported";
-      controlsRoot.replaceChildren(makeEmptyState("Texture preview is not wired in the playground yet."));
-      return activeState;
-    }
-
     const vertexSource = result.vertex?.includes("@vertex") ? result.vertex : fallbackVertexShader;
     const fragmentSource = result.fragment?.includes("@fragment") ? result.fragment : fallbackFragmentShader;
     const nextKey = `${vertexSource}\n// ---\n${fragmentSource}`;
@@ -111,6 +123,8 @@ export const createPreview = async (
 
     const uniformSpecs = collectUniformSpecs(vertexSource, fragmentSource);
     const uniformStates = uniformSpecs.map((spec) => createUniformState(device, spec, canvas));
+    const textureSpecs = collectTextureSpecs(vertexSource, fragmentSource);
+    const textureStates = textureSpecs.map((spec) => createTextureState(device, spec));
 
     try {
       const vertexModule = device.createShaderModule({ code: vertexSource });
@@ -128,34 +142,52 @@ export const createPreview = async (
 
       if (currentVersion !== buildVersion) {
         destroyUniforms(uniformStates);
+        destroyTextures(textureStates);
         return activeState;
       }
 
+      const bindEntries = [
+        ...uniformStates.map<GPUBindGroupEntry>((state) => ({
+          binding: state.spec.binding,
+          resource: { buffer: state.buffer },
+        })),
+        ...textureStates.flatMap<GPUBindGroupEntry>((state) => [
+          {
+            binding: state.spec.textureBinding,
+            resource: state.view,
+          },
+          {
+            binding: state.spec.samplerBinding,
+            resource: state.sampler,
+          },
+        ]),
+      ];
+
       const bindGroup =
-        uniformStates.length > 0
+        bindEntries.length > 0
           ? device.createBindGroup({
               layout: pipeline.getBindGroupLayout(0),
-              entries: uniformStates.map((state) => ({
-                binding: state.spec.binding,
-                resource: { buffer: state.buffer },
-              })),
+              entries: bindEntries,
             })
           : null;
 
       if (activeState) {
         destroyUniforms(activeState.uniforms);
+        destroyTextures(activeState.textures);
       }
 
-      renderControls(controlsRoot, uniformStates);
+      renderControls(controlsRoot, uniformStates, textureStates);
       status.textContent = "live";
       return {
         key: nextKey,
         pipeline,
         bindGroup,
         uniforms: uniformStates,
+        textures: textureStates,
       };
     } catch {
       destroyUniforms(uniformStates);
+      destroyTextures(textureStates);
       status.textContent = "preview error";
       controlsRoot.replaceChildren(makeEmptyState("WGSL compiled, but the preview pipeline could not be created."));
       return activeState;
@@ -194,6 +226,12 @@ const destroyUniforms = (uniforms: UniformState[]) => {
   }
 };
 
+const destroyTextures = (textures: TextureState[]) => {
+  for (const state of textures) {
+    state.texture.destroy();
+  }
+};
+
 const collectUniformSpecs = (...sources: Array<string | null>) => {
   const specs = new Map<number, UniformSpec>();
   const pattern = /@group\(0\)\s*@binding\((\d+)\)\s*var<uniform>\s+([A-Za-z_]\w*):\s*([A-Za-z0-9_<>]+);/g;
@@ -209,6 +247,56 @@ const collectUniformSpecs = (...sources: Array<string | null>) => {
   }
 
   return [...specs.values()].sort((left, right) => left.binding - right.binding);
+};
+
+const collectTextureSpecs = (...sources: Array<string | null>) => {
+  const textures = new Map<string, { binding: number; name: string; typeName: string }>();
+  const samplers = new Map<string, number>();
+  const texturePattern =
+    /@group\(0\)\s*@binding\((\d+)\)\s*var\s+([A-Za-z_]\w*):\s*(texture_(?:2d|3d|cube)<f32>);/g;
+  const samplerPattern = /@group\(0\)\s*@binding\((\d+)\)\s*var\s+([A-Za-z_]\w*):\s*sampler;/g;
+
+  for (const source of sources) {
+    if (!source) continue;
+
+    for (const match of source.matchAll(texturePattern)) {
+      const binding = Number(match[1]);
+      const name = match[2];
+      const baseName = name.endsWith("_texture") ? name.slice(0, -"_texture".length) : name;
+      if (!Number.isNaN(binding) && !textures.has(baseName)) {
+        textures.set(baseName, { binding, name: baseName, typeName: match[3] });
+      }
+    }
+
+    for (const match of source.matchAll(samplerPattern)) {
+      const binding = Number(match[1]);
+      const name = match[2];
+      const baseName = name.endsWith("_sampler") ? name.slice(0, -"_sampler".length) : name;
+      if (!Number.isNaN(binding) && !samplers.has(baseName)) {
+        samplers.set(baseName, binding);
+      }
+    }
+  }
+
+  return [...textures.values()]
+    .flatMap<TextureSpec>((texture) => {
+      const samplerBinding = samplers.get(texture.name);
+      if (samplerBinding === undefined) return [];
+      return [
+        {
+          textureBinding: texture.binding,
+          samplerBinding,
+          name: texture.name,
+          typeName: texture.typeName,
+          dimension: texture.typeName.includes("cube")
+            ? "cube"
+            : texture.typeName.includes("3d")
+              ? "3d"
+              : "2d",
+        },
+      ];
+    })
+    .sort((left, right) => left.textureBinding - right.textureBinding);
 };
 
 const parseUniformSpec = (binding: number, name: string, typeName: string): UniformSpec | null => {
@@ -326,12 +414,81 @@ const identityMatrix = (size: 2 | 3 | 4) => {
   return values;
 };
 
-const renderControls = (root: HTMLElement, uniforms: UniformState[]) => {
+const createTextureState = (device: GPUDevice, spec: TextureSpec): TextureState => {
+  const texture = makePreviewTexture(device, spec);
+  return {
+    spec,
+    texture,
+    view: texture.createView({
+      dimension: spec.dimension,
+    }),
+    sampler: device.createSampler({
+      magFilter: "linear",
+      minFilter: "linear",
+      mipmapFilter: "linear",
+      addressModeU: "repeat",
+      addressModeV: "repeat",
+      addressModeW: "repeat",
+    }),
+  };
+};
+
+const makePreviewTexture = (device: GPUDevice, spec: TextureSpec) => {
+  const extent =
+    spec.dimension === "cube"
+      ? { width: 48, height: 48, depthOrArrayLayers: 6 }
+      : spec.dimension === "3d"
+        ? { width: 16, height: 16, depthOrArrayLayers: 16 }
+        : { width: 96, height: 96, depthOrArrayLayers: 1 };
+
+  const texture = device.createTexture({
+    size: extent,
+    format: "rgba8unorm",
+    dimension: spec.dimension === "3d" ? "3d" : "2d",
+    usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+  });
+
+  const width = extent.width;
+  const height = extent.height;
+  const layers = extent.depthOrArrayLayers;
+  const data = new Uint8Array(width * height * layers * 4);
+
+  for (let layer = 0; layer < layers; layer += 1) {
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        const offset = ((layer * width * height) + (y * width) + x) * 4;
+        const band = ((Math.floor(x / 12) + Math.floor(y / 12) + layer) % 2) === 0;
+        data[offset] = band ? 247 : 38;
+        data[offset + 1] = spec.dimension === "3d" ? Math.floor((layer / Math.max(1, layers - 1)) * 255) : band ? 141 : 196;
+        data[offset + 2] = spec.dimension === "cube" ? ((layer * 37) % 255) : band ? 64 : 250;
+        data[offset + 3] = 255;
+      }
+    }
+  }
+
+  device.queue.writeTexture(
+    { texture },
+    data,
+    {
+      bytesPerRow: width * 4,
+      rowsPerImage: height,
+    },
+    extent,
+  );
+
+  return texture;
+};
+
+const renderControls = (root: HTMLElement, uniforms: UniformState[], textures: TextureState[]) => {
   root.replaceChildren();
 
-  if (uniforms.length === 0) {
-    root.append(makeEmptyState("No uniforms detected. Preview is using only shader code."));
+  if (uniforms.length === 0 && textures.length === 0) {
+    root.append(makeEmptyState("No preview resources detected. Preview is using only shader code."));
     return;
+  }
+
+  for (const state of textures) {
+    root.append(makeTextureCard(state));
   }
 
   for (const state of uniforms) {
@@ -413,6 +570,33 @@ const makeUniformCard = (state: UniformState) => {
     row.append(input, output);
     card.append(row);
   }
+
+  return card;
+};
+
+const makeTextureCard = (state: TextureState) => {
+  const card = document.createElement("section");
+  card.className = "uniform-card";
+
+  const header = document.createElement("header");
+  header.className = "uniform-card-header";
+
+  const title = document.createElement("strong");
+  title.textContent = state.spec.name;
+  header.append(title);
+
+  const meta = document.createElement("span");
+  meta.textContent = state.spec.typeName;
+  header.append(meta);
+  card.append(header);
+
+  const text = document.createElement("p");
+  text.className = "uniform-live";
+  text.textContent =
+    state.spec.dimension === "2d"
+      ? "Generated checkerboard texture for sampler preview."
+      : `Generated ${state.spec.dimension} texture placeholder for sampler preview.`;
+  card.append(text);
 
   return card;
 };

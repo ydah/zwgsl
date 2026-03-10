@@ -330,7 +330,7 @@ Current capabilities:
 - Monaco language registration for `zwgsl`
 - live WGSL compilation through `zwgsl.wasm`
 - worker-backed diagnostics, hover, completion, and goto-definition
-- WebGPU preview surface with animated `iTime` / `iResolution` uniforms and generated controls
+- WebGPU preview surface with animated `iTime` / `iResolution` uniforms, generated controls, and sampler placeholders
 - `npm run sync-wasm` to refresh the wasm payload from `zig-out/bin/zwgsl.wasm`
 
 ## Architecture
