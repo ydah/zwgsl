@@ -210,8 +210,12 @@ fn emitStage(allocator: std.mem.Allocator, module: *const mir.Module, entry_poin
     try emitEntryPoint(writer, module, entry_point);
 
     const output = try buffer.toOwnedSlice(allocator);
-    if (!options.optimize_output) return output;
-    return compactOutput(allocator, output);
+    defer allocator.free(output);
+
+    const sanitized = try sanitizeReservedIdentifiers(allocator, output);
+    if (!options.optimize_output) return sanitized;
+    defer allocator.free(sanitized);
+    return compactOutput(allocator, sanitized);
 }
 
 fn emitStageInterfaceStructs(writer: anytype, module: *const mir.Module, entry_point: mir.EntryPoint) !void {
@@ -1560,6 +1564,36 @@ fn compactOutput(allocator: std.mem.Allocator, source: []const u8) ![]const u8 {
     }
     if (wrote_line) try writer.writeByte('\n');
     return try buffer.toOwnedSlice(allocator);
+}
+
+fn sanitizeReservedIdentifiers(allocator: std.mem.Allocator, source: []const u8) ![]const u8 {
+    var buffer = try std.ArrayList(u8).initCapacity(allocator, source.len);
+    const writer = buffer.writer(allocator);
+
+    var index: usize = 0;
+    while (index < source.len) {
+        if (startsReservedIdentifier(source, index)) {
+            try writer.writeByte('_');
+            index += 2;
+            continue;
+        }
+
+        try writer.writeByte(source[index]);
+        index += 1;
+    }
+
+    return try buffer.toOwnedSlice(allocator);
+}
+
+fn startsReservedIdentifier(source: []const u8, index: usize) bool {
+    if (index + 1 >= source.len) return false;
+    if (source[index] != '_' or source[index + 1] != '_') return false;
+    if (index > 0 and isIdentifierContinue(source[index - 1])) return false;
+    return true;
+}
+
+fn isIdentifierContinue(byte: u8) bool {
+    return std.ascii.isAlphanumeric(byte) or byte == '_';
 }
 
 fn assignmentOp(tag: token.TokenTag) []const u8 {

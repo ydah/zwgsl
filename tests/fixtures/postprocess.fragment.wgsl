@@ -12,7 +12,7 @@ struct FragmentOutput {
 var<private> v_uv: vec2f;
 var<private> frag_color: vec4f;
 
-fn __zwgsl_fragment_main() {
+fn _zwgsl_fragment_main() {
     let color: vec4f = textureSample(scene_tex_texture, scene_tex_sampler, v_uv);
     frag_color = vec4f(color.rgb, 1.0);
 }
@@ -20,7 +20,7 @@ fn __zwgsl_fragment_main() {
 @fragment
 fn main(input: FragmentInput) -> FragmentOutput {
     v_uv = input.v_uv;
-    __zwgsl_fragment_main();
+    _zwgsl_fragment_main();
     var output: FragmentOutput;
     output.frag_color = frag_color;
     return output;

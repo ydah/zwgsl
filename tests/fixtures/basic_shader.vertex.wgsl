@@ -14,7 +14,7 @@ var<private> gl_Position: vec4f;
 var<private> position: vec3f;
 var<private> v_pos: vec3f;
 
-fn __zwgsl_vertex_main() {
+fn _zwgsl_vertex_main() {
     v_pos = position;
     gl_Position = mvp * vec4f(position, 1.0);
 }
@@ -22,7 +22,7 @@ fn __zwgsl_vertex_main() {
 @vertex
 fn main(input: VertexInput) -> VertexOutput {
     position = input.position;
-    __zwgsl_vertex_main();
+    _zwgsl_vertex_main();
     var output: VertexOutput;
     output.gl_Position = gl_Position;
     output.v_pos = v_pos;
