@@ -46,12 +46,31 @@ type TextureState = {
   sampler: GPUSampler;
 };
 
+type VertexAttributeKind = "f32" | "i32" | "u32";
+
+type VertexAttributeSpec = {
+  location: number;
+  name: string;
+  typeName: string;
+  format: GPUVertexFormat;
+  kind: VertexAttributeKind;
+  componentCount: 1 | 2 | 3 | 4;
+  offset: number;
+};
+
+type VertexPreviewState = {
+  buffer: GPUBuffer | null;
+  buffers: GPUVertexBufferLayout[];
+  vertexCount: number;
+};
+
 type CompiledPreviewState = {
   key: string;
   pipeline: GPURenderPipeline;
   bindGroup: GPUBindGroup | null;
   uniforms: UniformState[];
   textures: TextureState[];
+  vertex: VertexPreviewState;
 };
 
 const fallbackVertexShader = `
@@ -72,6 +91,24 @@ fn main() -> @location(0) vec4f {
   return vec4f(0.91, 0.48, 0.19, 1.0);
 }
 `;
+
+const previewVertexPositions = [
+  [-1, -1, 0, 1],
+  [3, -1, 0, 1],
+  [-1, 3, 0, 1],
+] as const;
+
+const previewUvs = [
+  [0, 0, 0, 1],
+  [2, 0, 0, 1],
+  [0, 2, 0, 1],
+] as const;
+
+const previewColors = [
+  [0.91, 0.48, 0.19, 1],
+  [0.18, 0.64, 1, 1],
+  [1, 0.82, 0.24, 1],
+] as const;
 
 export const createPreview = async (
   canvas: HTMLCanvasElement,
@@ -125,13 +162,18 @@ export const createPreview = async (
     const uniformStates = uniformSpecs.map((spec) => createUniformState(device, spec, canvas));
     const textureSpecs = collectTextureSpecs(vertexSource, fragmentSource);
     const textureStates = textureSpecs.map((spec) => createTextureState(device, spec));
+    const vertexState = createVertexPreviewState(device, vertexSource);
 
     try {
       const vertexModule = device.createShaderModule({ code: vertexSource });
       const fragmentModule = device.createShaderModule({ code: fragmentSource });
       const pipeline = await device.createRenderPipelineAsync({
         layout: "auto",
-        vertex: { module: vertexModule, entryPoint: "main" },
+        vertex: {
+          module: vertexModule,
+          entryPoint: "main",
+          buffers: vertexState.buffers,
+        },
         fragment: {
           module: fragmentModule,
           entryPoint: "main",
@@ -143,6 +185,7 @@ export const createPreview = async (
       if (currentVersion !== buildVersion) {
         destroyUniforms(uniformStates);
         destroyTextures(textureStates);
+        destroyVertexPreview(vertexState);
         return activeState;
       }
 
@@ -174,6 +217,7 @@ export const createPreview = async (
       if (activeState) {
         destroyUniforms(activeState.uniforms);
         destroyTextures(activeState.textures);
+        destroyVertexPreview(activeState.vertex);
       }
 
       renderControls(controlsRoot, uniformStates, textureStates);
@@ -184,12 +228,19 @@ export const createPreview = async (
         bindGroup,
         uniforms: uniformStates,
         textures: textureStates,
+        vertex: vertexState,
       };
-    } catch {
+    } catch (error) {
       destroyUniforms(uniformStates);
       destroyTextures(textureStates);
+      destroyVertexPreview(vertexState);
       status.textContent = "preview error";
-      controlsRoot.replaceChildren(makeEmptyState("WGSL compiled, but the preview pipeline could not be created."));
+      controlsRoot.replaceChildren(
+        makeEmptyState(
+          `WGSL compiled, but the preview pipeline could not be created. ${describePreviewError(error)}`,
+        ),
+      );
+      console.error("zwgsl playground preview failed", error);
       return activeState;
     }
   };
@@ -205,7 +256,7 @@ export const createPreview = async (
 
     if (activeState) {
       updateUniforms(activeState.uniforms, canvas, device, (now - startedAt) / 1000);
-      drawFrame(device, context, activeState.pipeline, activeState.bindGroup);
+      drawFrame(device, context, activeState.pipeline, activeState.bindGroup, activeState.vertex);
     }
 
     window.requestAnimationFrame(tick);
@@ -230,6 +281,10 @@ const destroyTextures = (textures: TextureState[]) => {
   for (const state of textures) {
     state.texture.destroy();
   }
+};
+
+const destroyVertexPreview = (vertex: VertexPreviewState) => {
+  vertex.buffer?.destroy();
 };
 
 const collectUniformSpecs = (...sources: Array<string | null>) => {
@@ -479,6 +534,185 @@ const makePreviewTexture = (device: GPUDevice, spec: TextureSpec) => {
   return texture;
 };
 
+const createVertexPreviewState = (device: GPUDevice, source: string): VertexPreviewState => {
+  const attributes = collectVertexAttributeSpecs(source);
+  if (attributes.length === 0) {
+    return {
+      buffer: null,
+      buffers: [],
+      vertexCount: 3,
+    };
+  }
+
+  const stride = attributes.reduce((size, attribute) => size + vertexFormatSize(attribute.format), 0);
+  let nextOffset = 0;
+  for (const attribute of attributes) {
+    attribute.offset = nextOffset;
+    nextOffset += vertexFormatSize(attribute.format);
+  }
+
+  const vertexCount = previewVertexPositions.length;
+  const bytes = new ArrayBuffer(stride * vertexCount);
+  const view = new DataView(bytes);
+
+  for (let vertexIndex = 0; vertexIndex < vertexCount; vertexIndex += 1) {
+    const baseOffset = vertexIndex * stride;
+    for (const attribute of attributes) {
+      writeVertexAttribute(
+        view,
+        baseOffset + attribute.offset,
+        attribute,
+        previewAttributeValues(attribute, vertexIndex),
+      );
+    }
+  }
+
+  const buffer = device.createBuffer({
+    size: bytes.byteLength,
+    usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+  });
+  device.queue.writeBuffer(buffer, 0, bytes);
+
+  return {
+    buffer,
+    buffers: [
+      {
+        arrayStride: stride,
+        stepMode: "vertex",
+        attributes: attributes.map((attribute) => ({
+          shaderLocation: attribute.location,
+          offset: attribute.offset,
+          format: attribute.format,
+        })),
+      },
+    ],
+    vertexCount,
+  };
+};
+
+const collectVertexAttributeSpecs = (source: string) => {
+  const structMatch = /struct\s+VertexInput\s*\{([\s\S]*?)\};/.exec(source);
+  if (!structMatch) return [];
+
+  const pattern = /@location\((\d+)\)\s*([A-Za-z_]\w*):\s*([A-Za-z0-9_]+),/g;
+  const attributes: VertexAttributeSpec[] = [];
+
+  for (const match of structMatch[1].matchAll(pattern)) {
+    const location = Number(match[1]);
+    const format = parseVertexAttributeFormat(match[3]);
+    if (!Number.isFinite(location) || !format) continue;
+    attributes.push({
+      location,
+      name: match[2],
+      typeName: match[3],
+      format: format.format,
+      kind: format.kind,
+      componentCount: format.componentCount,
+      offset: 0,
+    });
+  }
+
+  return attributes.sort((left, right) => left.location - right.location);
+};
+
+const parseVertexAttributeFormat = (typeName: string) => {
+  if (typeName === "f32") return { format: "float32" as const, kind: "f32" as const, componentCount: 1 as const };
+  if (typeName === "i32") return { format: "sint32" as const, kind: "i32" as const, componentCount: 1 as const };
+  if (typeName === "u32") return { format: "uint32" as const, kind: "u32" as const, componentCount: 1 as const };
+
+  const vectorMatch = /^vec([234])(f|i|u)$/.exec(typeName);
+  if (!vectorMatch) return null;
+
+  const width = Number(vectorMatch[1]) as 2 | 3 | 4;
+  const prefix =
+    vectorMatch[2] === "f"
+      ? "float32"
+      : vectorMatch[2] === "i"
+        ? "sint32"
+        : "uint32";
+  const kind = vectorMatch[2] === "f" ? "f32" : vectorMatch[2] === "i" ? "i32" : "u32";
+
+  return {
+    format: `${prefix}x${width}` as GPUVertexFormat,
+    kind,
+    componentCount: width,
+  };
+};
+
+const vertexFormatSize = (format: GPUVertexFormat) => {
+  switch (format) {
+    case "float32":
+    case "sint32":
+    case "uint32":
+      return 4;
+    case "float32x2":
+    case "sint32x2":
+    case "uint32x2":
+      return 8;
+    case "float32x3":
+    case "sint32x3":
+    case "uint32x3":
+      return 12;
+    case "float32x4":
+    case "sint32x4":
+    case "uint32x4":
+      return 16;
+    default:
+      throw new Error(`Unsupported preview vertex format: ${format}`);
+  }
+};
+
+const previewAttributeValues = (attribute: VertexAttributeSpec, vertexIndex: number) => {
+  const name = attribute.name.toLowerCase();
+
+  if (name.includes("position")) return previewVertexPositions[vertexIndex].slice(0, attribute.componentCount);
+  if (name === "uv" || name.endsWith("_uv") || name.includes("texcoord")) {
+    return previewUvs[vertexIndex].slice(0, attribute.componentCount);
+  }
+  if (name.includes("normal")) {
+    return [0, 0, 1, 0].slice(0, attribute.componentCount);
+  }
+  if (name.includes("color") || name.includes("colour") || name.includes("tint")) {
+    return previewColors[vertexIndex].slice(0, attribute.componentCount);
+  }
+  if (name.includes("index") || name.endsWith("id")) {
+    return [vertexIndex, 0, 0, 1].slice(0, attribute.componentCount);
+  }
+  if (attribute.kind === "f32") {
+    return [0, 0, 0, 1].slice(0, attribute.componentCount);
+  }
+  return [0, 0, 0, 0].slice(0, attribute.componentCount);
+};
+
+const writeVertexAttribute = (
+  view: DataView,
+  offset: number,
+  attribute: VertexAttributeSpec,
+  values: number[],
+) => {
+  for (let index = 0; index < attribute.componentCount; index += 1) {
+    const targetOffset = offset + index * 4;
+    const value = values[index] ?? 0;
+
+    switch (attribute.kind) {
+      case "f32":
+        view.setFloat32(targetOffset, value, true);
+        break;
+      case "i32":
+        view.setInt32(targetOffset, Math.round(value), true);
+        break;
+      case "u32":
+        view.setUint32(targetOffset, Math.max(0, Math.round(value)), true);
+        break;
+    }
+  }
+};
+
+const describePreviewError = (error: unknown) => {
+  if (error instanceof Error && error.message) return error.message;
+  return "Check the browser console for the WebGPU validation error.";
+};
+
 const renderControls = (root: HTMLElement, uniforms: UniformState[], textures: TextureState[]) => {
   root.replaceChildren();
 
@@ -679,6 +913,7 @@ const drawFrame = (
   context: GPUCanvasContext,
   pipeline: GPURenderPipeline,
   bindGroup: GPUBindGroup | null,
+  vertex: VertexPreviewState,
 ) => {
   const encoder = device.createCommandEncoder();
   const view = context.getCurrentTexture().createView();
@@ -697,7 +932,10 @@ const drawFrame = (
   if (bindGroup) {
     pass.setBindGroup(0, bindGroup);
   }
-  pass.draw(3);
+  if (vertex.buffer) {
+    pass.setVertexBuffer(0, vertex.buffer);
+  }
+  pass.draw(vertex.vertexCount);
   pass.end();
   device.queue.submit([encoder.finish()]);
 };
