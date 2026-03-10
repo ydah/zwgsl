@@ -263,22 +263,29 @@ pub const Expr = struct {
 };
 
 pub const MatchArm = struct {
+    position: Position,
     pattern: Pattern,
     guard: ?*Expr = null,
     body: []const *Stmt,
 };
 
-pub const Pattern = union(enum) {
-    constructor: ConstructorPattern,
-    wildcard: void,
-    binding: []const u8,
-    integer: i64,
-    float: f64,
-    bool: bool,
-    symbol: []const u8,
+pub const Pattern = struct {
+    position: Position,
+    data: Data,
+
+    pub const Data = union(enum) {
+        constructor: ConstructorPattern,
+        wildcard: void,
+        binding: []const u8,
+        integer: i64,
+        float: f64,
+        bool: bool,
+        symbol: []const u8,
+    };
 };
 
 pub const ConstructorPattern = struct {
+    position: Position,
     name: []const u8,
     args: []const Pattern,
 };

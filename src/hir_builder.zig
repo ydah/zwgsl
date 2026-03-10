@@ -34,6 +34,8 @@ const Builder = struct {
                 .name = global.name,
                 .ty = global.ty,
                 .location = global.location,
+                .source_line = global.source_line,
+                .source_column = global.source_column,
             };
         }
         return cloned;
@@ -45,6 +47,8 @@ const Builder = struct {
             cloned[index] = .{
                 .name = struct_decl.name,
                 .fields = try self.cloneStructFields(struct_decl.fields),
+                .source_line = struct_decl.source_line,
+                .source_column = struct_decl.source_column,
             };
         }
         return cloned;
@@ -56,6 +60,8 @@ const Builder = struct {
             cloned[index] = .{
                 .name = field.name,
                 .ty = field.ty,
+                .source_line = field.source_line,
+                .source_column = field.source_column,
             };
         }
         return cloned;
@@ -77,6 +83,7 @@ const Builder = struct {
             .body = try self.cloneStatements(function.body),
             .stage = function.stage,
             .source_line = function.source_line,
+            .source_column = function.source_column,
         };
     }
 
@@ -87,6 +94,8 @@ const Builder = struct {
                 .name = param.name,
                 .ty = param.ty,
                 .is_inout = param.is_inout,
+                .source_line = param.source_line,
+                .source_column = param.source_column,
             };
         }
         return cloned;
@@ -100,6 +109,8 @@ const Builder = struct {
             .outputs = try self.cloneGlobals(stage.outputs),
             .varyings = try self.cloneGlobals(stage.varyings),
             .functions = try self.cloneFunctions(stage.functions),
+            .source_line = stage.source_line,
+            .source_column = stage.source_column,
         };
     }
 
@@ -114,6 +125,7 @@ const Builder = struct {
     fn cloneStatement(self: *Builder, statement: ir.Statement) anyerror!hir.Statement {
         return .{
             .source_line = statement.source_line,
+            .source_column = statement.source_column,
             .data = switch (statement.data) {
                 .var_decl => |var_decl| .{
                     .var_decl = .{
@@ -157,6 +169,8 @@ const Builder = struct {
             cloned[index] = .{
                 .value = case_stmt.value,
                 .body = try self.cloneStatements(case_stmt.body),
+                .source_line = case_stmt.source_line,
+                .source_column = case_stmt.source_column,
             };
         }
         return cloned;
@@ -166,6 +180,8 @@ const Builder = struct {
         const cloned = try self.allocator.create(hir.Expr);
         cloned.* = .{
             .ty = expr.ty,
+            .source_line = expr.source_line,
+            .source_column = expr.source_column,
             .data = switch (expr.data) {
                 .integer => |value| .{ .integer = value },
                 .float => |value| .{ .float = value },

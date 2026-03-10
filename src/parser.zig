@@ -837,10 +837,12 @@ pub const Parser = struct {
 
         self.consumeNewlines();
         while (self.match(.kw_when)) {
+            const when_tok = self.previous();
             const pattern = try self.parsePattern();
             const guard = if (self.match(.kw_if)) try self.parseExpression(0) else null;
             self.consumeNewlines();
             try arms.append(self.allocator, .{
+                .position = positionOf(when_tok),
                 .pattern = pattern,
                 .guard = guard,
                 .body = try self.parseStatementList(&.{ .kw_when, .kw_end }),
@@ -861,29 +863,47 @@ pub const Parser = struct {
         return switch (tok.tag) {
             .symbol => blk: {
                 _ = self.advance();
-                break :blk .{ .symbol = try self.symbolValue(tok) };
+                break :blk .{
+                    .position = positionOf(tok),
+                    .data = .{ .symbol = try self.symbolValue(tok) },
+                };
             },
             .integer_literal => blk: {
                 _ = self.advance();
-                break :blk .{ .integer = try std.fmt.parseInt(i64, tok.lexeme(self.source), 10) };
+                break :blk .{
+                    .position = positionOf(tok),
+                    .data = .{ .integer = try std.fmt.parseInt(i64, tok.lexeme(self.source), 10) },
+                };
             },
             .float_literal => blk: {
                 _ = self.advance();
-                break :blk .{ .float = try std.fmt.parseFloat(f64, tok.lexeme(self.source)) };
+                break :blk .{
+                    .position = positionOf(tok),
+                    .data = .{ .float = try std.fmt.parseFloat(f64, tok.lexeme(self.source)) },
+                };
             },
             .kw_true => {
                 _ = self.advance();
-                return .{ .bool = true };
+                return .{
+                    .position = positionOf(tok),
+                    .data = .{ .bool = true },
+                };
             },
             .kw_false => {
                 _ = self.advance();
-                return .{ .bool = false };
+                return .{
+                    .position = positionOf(tok),
+                    .data = .{ .bool = false },
+                };
             },
             .identifier => {
                 _ = self.advance();
                 const name = try self.identifierValue(tok);
                 if (std.mem.eql(u8, name, "_")) {
-                    return .{ .wildcard = {} };
+                    return .{
+                        .position = positionOf(tok),
+                        .data = .{ .wildcard = {} },
+                    };
                 }
                 if (std.ascii.isUpper(name[0])) {
                     var args: std.ArrayListUnmanaged(ast.Pattern) = .{};
@@ -898,13 +918,18 @@ pub const Parser = struct {
                         _ = try self.expect(.rparen, "')' after constructor pattern");
                     }
                     return .{
-                        .constructor = .{
+                        .position = positionOf(tok),
+                        .data = .{ .constructor = .{
+                            .position = positionOf(tok),
                             .name = name,
                             .args = try args.toOwnedSlice(self.allocator),
-                        },
+                        } },
                     };
                 }
-                return .{ .binding = name };
+                return .{
+                    .position = positionOf(tok),
+                    .data = .{ .binding = name },
+                };
             },
             else => {
                 try self.reportUnexpected(tok, "pattern");

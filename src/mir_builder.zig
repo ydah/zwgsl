@@ -32,18 +32,22 @@ const Builder = struct {
         var next_binding: u32 = 0;
         for (uniforms) |uniform| {
             if (uniform.ty.isSampler()) {
-                try bindings.append(self.allocator, .{
-                    .name = uniform.name,
-                    .ty = uniform.ty,
-                    .kind = .texture,
-                    .binding = next_binding,
-                });
-                try bindings.append(self.allocator, .{
-                    .name = uniform.name,
-                    .ty = uniform.ty,
-                    .kind = .sampler,
-                    .binding = next_binding + 1,
-                });
+            try bindings.append(self.allocator, .{
+                .name = uniform.name,
+                .ty = uniform.ty,
+                .kind = .texture,
+                .binding = next_binding,
+                .source_line = uniform.source_line,
+                .source_column = uniform.source_column,
+            });
+            try bindings.append(self.allocator, .{
+                .name = uniform.name,
+                .ty = uniform.ty,
+                .kind = .sampler,
+                .binding = next_binding + 1,
+                .source_line = uniform.source_line,
+                .source_column = uniform.source_column,
+            });
                 next_binding += 2;
                 continue;
             }
@@ -53,6 +57,8 @@ const Builder = struct {
                 .ty = uniform.ty,
                 .kind = .uniform,
                 .binding = next_binding,
+                .source_line = uniform.source_line,
+                .source_column = uniform.source_column,
             });
             next_binding += 1;
         }
@@ -67,6 +73,8 @@ const Builder = struct {
                 .name = global.name,
                 .ty = global.ty,
                 .location = global.location,
+                .source_line = global.source_line,
+                .source_column = global.source_column,
             };
         }
         return lowered;
@@ -78,6 +86,8 @@ const Builder = struct {
             lowered[index] = .{
                 .name = struct_decl.name,
                 .fields = try self.lowerStructFields(struct_decl.fields),
+                .source_line = struct_decl.source_line,
+                .source_column = struct_decl.source_column,
             };
         }
         return lowered;
@@ -89,6 +99,8 @@ const Builder = struct {
             lowered[index] = .{
                 .name = field.name,
                 .ty = field.ty,
+                .source_line = field.source_line,
+                .source_column = field.source_column,
             };
         }
         return lowered;
@@ -110,6 +122,7 @@ const Builder = struct {
             .body = try self.lowerStatements(function.body),
             .stage = function.stage,
             .source_line = function.source_line,
+            .source_column = function.source_column,
         };
     }
 
@@ -120,6 +133,8 @@ const Builder = struct {
                 .name = param.name,
                 .ty = param.ty,
                 .is_inout = param.is_inout,
+                .source_line = param.source_line,
+                .source_column = param.source_column,
             };
         }
         return lowered;
@@ -133,6 +148,8 @@ const Builder = struct {
             .outputs = try self.lowerGlobals(stage.outputs),
             .varyings = try self.lowerGlobals(stage.varyings),
             .functions = try self.lowerFunctions(stage.functions),
+            .source_line = stage.source_line,
+            .source_column = stage.source_column,
         };
     }
 
@@ -147,6 +164,7 @@ const Builder = struct {
     fn lowerStatement(self: *Builder, statement: hir.Statement) anyerror!mir.Statement {
         return .{
             .source_line = statement.source_line,
+            .source_column = statement.source_column,
             .data = switch (statement.data) {
                 .var_decl => |var_decl| .{
                     .var_decl = .{
@@ -190,6 +208,8 @@ const Builder = struct {
             lowered[index] = .{
                 .value = case_stmt.value,
                 .body = try self.lowerStatements(case_stmt.body),
+                .source_line = case_stmt.source_line,
+                .source_column = case_stmt.source_column,
             };
         }
         return lowered;
@@ -199,6 +219,8 @@ const Builder = struct {
         const lowered = try self.allocator.create(mir.Expr);
         lowered.* = .{
             .ty = expr.ty,
+            .source_line = expr.source_line,
+            .source_column = expr.source_column,
             .data = switch (expr.data) {
                 .integer => |value| .{ .integer = value },
                 .float => |value| .{ .float = value },

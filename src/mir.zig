@@ -15,6 +15,8 @@ pub const Binding = struct {
     kind: BindingKind,
     group: u32 = 0,
     binding: u32,
+    source_line: ?u32 = null,
+    source_column: ?u32 = null,
 };
 
 pub const Module = struct {
@@ -32,22 +34,30 @@ pub const Global = struct {
     name: []const u8,
     ty: types.Type,
     location: ?u32 = null,
+    source_line: ?u32 = null,
+    source_column: ?u32 = null,
 };
 
 pub const StructField = struct {
     name: []const u8,
     ty: types.Type,
+    source_line: ?u32 = null,
+    source_column: ?u32 = null,
 };
 
 pub const StructDecl = struct {
     name: []const u8,
     fields: []const StructField,
+    source_line: ?u32 = null,
+    source_column: ?u32 = null,
 };
 
 pub const Param = struct {
     name: []const u8,
     ty: types.Type,
     is_inout: bool = false,
+    source_line: ?u32 = null,
+    source_column: ?u32 = null,
 };
 
 pub const Function = struct {
@@ -57,6 +67,7 @@ pub const Function = struct {
     body: []const Statement,
     stage: ?ast.Stage = null,
     source_line: ?u32 = null,
+    source_column: ?u32 = null,
 
     pub fn isMain(self: Function) bool {
         return std.mem.eql(u8, self.name, "main");
@@ -70,10 +81,13 @@ pub const Stage = struct {
     outputs: []const Global = &.{},
     varyings: []const Global = &.{},
     functions: []const Function = &.{},
+    source_line: ?u32 = null,
+    source_column: ?u32 = null,
 };
 
 pub const Statement = struct {
     source_line: ?u32 = null,
+    source_column: ?u32 = null,
     data: Data,
 
     pub const Data = union(enum) {
@@ -109,6 +123,8 @@ pub const IfStmt = struct {
 pub const SwitchCase = struct {
     value: i64,
     body: []const Statement,
+    source_line: ?u32 = null,
+    source_column: ?u32 = null,
 };
 
 pub const SwitchStmt = struct {
@@ -119,6 +135,8 @@ pub const SwitchStmt = struct {
 
 pub const Expr = struct {
     ty: types.Type,
+    source_line: ?u32 = null,
+    source_column: ?u32 = null,
     data: Data,
 
     pub const Data = union(enum) {

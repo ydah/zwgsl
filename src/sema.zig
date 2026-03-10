@@ -1488,7 +1488,7 @@ const Analyzer = struct {
 
         for (match_expr.arms) |arm| {
             var arm_scope = Scope.init(self.allocator, scope);
-            const summary = try self.bindPattern(&arm_scope, arm.pattern, value_type, position);
+            const summary = try self.bindPattern(&arm_scope, arm.pattern, value_type);
             if (summary.matches_all) exhaustive = true;
             if (summary.constructor_name) |constructor_name| {
                 try seen_constructors.put(self.allocator, constructor_name, {});
@@ -1549,9 +1549,8 @@ const Analyzer = struct {
         scope: *Scope,
         pattern: ast.Pattern,
         expected_type: types.Type,
-        position: ast.Position,
     ) anyerror!struct { matches_all: bool, constructor_name: ?[]const u8 } {
-        return switch (pattern) {
+        return switch (pattern.data) {
             .wildcard => .{ .matches_all = true, .constructor_name = null },
             .binding => |name| blk: {
                 if (!try scope.put(name, .{
@@ -1559,56 +1558,56 @@ const Analyzer = struct {
                     .kind = .local,
                     .mutable = false,
                 })) {
-                    try self.report(position, "duplicate pattern binding '{s}'", .{name});
+                    try self.report(pattern.position, "duplicate pattern binding '{s}'", .{name});
                 }
                 break :blk .{ .matches_all = true, .constructor_name = null };
             },
             .integer => blk: {
                 if (!expected_type.isBuiltin(.int)) {
-                    try self.report(position, "integer pattern expects Int", .{});
+                    try self.report(pattern.position, "integer pattern expects Int", .{});
                 }
                 break :blk .{ .matches_all = false, .constructor_name = null };
             },
             .float => blk: {
                 if (!expected_type.isBuiltin(.float)) {
-                    try self.report(position, "float pattern expects Float", .{});
+                    try self.report(pattern.position, "float pattern expects Float", .{});
                 }
                 break :blk .{ .matches_all = false, .constructor_name = null };
             },
             .bool => blk: {
                 if (!expected_type.isBuiltin(.bool)) {
-                    try self.report(position, "bool pattern expects Bool", .{});
+                    try self.report(pattern.position, "bool pattern expects Bool", .{});
                 }
                 break :blk .{ .matches_all = false, .constructor_name = null };
             },
             .symbol => |value| blk: {
                 _ = value;
                 if (!expected_type.isBuiltin(.symbol)) {
-                    try self.report(position, "symbol pattern expects Symbol", .{});
+                    try self.report(pattern.position, "symbol pattern expects Symbol", .{});
                 }
                 break :blk .{ .matches_all = false, .constructor_name = null };
             },
             .constructor => |constructor| blk: {
                 const info = self.constructors.get(constructor.name) orelse {
-                    try self.report(position, "unknown constructor '{s}'", .{constructor.name});
+                    try self.report(constructor.position, "unknown constructor '{s}'", .{constructor.name});
                     break :blk .{ .matches_all = false, .constructor_name = null };
                 };
 
                 if (constructor.args.len != info.field_types.len) {
-                    try self.report(position, "constructor '{s}' expects {d} fields", .{ constructor.name, info.field_types.len });
+                    try self.report(constructor.position, "constructor '{s}' expects {d} fields", .{ constructor.name, info.field_types.len });
                     break :blk .{ .matches_all = false, .constructor_name = null };
                 }
 
                 var substitution = unify.Substitution.init(self.allocator);
                 defer substitution.deinit();
                 unify.unify(&substitution, info.return_type, expected_type) catch {
-                    try self.report(position, "constructor '{s}' does not match {s}", .{ constructor.name, expected_type.glslName() });
+                    try self.report(constructor.position, "constructor '{s}' does not match {s}", .{ constructor.name, expected_type.glslName() });
                     break :blk .{ .matches_all = false, .constructor_name = null };
                 };
 
                 for (constructor.args, info.field_types) |arg_pattern, field_type| {
                     const resolved_field_type = try substitution.apply(field_type);
-                    _ = try self.bindPattern(scope, arg_pattern, resolved_field_type, position);
+                    _ = try self.bindPattern(scope, arg_pattern, resolved_field_type);
                 }
 
                 break :blk .{ .matches_all = false, .constructor_name = constructor.name };

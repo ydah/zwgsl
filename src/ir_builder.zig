@@ -64,6 +64,8 @@ const Builder = struct {
                 try items.append(self.allocator, .{
                     .name = item.uniform.name,
                     .ty = types.fromName(item.uniform.type_name) orelse .{ .struct_type = item.uniform.type_name },
+                    .source_line = item.uniform.position.line,
+                    .source_column = item.uniform.position.column,
                 });
             }
         }
@@ -83,11 +85,15 @@ const Builder = struct {
                     try fields.append(self.allocator, .{
                         .name = field.name,
                         .ty = types.fromName(field.type_name) orelse .{ .struct_type = field.type_name },
+                        .source_line = field.position.line,
+                        .source_column = field.position.column,
                     });
                 }
                 try items.append(self.allocator, .{
                     .name = item.struct_def.name,
                     .fields = try fields.toOwnedSlice(self.allocator),
+                    .source_line = item.struct_def.position.line,
+                    .source_column = item.struct_def.position.column,
                 });
             }
         }
@@ -116,6 +122,8 @@ const Builder = struct {
             try items.append(self.allocator, .{
                 .name = type_info.name,
                 .fields = try fields.toOwnedSlice(self.allocator),
+                .source_line = item.type_def.position.line,
+                .source_column = item.type_def.position.column,
             });
         }
 
@@ -135,7 +143,7 @@ const Builder = struct {
                 defer body.deinit(self.allocator);
 
                 const result_name = "__result";
-                try body.append(self.allocator, self.makeStatement(0, .{
+                try body.append(self.allocator, self.makeStatementAt(null, .{
                     .var_decl = .{
                         .name = result_name,
                         .ty = info.return_type,
@@ -143,16 +151,16 @@ const Builder = struct {
                         .value = null,
                     },
                 }));
-                try body.append(self.allocator, self.makeStatement(0, .{
+                try body.append(self.allocator, self.makeStatementAt(variant.position, .{
                     .assign = .{
-                        .target = try self.makeExpr(types.builtinType(.int), .{
+                        .target = try self.makeExprAt(variant.position, types.builtinType(.int), .{
                             .field = .{
-                                .target = try self.makeExpr(info.return_type, .{ .identifier = result_name }),
+                                .target = try self.makeExprAt(variant.position, info.return_type, .{ .identifier = result_name }),
                                 .name = "tag",
                             },
                         }),
                         .operator = .assign,
-                        .value = try self.makeExpr(types.builtinType(.int), .{ .integer = @as(i64, @intCast(info.tag)) }),
+                        .value = try self.makeExprAt(variant.position, types.builtinType(.int), .{ .integer = @as(i64, @intCast(info.tag)) }),
                     },
                 }));
 
@@ -162,23 +170,25 @@ const Builder = struct {
                         .name = param_name,
                         .ty = field_type,
                         .is_inout = false,
+                        .source_line = variant.position.line,
+                        .source_column = variant.position.column,
                     });
-                    try body.append(self.allocator, self.makeStatement(0, .{
+                    try body.append(self.allocator, self.makeStatementAt(variant.position, .{
                         .assign = .{
-                            .target = try self.makeExpr(field_type, .{
+                            .target = try self.makeExprAt(variant.position, field_type, .{
                                 .field = .{
-                                    .target = try self.makeExpr(info.return_type, .{ .identifier = result_name }),
+                                    .target = try self.makeExprAt(variant.position, info.return_type, .{ .identifier = result_name }),
                                     .name = try self.adtFieldName(info.name, field_name, index),
                                 },
                             }),
                             .operator = .assign,
-                            .value = try self.makeExpr(field_type, .{ .identifier = param_name }),
+                            .value = try self.makeExprAt(variant.position, field_type, .{ .identifier = param_name }),
                         },
                     }));
                 }
 
-                try body.append(self.allocator, self.makeStatement(0, .{
-                    .return_stmt = try self.makeExpr(info.return_type, .{ .identifier = result_name }),
+                try body.append(self.allocator, self.makeStatementAt(variant.position, .{
+                    .return_stmt = try self.makeExprAt(variant.position, info.return_type, .{ .identifier = result_name }),
                 }));
 
                 try self.lowered_globals.append(self.allocator, .{
@@ -187,7 +197,8 @@ const Builder = struct {
                     .params = try params.toOwnedSlice(self.allocator),
                     .body = try body.toOwnedSlice(self.allocator),
                     .stage = null,
-                    .source_line = 0,
+                    .source_line = variant.position.line,
+                    .source_column = variant.position.column,
                 });
             }
         }
@@ -227,6 +238,8 @@ const Builder = struct {
             .outputs = output_slice,
             .varyings = varying_slice,
             .functions = try self.lowerFunctions(functions, block.stage, &stage_io),
+            .source_line = block.position.line,
+            .source_column = block.position.column,
         };
     }
 
@@ -295,12 +308,15 @@ const Builder = struct {
         context.substitution = options.substitution;
         context.self_type = options.self_type;
 
-        for (signature.params) |param| {
+        for (signature.params, 0..) |param, index| {
             const param_type = try self.applyType(param.ty, &context);
+            const param_position = if (index < function.params.len) function.params[index].position else function.position;
             try params.append(self.allocator, .{
                 .name = param.name,
                 .ty = param_type,
                 .is_inout = param.is_inout,
+                .source_line = param_position.line,
+                .source_column = param_position.column,
             });
             try context.locals.put(param.name, param_type);
         }
@@ -326,7 +342,7 @@ const Builder = struct {
         for (self.typed.whereBindings(function)) |binding| {
             try self.appendLocalBinding(
                 &lowered_statements,
-                binding.*.position.line,
+                binding.*.position,
                 binding.*.name,
                 binding.*.value,
                 false,
@@ -344,9 +360,13 @@ const Builder = struct {
         const return_type = try self.applyType(signature.return_type, &context);
         if (!return_type.isVoid() and lowered_body.len > 0 and lowered_body[lowered_body.len - 1].data == .expr) {
             var replaced = try self.allocator.dupe(ir.Statement, lowered_body);
-            replaced[replaced.len - 1] = self.makeStatement(lowered_body[lowered_body.len - 1].source_line, .{
-                .return_stmt = lowered_body[lowered_body.len - 1].data.expr,
-            });
+            replaced[replaced.len - 1] = Builder.makeStatementWithColumn(
+                lowered_body[lowered_body.len - 1].source_line,
+                lowered_body[lowered_body.len - 1].source_column,
+                .{
+                    .return_stmt = lowered_body[lowered_body.len - 1].data.expr,
+                },
+            );
             final_body = replaced;
         }
 
@@ -357,6 +377,7 @@ const Builder = struct {
             .body = final_body,
             .stage = stage,
             .source_line = function.position.line,
+            .source_column = function.position.column,
         };
     }
 
@@ -379,14 +400,14 @@ const Builder = struct {
     ) anyerror!void {
         switch (statement.data) {
             .expression => |expr| {
-                try list.append(self.allocator, self.makeStatement(statement.position.line, .{
+                try list.append(self.allocator, self.makeStatementAt(statement.position, .{
                     .expr = try self.lowerExpr(expr, context),
                 }));
             },
             .let_binding => |binding| {
                 try self.appendLocalBinding(
                     list,
-                    statement.position.line,
+                    statement.position,
                     binding.name,
                     binding.value,
                     false,
@@ -396,7 +417,7 @@ const Builder = struct {
             .typed_assignment => |typed_assignment| {
                 try self.appendLocalBinding(
                     list,
-                    statement.position.line,
+                    statement.position,
                     typed_assignment.name,
                     typed_assignment.value,
                     true,
@@ -410,7 +431,7 @@ const Builder = struct {
                         const value = try self.lowerExpr(assignment.value, context);
                         const ty = try self.resolvedExprType(assignment.value, context);
                         try context.locals.put(name, ty);
-                        try list.append(self.allocator, self.makeStatement(statement.position.line, .{
+                        try list.append(self.allocator, self.makeStatementAt(statement.position, .{
                             .var_decl = .{
                                 .name = name,
                                 .ty = ty,
@@ -422,7 +443,7 @@ const Builder = struct {
                     }
                 }
 
-                try list.append(self.allocator, self.makeStatement(statement.position.line, .{
+                try list.append(self.allocator, self.makeStatementAt(statement.position, .{
                     .assign = .{
                         .target = try self.lowerExpr(assignment.target, context),
                         .operator = assignment.operator,
@@ -431,17 +452,17 @@ const Builder = struct {
                 }));
             },
             .return_stmt => |value| {
-                try list.append(self.allocator, self.makeStatement(statement.position.line, .{
+                try list.append(self.allocator, self.makeStatementAt(statement.position, .{
                     .return_stmt = if (value) |expr| try self.lowerExpr(expr, context) else null,
                 }));
             },
-            .discard => try list.append(self.allocator, self.makeStatement(statement.position.line, .{ .discard = {} })),
+            .discard => try list.append(self.allocator, self.makeStatementAt(statement.position, .{ .discard = {} })),
             .conditional => |conditional| {
                 const lowered_body = try self.lowerSingleStatementSlice(conditional.body, context);
                 const condition = try self.lowerExpr(conditional.condition, context);
                 const then_body = if (conditional.negate) &.{} else lowered_body;
                 const else_body = if (conditional.negate) lowered_body else &.{};
-                try list.append(self.allocator, self.makeStatement(statement.position.line, .{
+                try list.append(self.allocator, self.makeStatementAt(statement.position, .{
                     .if_stmt = .{
                         .condition = condition,
                         .then_body = then_body,
@@ -476,10 +497,10 @@ const Builder = struct {
                     defer nested.deinit();
                     if (each_loop.binding) |binding| {
                         const collection = try self.lowerExpr(each_loop.collection, context);
-                        const index_expr = try self.makeExpr(types.builtinType(.int), .{
+                        const index_expr = try self.makeExprAt(statement.position, types.builtinType(.int), .{
                             .integer = index,
                         });
-                        const element_expr = try self.makeExpr(element_type, .{
+                        const element_expr = try self.makeExprAt(statement.position, element_type, .{
                             .index = .{
                                 .target = collection,
                                 .index = index_expr,
@@ -499,7 +520,7 @@ const Builder = struct {
     fn appendLocalBinding(
         self: *Builder,
         list: *std.ArrayListUnmanaged(ir.Statement),
-        source_line: u32,
+        position: ast.Position,
         name: []const u8,
         value_expr: *ast.Expr,
         mutable: bool,
@@ -507,7 +528,7 @@ const Builder = struct {
     ) anyerror!void {
         const ty = try self.resolvedExprType(value_expr, context);
         try context.locals.put(name, ty);
-        try list.append(self.allocator, self.makeStatement(source_line, .{
+        try list.append(self.allocator, self.makeStatementAt(position, .{
             .var_decl = .{
                 .name = name,
                 .ty = ty,
@@ -532,7 +553,7 @@ const Builder = struct {
 
         var condition = try self.lowerExpr(if_stmt.branches[index].condition, &branch_context);
         if (index == 0 and if_stmt.negate_first) {
-            condition = try self.makeExpr(types.builtinType(.bool), .{
+            condition = try self.makeExprAt(if_stmt.branches[index].condition.position, types.builtinType(.bool), .{
                 .unary = .{
                     .operator = .bang,
                     .operand = condition,
@@ -548,7 +569,7 @@ const Builder = struct {
             break :blk items;
         } else try self.lowerStatementList(if_stmt.else_body, context);
 
-        return self.makeStatement(if_stmt.branches[index].condition.position.line, .{
+        return self.makeStatementAt(if_stmt.branches[index].condition.position, .{
             .if_stmt = .{
                 .condition = condition,
                 .then_body = then_body,
@@ -559,32 +580,32 @@ const Builder = struct {
 
     fn lowerExpr(self: *Builder, expr: *ast.Expr, context: *FunctionContext) anyerror!*ir.Expr {
         return switch (expr.data) {
-            .integer => |value| self.makeExpr(try self.resolvedExprType(expr, context), .{ .integer = value }),
-            .float => |value| self.makeExpr(try self.resolvedExprType(expr, context), .{ .float = value }),
-            .bool => |value| self.makeExpr(try self.resolvedExprType(expr, context), .{ .bool = value }),
-            .symbol => |value| self.makeExpr(try self.resolvedExprType(expr, context), .{ .integer = symbolId(value) }),
+            .integer => |value| self.makeExprAt(expr.position, try self.resolvedExprType(expr, context), .{ .integer = value }),
+            .float => |value| self.makeExprAt(expr.position, try self.resolvedExprType(expr, context), .{ .float = value }),
+            .bool => |value| self.makeExprAt(expr.position, try self.resolvedExprType(expr, context), .{ .bool = value }),
+            .symbol => |value| self.makeExprAt(expr.position, try self.resolvedExprType(expr, context), .{ .integer = symbolId(value) }),
             .identifier => |name| blk: {
                 if (context.loop_bindings.get(name)) |binding| {
                     break :blk switch (binding) {
-                        .const_int => |value| try self.makeExpr(types.builtinType(.int), .{ .integer = value }),
+                        .const_int => |value| try self.makeExprAt(expr.position, types.builtinType(.int), .{ .integer = value }),
                         .expr => |value| value,
                     };
                 }
-                break :blk try self.makeExpr(try self.resolvedExprType(expr, context), .{ .identifier = name });
+                break :blk try self.makeExprAt(expr.position, try self.resolvedExprType(expr, context), .{ .identifier = name });
             },
             .self_ref => blk: {
                 if (context.self_type != null) {
-                    break :blk try self.makeExpr(try self.resolvedExprType(expr, context), .{ .identifier = "self" });
+                    break :blk try self.makeExprAt(expr.position, try self.resolvedExprType(expr, context), .{ .identifier = "self" });
                 }
                 return error.UnsupportedSelfReference;
             },
-            .unary => |unary| self.makeExpr(try self.resolvedExprType(expr, context), .{
+            .unary => |unary| self.makeExprAt(expr.position, try self.resolvedExprType(expr, context), .{
                 .unary = .{
                     .operator = unary.operator,
                     .operand = try self.lowerExpr(unary.operand, context),
                 },
             }),
-            .binary => |binary| self.makeExpr(try self.resolvedExprType(expr, context), .{
+            .binary => |binary| self.makeExprAt(expr.position, try self.resolvedExprType(expr, context), .{
                 .binary = .{
                     .operator = binary.operator,
                     .lhs = try self.lowerExpr(binary.lhs, context),
@@ -594,10 +615,10 @@ const Builder = struct {
             .member => |member| blk: {
                 if (member.target.data == .self_ref) {
                     if (context.self_type != null) {
-                        const self_expr = try self.makeExpr(context.self_type.?, .{ .identifier = "self" });
+                        const self_expr = try self.makeExprAt(member.target.position, context.self_type.?, .{ .identifier = "self" });
                         const self_type = context.self_type.?;
                         if (types.isValidSwizzle(self_type, member.name) != null or self_type == .struct_type) {
-                            break :blk try self.makeExpr(try self.resolvedExprType(expr, context), .{
+                            break :blk try self.makeExprAt(expr.position, try self.resolvedExprType(expr, context), .{
                                 .field = .{
                                     .target = self_expr,
                                     .name = member.name,
@@ -607,7 +628,7 @@ const Builder = struct {
                         if (builtins.resolveMethod(member.name, self_type, &.{})) |_| {
                             const args = try self.allocator.alloc(*ir.Expr, 1);
                             args[0] = self_expr;
-                            break :blk try self.makeExpr(try self.resolvedExprType(expr, context), .{
+                            break :blk try self.makeExprAt(expr.position, try self.resolvedExprType(expr, context), .{
                                 .call = .{
                                     .name = member.name,
                                     .args = args,
@@ -615,12 +636,12 @@ const Builder = struct {
                             });
                         }
                     }
-                    break :blk try self.makeExpr(try self.resolvedExprType(expr, context), .{ .identifier = member.name });
+                    break :blk try self.makeExprAt(expr.position, try self.resolvedExprType(expr, context), .{ .identifier = member.name });
                 }
 
                 const target_type = try self.resolvedExprType(member.target, context);
                 if (types.isValidSwizzle(target_type, member.name) != null or target_type == .struct_type) {
-                    break :blk try self.makeExpr(try self.resolvedExprType(expr, context), .{
+                    break :blk try self.makeExprAt(expr.position, try self.resolvedExprType(expr, context), .{
                         .field = .{
                             .target = try self.lowerExpr(member.target, context),
                             .name = member.name,
@@ -631,7 +652,7 @@ const Builder = struct {
                 if (builtins.resolveMethod(member.name, target_type, &.{})) |_| {
                     const args = try self.allocator.alloc(*ir.Expr, 1);
                     args[0] = try self.lowerExpr(member.target, context);
-                    break :blk try self.makeExpr(try self.resolvedExprType(expr, context), .{
+                    break :blk try self.makeExprAt(expr.position, try self.resolvedExprType(expr, context), .{
                         .call = .{
                             .name = member.name,
                             .args = args,
@@ -639,7 +660,7 @@ const Builder = struct {
                     });
                 }
 
-                break :blk try self.makeExpr(try self.resolvedExprType(expr, context), .{
+                break :blk try self.makeExprAt(expr.position, try self.resolvedExprType(expr, context), .{
                     .field = .{
                         .target = try self.lowerExpr(member.target, context),
                         .name = member.name,
@@ -659,7 +680,7 @@ const Builder = struct {
 
                 switch (call.callee.data) {
                     .identifier => |name| {
-                        break :blk try self.makeExpr(try self.resolvedExprType(expr, context), .{
+                        break :blk try self.makeExprAt(expr.position, try self.resolvedExprType(expr, context), .{
                             .call = .{
                                 .name = try self.resolveUserCallName(name, arg_types.items, context),
                                 .args = try args.toOwnedSlice(self.allocator),
@@ -678,7 +699,7 @@ const Builder = struct {
                         else
                             member.name;
 
-                        break :blk try self.makeExpr(try self.resolvedExprType(expr, context), .{
+                        break :blk try self.makeExprAt(expr.position, try self.resolvedExprType(expr, context), .{
                             .call = .{
                                 .name = call_name,
                                 .args = try args.toOwnedSlice(self.allocator),
@@ -688,7 +709,7 @@ const Builder = struct {
                     else => return error.UnsupportedCallTarget,
                 }
             },
-            .index => |index_expr| self.makeExpr(try self.resolvedExprType(expr, context), .{
+            .index => |index_expr| self.makeExprAt(expr.position, try self.resolvedExprType(expr, context), .{
                 .index = .{
                     .target = try self.lowerExpr(index_expr.target, context),
                     .index = try self.lowerExpr(index_expr.index, context),
@@ -728,7 +749,7 @@ const Builder = struct {
             try body.append(self.allocator, helper_if);
         }
         if (!result_type.isVoid()) {
-            try body.append(self.allocator, self.makeStatement(expr.position.line, .{
+            try body.append(self.allocator, self.makeStatementAt(expr.position, .{
                 .return_stmt = try self.defaultValueExpr(result_type),
             }));
         }
@@ -741,16 +762,19 @@ const Builder = struct {
                     .name = "__match_value",
                     .ty = value_type,
                     .is_inout = false,
+                    .source_line = expr.position.line,
+                    .source_column = expr.position.column,
                 },
             }),
             .body = try body.toOwnedSlice(self.allocator),
             .stage = null,
             .source_line = expr.position.line,
+            .source_column = expr.position.column,
         });
 
         const args = try self.allocator.alloc(*ir.Expr, 1);
         args[0] = try self.lowerExpr(match_expr.value, context);
-        return try self.makeExpr(result_type, .{
+        return try self.makeExprAt(expr.position, result_type, .{
             .call = .{
                 .name = helper_name,
                 .args = args,
@@ -771,9 +795,9 @@ const Builder = struct {
             if (!self.patternCanUseSwitch(arm.pattern, type_info.name)) return null;
         }
 
-        const selector = try self.makeExpr(types.builtinType(.int), .{
+        const selector = try self.makeExprAt(arms[0].position, types.builtinType(.int), .{
             .field = .{
-                .target = try self.makeExpr(value_type, .{ .identifier = "__match_value" }),
+                .target = try self.makeExprAt(arms[0].position, value_type, .{ .identifier = "__match_value" }),
                 .name = "tag",
             },
         });
@@ -784,10 +808,12 @@ const Builder = struct {
             try cases.append(self.allocator, .{
                 .value = @intCast(variant.tag),
                 .body = try self.lowerMatchCaseBody(arms, type_info.name, variant.tag, value_type, result_type, context),
+                .source_line = arms[0].position.line,
+                .source_column = arms[0].position.column,
             });
         }
 
-        return self.makeStatement(null, .{
+        return self.makeStatementAt(arms[0].position, .{
             .switch_stmt = .{
                 .selector = selector,
                 .cases = try cases.toOwnedSlice(self.allocator),
@@ -807,11 +833,11 @@ const Builder = struct {
         var arm_context = try context.clone(self.allocator);
         defer arm_context.deinit();
 
-        const match_value = try self.makeExpr(value_type, .{ .identifier = "__match_value" });
+        const match_value = try self.makeExprAt(arms[index].position, value_type, .{ .identifier = "__match_value" });
         var condition = try self.patternCondition(arms[index].pattern, match_value, value_type, &arm_context);
         if (arms[index].guard) |guard| {
             const guard_expr = try self.lowerExpr(guard, &arm_context);
-            condition = try self.makeExpr(types.builtinType(.bool), .{
+            condition = try self.makeExprAt(guard.position, types.builtinType(.bool), .{
                 .binary = .{
                     .operator = .and_and,
                     .lhs = condition,
@@ -835,13 +861,13 @@ const Builder = struct {
             break :blk items;
         } else if (result_type.isVoid()) &.{} else blk: {
             const items = try self.allocator.alloc(ir.Statement, 1);
-            items[0] = self.makeStatement(null, .{
+            items[0] = self.makeStatementAt(arms[index].position, .{
                 .return_stmt = try self.defaultValueExpr(result_type),
             });
             break :blk items;
         };
 
-        return self.makeStatement(null, .{
+        return self.makeStatementAt(arms[index].position, .{
             .if_stmt = .{
                 .condition = condition,
                 .then_body = try then_body.toOwnedSlice(self.allocator),
@@ -879,14 +905,14 @@ const Builder = struct {
         if (result_type.isVoid()) return &.{};
 
         const body = try self.allocator.alloc(ir.Statement, 1);
-        body[0] = self.makeStatement(null, .{
+        body[0] = self.makeStatementAt(null, .{
             .return_stmt = try self.defaultValueExpr(result_type),
         });
         return body;
     }
 
     fn patternCanUseSwitch(self: *Builder, pattern: ast.Pattern, parent_name: []const u8) bool {
-        return switch (pattern) {
+        return switch (pattern.data) {
             .wildcard, .binding => true,
             .constructor => |constructor| blk: {
                 const info = self.typed.constructor(constructor.name) orelse break :blk false;
@@ -897,7 +923,7 @@ const Builder = struct {
     }
 
     fn patternMatchesTag(self: *Builder, pattern: ast.Pattern, parent_name: []const u8, tag: u32) bool {
-        return switch (pattern) {
+        return switch (pattern.data) {
             .wildcard, .binding => true,
             .constructor => |constructor| blk: {
                 const info = self.typed.constructor(constructor.name) orelse break :blk false;
@@ -908,7 +934,7 @@ const Builder = struct {
     }
 
     fn finalizeImplicitReturn(
-        self: *Builder,
+        _: *Builder,
         body: *std.ArrayListUnmanaged(ir.Statement),
         result_type: types.Type,
         source_line: u32,
@@ -916,7 +942,7 @@ const Builder = struct {
         if (result_type.isVoid() or body.items.len == 0) return;
         if (body.items[body.items.len - 1].data != .expr) return;
 
-        body.items[body.items.len - 1] = self.makeStatement(source_line, .{
+        body.items[body.items.len - 1] = Builder.makeStatementWithColumn(source_line, body.items[body.items.len - 1].source_column, .{
             .return_stmt = body.items[body.items.len - 1].data.expr,
         });
     }
@@ -928,38 +954,38 @@ const Builder = struct {
         target_type: types.Type,
         context: *FunctionContext,
     ) anyerror!*ir.Expr {
-        return switch (pattern) {
-            .wildcard => try self.makeExpr(types.builtinType(.bool), .{ .bool = true }),
+        return switch (pattern.data) {
+            .wildcard => try self.makeExprAt(pattern.position, types.builtinType(.bool), .{ .bool = true }),
             .binding => |name| blk: {
                 try context.loop_bindings.put(name, .{ .expr = target });
-                break :blk try self.makeExpr(types.builtinType(.bool), .{ .bool = true });
+                break :blk try self.makeExprAt(pattern.position, types.builtinType(.bool), .{ .bool = true });
             },
-            .integer => |value| try self.makeExpr(types.builtinType(.bool), .{
+            .integer => |value| try self.makeExprAt(pattern.position, types.builtinType(.bool), .{
                 .binary = .{
                     .operator = .eq,
                     .lhs = target,
-                    .rhs = try self.makeExpr(types.builtinType(.int), .{ .integer = value }),
+                    .rhs = try self.makeExprAt(pattern.position, types.builtinType(.int), .{ .integer = value }),
                 },
             }),
-            .float => |value| try self.makeExpr(types.builtinType(.bool), .{
+            .float => |value| try self.makeExprAt(pattern.position, types.builtinType(.bool), .{
                 .binary = .{
                     .operator = .eq,
                     .lhs = target,
-                    .rhs = try self.makeExpr(types.builtinType(.float), .{ .float = value }),
+                    .rhs = try self.makeExprAt(pattern.position, types.builtinType(.float), .{ .float = value }),
                 },
             }),
-            .bool => |value| try self.makeExpr(types.builtinType(.bool), .{
+            .bool => |value| try self.makeExprAt(pattern.position, types.builtinType(.bool), .{
                 .binary = .{
                     .operator = .eq,
                     .lhs = target,
-                    .rhs = try self.makeExpr(types.builtinType(.bool), .{ .bool = value }),
+                    .rhs = try self.makeExprAt(pattern.position, types.builtinType(.bool), .{ .bool = value }),
                 },
             }),
-            .symbol => |value| try self.makeExpr(types.builtinType(.bool), .{
+            .symbol => |value| try self.makeExprAt(pattern.position, types.builtinType(.bool), .{
                 .binary = .{
                     .operator = .eq,
                     .lhs = target,
-                    .rhs = try self.makeExpr(types.builtinType(.symbol), .{ .integer = symbolId(value) }),
+                    .rhs = try self.makeExprAt(pattern.position, types.builtinType(.symbol), .{ .integer = symbolId(value) }),
                 },
             }),
             .constructor => |constructor| blk: {
@@ -969,29 +995,29 @@ const Builder = struct {
                 defer substitution.deinit();
                 try unify.unify(&substitution, info.return_type, target_type);
 
-                var condition = try self.makeExpr(types.builtinType(.bool), .{
+                var condition = try self.makeExprAt(pattern.position, types.builtinType(.bool), .{
                     .binary = .{
                         .operator = .eq,
-                        .lhs = try self.makeExpr(types.builtinType(.int), .{
+                        .lhs = try self.makeExprAt(pattern.position, types.builtinType(.int), .{
                             .field = .{
                                 .target = target,
                                 .name = "tag",
                             },
                         }),
-                        .rhs = try self.makeExpr(types.builtinType(.int), .{ .integer = @as(i64, @intCast(info.tag)) }),
+                        .rhs = try self.makeExprAt(pattern.position, types.builtinType(.int), .{ .integer = @as(i64, @intCast(info.tag)) }),
                     },
                 });
 
                 for (constructor.args, info.field_names, info.field_types, 0..) |arg_pattern, field_name, field_type, field_index| {
                     const resolved_field_type = try substitution.apply(field_type);
-                    const field_expr = try self.makeExpr(resolved_field_type, .{
+                    const field_expr = try self.makeExprAt(arg_pattern.position, resolved_field_type, .{
                         .field = .{
                             .target = target,
                             .name = try self.adtFieldName(constructor.name, field_name, field_index),
                         },
                     });
                     const nested_condition = try self.patternCondition(arg_pattern, field_expr, resolved_field_type, context);
-                    condition = try self.makeExpr(types.builtinType(.bool), .{
+                    condition = try self.makeExprAt(arg_pattern.position, types.builtinType(.bool), .{
                         .binary = .{
                             .operator = .and_and,
                             .lhs = condition,
@@ -1188,17 +1214,36 @@ const Builder = struct {
     }
 
     fn makeExpr(self: *Builder, ty: types.Type, data: ir.Expr.Data) anyerror!*ir.Expr {
+        return self.makeExprAt(null, ty, data);
+    }
+
+    fn makeExprAt(self: *Builder, position: ?ast.Position, ty: types.Type, data: ir.Expr.Data) anyerror!*ir.Expr {
         const expr = try self.allocator.create(ir.Expr);
         expr.* = .{
             .ty = ty,
+            .source_line = if (position) |pos| pos.line else null,
+            .source_column = if (position) |pos| pos.column else null,
             .data = data,
         };
         return expr;
     }
 
     fn makeStatement(_: *Builder, source_line: ?u32, data: ir.Statement.Data) ir.Statement {
+        return Builder.makeStatementWithColumn(source_line, null, data);
+    }
+
+    fn makeStatementAt(_: *Builder, position: ?ast.Position, data: ir.Statement.Data) ir.Statement {
+        return Builder.makeStatementWithColumn(
+            if (position) |pos| pos.line else null,
+            if (position) |pos| pos.column else null,
+            data,
+        );
+    }
+
+    fn makeStatementWithColumn(source_line: ?u32, source_column: ?u32, data: ir.Statement.Data) ir.Statement {
         return .{
             .source_line = source_line,
+            .source_column = source_column,
             .data = data,
         };
     }
@@ -1216,6 +1261,8 @@ const Builder = struct {
             .name = decl.name,
             .ty = types.fromName(decl.type_name) orelse .{ .struct_type = decl.type_name },
             .location = decl.location,
+            .source_line = decl.position.line,
+            .source_column = decl.position.column,
         };
     }
 
