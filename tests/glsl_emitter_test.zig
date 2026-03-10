@@ -90,3 +90,38 @@ test "compiler lowers vector each loops" {
     try std.testing.expect(std.mem.indexOf(u8, output.vertex_source.?, "total += position[1];") != null);
     try std.testing.expect(std.mem.indexOf(u8, output.vertex_source.?, "total += position[2];") != null);
 }
+
+test "compiler lowers where bindings before function bodies" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const source =
+        \\fragment do
+        \\  output :frag_color, Vec4, location: 0
+        \\  def shade(n: Vec3) -> Float
+        \\    ambient + diffuse
+        \\  where
+        \\    diffuse = max(dot(n, light_dir), 0.0)
+        \\    ambient = 0.1
+        \\    light_dir = normalize(vec3(1.0, 1.0, 1.0))
+        \\  end
+        \\
+        \\  def main
+        \\    frag_color = vec4(shade(vec3(0.0, 0.0, 1.0)))
+        \\  end
+        \\end
+    ;
+
+    const output = try zwgsl.compiler.compile(arena.allocator(), source, .{});
+    try std.testing.expectEqual(@as(usize, 0), output.errors.len);
+
+    const fragment = output.fragment_source.?;
+    const ambient_index = std.mem.indexOf(u8, fragment, "float ambient = 0.1;").?;
+    const light_dir_index = std.mem.indexOf(u8, fragment, "vec3 light_dir = normalize(vec3(1.0, 1.0, 1.0));").?;
+    const diffuse_index = std.mem.indexOf(u8, fragment, "float diffuse = max(dot(n, light_dir), 0.0);").?;
+    const return_index = std.mem.indexOf(u8, fragment, "ambient + diffuse").?;
+
+    try std.testing.expect(ambient_index < return_index);
+    try std.testing.expect(light_dir_index < diffuse_index);
+    try std.testing.expect(diffuse_index < return_index);
+}

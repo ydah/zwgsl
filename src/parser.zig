@@ -237,7 +237,11 @@ pub const Parser = struct {
         }
 
         self.consumeNewlines();
-        const body = try self.parseStatementList(&.{.kw_end});
+        const body = try self.parseStatementList(&.{ .kw_where, .kw_end });
+        const where_clause = if (self.check(.kw_where))
+            try self.parseWhereClause()
+        else
+            null;
         _ = try self.expect(.kw_end, "'end' to close function");
 
         const function = try self.allocator.create(ast.FunctionDef);
@@ -247,8 +251,26 @@ pub const Parser = struct {
             .params = try params.toOwnedSlice(self.allocator),
             .return_type = return_type,
             .body = body,
+            .where_clause = where_clause,
         };
         return function;
+    }
+
+    fn parseWhereClause(self: *Parser) anyerror!ast.WhereClause {
+        const start = try self.expect(.kw_where, "where clause");
+        var bindings: std.ArrayListUnmanaged(ast.LetBinding) = .{};
+        defer bindings.deinit(self.allocator);
+
+        self.consumeNewlines();
+        while (!self.isAtEnd() and !self.check(.kw_end)) {
+            try bindings.append(self.allocator, try self.parseWhereBinding());
+            self.consumeNewlines();
+        }
+
+        return .{
+            .position = positionOf(start),
+            .bindings = try bindings.toOwnedSlice(self.allocator),
+        };
     }
 
     fn parseParam(self: *Parser) anyerror!ast.Param {
@@ -288,6 +310,7 @@ pub const Parser = struct {
 
     fn parseStatement(self: *Parser) anyerror!*ast.Stmt {
         const base_statement = switch (self.current().tag) {
+            .kw_let => try self.parseLetStatement(),
             .kw_if => try self.parseIfStatement(false),
             .kw_unless => try self.parseIfStatement(true),
             .kw_return => try self.parseReturnStatement(),
@@ -371,6 +394,13 @@ pub const Parser = struct {
         return try self.makeStmt(positionOf(start), .{ .discard = {} });
     }
 
+    fn parseLetStatement(self: *Parser) anyerror!*ast.Stmt {
+        const start = try self.expect(.kw_let, "let binding");
+        return try self.makeStmt(positionOf(start), .{
+            .let_binding = try self.parseBinding(positionOf(start), "let binding name"),
+        });
+    }
+
     fn parseSimpleStatement(self: *Parser) anyerror!*ast.Stmt {
         if (self.looksLikeTypedAssignment()) {
             const name_tok = try self.expect(.identifier, "typed assignment name");
@@ -414,6 +444,25 @@ pub const Parser = struct {
         }
 
         return try self.makeStmt(expr.position, .{ .expression = expr });
+    }
+
+    fn parseWhereBinding(self: *Parser) anyerror!ast.LetBinding {
+        return try self.parseBinding(positionOf(self.current()), "where binding name");
+    }
+
+    fn parseBinding(self: *Parser, position: ast.Position, name_label: []const u8) anyerror!ast.LetBinding {
+        const name_tok = try self.expect(.identifier, name_label);
+        var type_name: ?[]const u8 = null;
+        if (self.match(.colon)) {
+            type_name = try self.expectIdentifier("binding type");
+        }
+        _ = try self.expect(.assign, "'=' after binding");
+        return .{
+            .position = position,
+            .name = try self.identifierValue(name_tok),
+            .type_name = type_name,
+            .value = try self.parseExpression(0),
+        };
     }
 
     fn parseLoopStatement(self: *Parser, position: ast.Position, is_times: bool, receiver: *ast.Expr) anyerror!*ast.Stmt {
@@ -729,14 +778,14 @@ pub const Parser = struct {
                 self.consumeNewlines();
                 return;
             }
-            if (self.check(.kw_end) or self.check(.kw_else) or self.check(.kw_elsif)) return;
+            if (self.check(.kw_end) or self.check(.kw_else) or self.check(.kw_elsif) or self.check(.kw_where)) return;
             _ = self.advance();
         }
     }
 
     fn currentStartsBoundary(self: *Parser) bool {
         return isSeparatorTag(self.current().tag) or
-            self.currentIsOneOf(&.{ .kw_end, .kw_else, .kw_elsif, .eof });
+            self.currentIsOneOf(&.{ .kw_end, .kw_else, .kw_elsif, .kw_where, .eof });
     }
 
     fn intern(self: *Parser, value: []const u8) anyerror![]const u8 {

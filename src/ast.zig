@@ -64,6 +64,19 @@ pub const FunctionDef = struct {
     params: []const Param,
     return_type: ?[]const u8,
     body: []const *Stmt,
+    where_clause: ?WhereClause = null,
+};
+
+pub const LetBinding = struct {
+    position: Position,
+    name: []const u8,
+    type_name: ?[]const u8 = null,
+    value: *Expr,
+};
+
+pub const WhereClause = struct {
+    position: Position,
+    bindings: []const LetBinding,
 };
 
 pub const ShaderBlock = struct {
@@ -136,6 +149,7 @@ pub const Stmt = struct {
 
     pub const Data = union(enum) {
         expression: *Expr,
+        let_binding: LetBinding,
         assignment: Assignment,
         typed_assignment: TypedAssignment,
         return_stmt: ?*Expr,

@@ -268,7 +268,11 @@ fn emitStatements(writer: anytype, statements: []const ir.Statement, indent: usi
         try writeIndent(writer, indent);
         switch (statement.data) {
             .var_decl => |decl| {
-                try writer.print("var {s}: {s}", .{ decl.name, decl.ty.wgslName() });
+                try writer.print("{s} {s}: {s}", .{
+                    if (decl.mutable) "var" else "let",
+                    decl.name,
+                    decl.ty.wgslName(),
+                });
                 if (decl.value) |value| {
                     try writer.writeAll(" = ");
                     try emitExpr(writer, value, 0, uniforms);

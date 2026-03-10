@@ -194,6 +194,38 @@ test "parser handles function return types" {
     try std.testing.expectEqual(@as(usize, 1), function.params.len);
 }
 
+test "parser handles let bindings" {
+    var parsed = try parseProgram(
+        \\def main
+        \\  let color: Vec3 = vec3(1.0, 0.0, 0.0)
+        \\end
+    );
+    defer parsed.arena.deinit();
+
+    const stmt = parsed.program.items[0].function.body[0];
+    try std.testing.expectEqual(.let_binding, std.meta.activeTag(stmt.data));
+    try std.testing.expectEqualStrings("color", stmt.data.let_binding.name);
+    try std.testing.expectEqualStrings("Vec3", stmt.data.let_binding.type_name.?);
+}
+
+test "parser handles where clauses" {
+    var parsed = try parseProgram(
+        \\def lighting(n: Vec3) -> Float
+        \\  ambient + diffuse
+        \\where
+        \\  diffuse = max(n.x, 0.0)
+        \\  ambient = 0.1
+        \\end
+    );
+    defer parsed.arena.deinit();
+
+    const function = parsed.program.items[0].function;
+    try std.testing.expect(function.where_clause != null);
+    try std.testing.expectEqual(@as(usize, 2), function.where_clause.?.bindings.len);
+    try std.testing.expectEqualStrings("diffuse", function.where_clause.?.bindings[0].name);
+    try std.testing.expectEqualStrings("ambient", function.where_clause.?.bindings[1].name);
+}
+
 test "parser reuses interned identifier slices with a shared string pool" {
     var parsed = try parseProgramWithPool(
         \\def main(value: Float) -> Float

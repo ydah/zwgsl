@@ -176,3 +176,54 @@ test "sema rejects each loops on non-vectors" {
     defer analyzed.arena.deinit();
     try std.testing.expect(analyzed.diagnostics.items.items.len > 0);
 }
+
+test "sema rejects reassigning let bindings" {
+    var analyzed = try analyzeSource(
+        \\def main
+        \\  let value = 1.0
+        \\  value = 2.0
+        \\end
+    );
+    defer analyzed.arena.deinit();
+
+    try std.testing.expect(analyzed.diagnostics.items.items.len > 0);
+    try std.testing.expect(std.mem.indexOf(u8, analyzed.diagnostics.items.items[0].message, "immutable") != null);
+}
+
+test "sema resolves where bindings in dependency order" {
+    var analyzed = try analyzeSource(
+        \\def shade(n: Vec3) -> Float
+        \\  ambient + diffuse
+        \\where
+        \\  diffuse = max(dot(n, light_dir), 0.0)
+        \\  ambient = 0.1
+        \\  light_dir = normalize(vec3(1.0, 1.0, 1.0))
+        \\end
+    );
+    defer analyzed.arena.deinit();
+
+    try std.testing.expectEqual(@as(usize, 0), analyzed.diagnostics.items.items.len);
+}
+
+test "sema reports circular where dependencies" {
+    var analyzed = try analyzeSource(
+        \\def broken -> Float
+        \\  a
+        \\where
+        \\  a = b
+        \\  b = a
+        \\end
+    );
+    defer analyzed.arena.deinit();
+
+    try std.testing.expect(analyzed.diagnostics.items.items.len > 0);
+
+    var found_cycle = false;
+    for (analyzed.diagnostics.items.items) |diagnostic| {
+        if (std.mem.indexOf(u8, diagnostic.message, "circular dependency") != null) {
+            found_cycle = true;
+            break;
+        }
+    }
+    try std.testing.expect(found_cycle);
+}

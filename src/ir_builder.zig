@@ -175,12 +175,31 @@ const Builder = struct {
             try context.nonlocals.put("local_invocation_index", {});
         }
 
+        var lowered_statements = std.ArrayListUnmanaged(ir.Statement){};
+        defer lowered_statements.deinit(self.allocator);
+
+        for (self.typed.whereBindings(function)) |binding| {
+            try self.appendLocalBinding(
+                &lowered_statements,
+                binding.*.position.line,
+                binding.*.name,
+                binding.*.value,
+                false,
+                &context,
+            );
+        }
+
         const body = try self.lowerStatementList(function.body, &context);
-        var final_body = body;
-        if (!signature.return_type.isVoid() and body.len > 0 and body[body.len - 1].data == .expr) {
-            var replaced = try self.allocator.dupe(ir.Statement, body);
-            replaced[replaced.len - 1] = self.makeStatement(body[body.len - 1].source_line, .{
-                .return_stmt = body[body.len - 1].data.expr,
+        for (body) |statement| {
+            try lowered_statements.append(self.allocator, statement);
+        }
+
+        const lowered_body = try lowered_statements.toOwnedSlice(self.allocator);
+        var final_body = lowered_body;
+        if (!signature.return_type.isVoid() and lowered_body.len > 0 and lowered_body[lowered_body.len - 1].data == .expr) {
+            var replaced = try self.allocator.dupe(ir.Statement, lowered_body);
+            replaced[replaced.len - 1] = self.makeStatement(lowered_body[lowered_body.len - 1].source_line, .{
+                .return_stmt = lowered_body[lowered_body.len - 1].data.expr,
             });
             final_body = replaced;
         }
@@ -218,16 +237,25 @@ const Builder = struct {
                     .expr = try self.lowerExpr(expr, context),
                 }));
             },
+            .let_binding => |binding| {
+                try self.appendLocalBinding(
+                    list,
+                    statement.position.line,
+                    binding.name,
+                    binding.value,
+                    false,
+                    context,
+                );
+            },
             .typed_assignment => |typed_assignment| {
-                const ty = self.typed.exprType(typed_assignment.value);
-                try context.locals.put(typed_assignment.name, ty);
-                try list.append(self.allocator, self.makeStatement(statement.position.line, .{
-                    .var_decl = .{
-                        .name = typed_assignment.name,
-                        .ty = ty,
-                        .value = try self.lowerExpr(typed_assignment.value, context),
-                    },
-                }));
+                try self.appendLocalBinding(
+                    list,
+                    statement.position.line,
+                    typed_assignment.name,
+                    typed_assignment.value,
+                    true,
+                    context,
+                );
             },
             .assignment => |assignment| {
                 if (assignment.target.data == .identifier and assignment.operator == .assign) {
@@ -240,6 +268,7 @@ const Builder = struct {
                             .var_decl = .{
                                 .name = name,
                                 .ty = ty,
+                                .mutable = true,
                                 .value = value,
                             },
                         }));
@@ -319,6 +348,27 @@ const Builder = struct {
                 }
             },
         }
+    }
+
+    fn appendLocalBinding(
+        self: *Builder,
+        list: *std.ArrayListUnmanaged(ir.Statement),
+        source_line: u32,
+        name: []const u8,
+        value_expr: *ast.Expr,
+        mutable: bool,
+        context: *FunctionContext,
+    ) anyerror!void {
+        const ty = self.typed.exprType(value_expr);
+        try context.locals.put(name, ty);
+        try list.append(self.allocator, self.makeStatement(source_line, .{
+            .var_decl = .{
+                .name = name,
+                .ty = ty,
+                .mutable = mutable,
+                .value = try self.lowerExpr(value_expr, context),
+            },
+        }));
     }
 
     fn lowerSingleStatementSlice(self: *Builder, statement: *ast.Stmt, context: *FunctionContext) anyerror![]const ir.Statement {

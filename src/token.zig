@@ -26,6 +26,8 @@ pub const TokenTag = enum {
     kw_precision,
     kw_pipeline,
     kw_nil,
+    kw_let,
+    kw_where,
 
     integer_literal,
     float_literal,
@@ -113,6 +115,8 @@ pub fn keywordTag(identifier: []const u8) ?TokenTag {
         .{ "precision", .kw_precision },
         .{ "pipeline", .kw_pipeline },
         .{ "nil", .kw_nil },
+        .{ "let", .kw_let },
+        .{ "where", .kw_where },
     });
     return map.get(identifier);
 }

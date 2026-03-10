@@ -15,6 +15,11 @@ const SymbolKind = enum {
     builtin,
 };
 
+const WhereVisitState = enum {
+    visiting,
+    visited,
+};
+
 const SymbolInfo = struct {
     ty: types.Type,
     kind: SymbolKind,
@@ -70,6 +75,7 @@ pub const TypedProgram = struct {
     program: *ast.Program,
     expr_types: std.AutoHashMap(*ast.Expr, types.Type),
     function_signatures: std.AutoHashMap(*ast.FunctionDef, FunctionSignature),
+    where_bindings: std.AutoHashMap(*ast.FunctionDef, []const *const ast.LetBinding),
     global_functions: []const *ast.FunctionDef = &.{},
     vertex_functions: []const *ast.FunctionDef = &.{},
     fragment_functions: []const *ast.FunctionDef = &.{},
@@ -84,6 +90,10 @@ pub const TypedProgram = struct {
 
     pub fn functionSignature(self: *const TypedProgram, function: *ast.FunctionDef) ?FunctionSignature {
         return self.function_signatures.get(function);
+    }
+
+    pub fn whereBindings(self: *const TypedProgram, function: *ast.FunctionDef) []const *const ast.LetBinding {
+        return self.where_bindings.get(function) orelse &.{};
     }
 };
 
@@ -130,6 +140,7 @@ const Analyzer = struct {
             .program = program,
             .expr_types = std.AutoHashMap(*ast.Expr, types.Type).init(allocator),
             .function_signatures = std.AutoHashMap(*ast.FunctionDef, FunctionSignature).init(allocator),
+            .where_bindings = std.AutoHashMap(*ast.FunctionDef, []const *const ast.LetBinding).init(allocator),
         };
 
         return .{
@@ -438,6 +449,10 @@ const Analyzer = struct {
             .stage_functions = stage_functions,
         };
 
+        if (function.where_clause) |where_clause| {
+            try self.analyzeWhereClause(function, &scope, where_clause, &context);
+        }
+
         var last_expr_type: ?types.Type = null;
         for (function.body, 0..) |statement, index| {
             const stmt_type = try self.analyzeStmt(&scope, statement, &context);
@@ -490,6 +505,10 @@ const Analyzer = struct {
         switch (stmt.data) {
             .expression => |expr| {
                 return try self.analyzeExpr(scope, expr, context);
+            },
+            .let_binding => |binding| {
+                try self.analyzeLetBinding(scope, binding, true, context);
+                return null;
             },
             .typed_assignment => |typed_assignment| {
                 const target_type = try self.resolveTypeName(typed_assignment.type_name, stmt.position);
@@ -592,6 +611,105 @@ const Analyzer = struct {
                 return null;
             },
         }
+    }
+
+    fn analyzeLetBinding(
+        self: *Analyzer,
+        scope: *Scope,
+        binding: ast.LetBinding,
+        immutable: bool,
+        context: *FunctionContext,
+    ) anyerror!void {
+        const value_type = try self.analyzeExpr(scope, binding.value, context);
+        const target_type = if (binding.type_name) |type_name| blk: {
+            const annotated = try self.resolveTypeName(type_name, binding.position);
+            if (!types.isAssignable(annotated, value_type)) {
+                try self.report(binding.position, "cannot assign value of type {s} to {s}", .{ value_type.glslName(), annotated.glslName() });
+            }
+            break :blk annotated;
+        } else value_type;
+
+        if (!try scope.put(binding.name, .{
+            .ty = target_type,
+            .kind = .local,
+            .mutable = !immutable,
+        })) {
+            try self.report(binding.position, "redefinition of local '{s}'", .{binding.name});
+        }
+    }
+
+    fn analyzeWhereClause(
+        self: *Analyzer,
+        function: *ast.FunctionDef,
+        scope: *Scope,
+        where_clause: ast.WhereClause,
+        context: *FunctionContext,
+    ) anyerror!void {
+        const ordered = try self.sortWhereBindings(where_clause.bindings);
+        try self.typed.where_bindings.put(function, ordered);
+
+        for (ordered) |binding| {
+            try self.analyzeLetBinding(scope, binding.*, true, context);
+        }
+    }
+
+    fn sortWhereBindings(self: *Analyzer, bindings: []const ast.LetBinding) anyerror![]const *const ast.LetBinding {
+        var binding_map = std.StringHashMap(*const ast.LetBinding).init(self.allocator);
+        defer binding_map.deinit();
+        for (bindings) |*binding| {
+            if (binding_map.contains(binding.name)) {
+                try self.report(binding.position, "redefinition of local '{s}'", .{binding.name});
+                continue;
+            }
+            try binding_map.put(binding.name, binding);
+        }
+
+        var states = std.StringHashMap(WhereVisitState).init(self.allocator);
+        defer states.deinit();
+
+        var ordered: std.ArrayListUnmanaged(*const ast.LetBinding) = .{};
+        defer ordered.deinit(self.allocator);
+
+        var iterator = binding_map.iterator();
+        while (iterator.next()) |entry| {
+            try self.visitWhereBinding(&binding_map, &states, &ordered, entry.value_ptr.*);
+        }
+
+        return try ordered.toOwnedSlice(self.allocator);
+    }
+
+    fn visitWhereBinding(
+        self: *Analyzer,
+        binding_map: *const std.StringHashMap(*const ast.LetBinding),
+        states: *std.StringHashMap(WhereVisitState),
+        ordered: *std.ArrayListUnmanaged(*const ast.LetBinding),
+        binding: *const ast.LetBinding,
+    ) anyerror!void {
+        if (states.get(binding.name)) |state| {
+            switch (state) {
+                .visited => return,
+                .visiting => {
+                    try self.report(binding.position, "circular dependency in where clause for '{s}'", .{binding.name});
+                    return;
+                },
+            }
+        }
+
+        try states.put(binding.name, .visiting);
+
+        var identifiers: std.StringHashMapUnmanaged(void) = .{};
+        defer identifiers.deinit(self.allocator);
+        try collectExprIdentifiers(self.allocator, binding.value, &identifiers);
+
+        var iterator = identifiers.iterator();
+        while (iterator.next()) |entry| {
+            if (binding_map.get(entry.key_ptr.*)) |dependency| {
+                try self.visitWhereBinding(binding_map, states, ordered, dependency);
+            }
+        }
+
+        try states.put(binding.name, .visited);
+        try ordered.append(self.allocator, binding);
     }
 
     fn analyzeAssignment(
@@ -848,4 +966,31 @@ fn compoundOperator(tag: @import("token.zig").TokenTag) @import("token.zig").Tok
 
 fn sameName(lhs: []const u8, rhs: []const u8) bool {
     return (lhs.len == rhs.len and lhs.ptr == rhs.ptr) or std.mem.eql(u8, lhs, rhs);
+}
+
+fn collectExprIdentifiers(
+    allocator: std.mem.Allocator,
+    expr: *ast.Expr,
+    names: *std.StringHashMapUnmanaged(void),
+) anyerror!void {
+    switch (expr.data) {
+        .identifier => |name| try names.put(allocator, name, {}),
+        .unary => |unary| try collectExprIdentifiers(allocator, unary.operand, names),
+        .binary => |binary| {
+            try collectExprIdentifiers(allocator, binary.lhs, names);
+            try collectExprIdentifiers(allocator, binary.rhs, names);
+        },
+        .member => |member| try collectExprIdentifiers(allocator, member.target, names),
+        .call => |call| {
+            try collectExprIdentifiers(allocator, call.callee, names);
+            for (call.args) |arg| {
+                try collectExprIdentifiers(allocator, arg, names);
+            }
+        },
+        .index => |index_expr| {
+            try collectExprIdentifiers(allocator, index_expr.target, names);
+            try collectExprIdentifiers(allocator, index_expr.index, names);
+        },
+        else => {},
+    }
 }

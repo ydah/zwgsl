@@ -74,6 +74,7 @@ pub const Statement = struct {
 pub const VarDecl = struct {
     name: []const u8,
     ty: types.Type,
+    mutable: bool = true,
     value: ?*Expr = null,
 };
 

@@ -144,6 +144,7 @@ fn startsIndentedBlock(tag: token.TokenTag) bool {
         .kw_elsif,
         .kw_else,
         .kw_struct,
+        .kw_where,
         => true,
         else => false,
     };
@@ -154,6 +155,7 @@ fn suppressesVirtualSemi(tag: token.TokenTag) bool {
         .kw_end,
         .kw_else,
         .kw_elsif,
+        .kw_where,
         => true,
         else => false,
     };
