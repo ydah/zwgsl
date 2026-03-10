@@ -956,7 +956,7 @@ fn builtinItems() []const StaticDoc {
         .{ .name = "cross", .detail = "fn cross(a: Vec(3), b: Vec(3)) -> Vec(3)", .documentation = "Computes a 3D cross product." },
         .{ .name = "reflect", .detail = "fn reflect(i: Vec(N), n: Vec(N)) -> Vec(N)", .documentation = "Reflects an incident vector around a normal." },
         .{ .name = "mix", .detail = "fn mix(a: T, b: T, t: T | Sca) -> T", .documentation = "Linearly interpolates between values." },
-        .{ .name = "texture", .detail = "fn texture(s: Sampler2D, uv: Vec2) -> Vec4", .documentation = "Samples a texture and maps to WGSL textureSample." },
+        .{ .name = "texture", .detail = "fn texture(s: Sampler2D | SamplerCube | Sampler3D, coord: Vec2 | Vec3) -> Vec4", .documentation = "Samples 2D, cube, or 3D samplers and lowers to WGSL textureSample." },
         .{ .name = "transpose", .detail = "fn transpose(m: Mat(M, N)) -> Mat(M, N)", .documentation = "Returns the transposed matrix." },
     };
 }

@@ -28,7 +28,8 @@ syntax while still targeting modern GPU backends.
 - Dependent dimension matching for `Vec(N)`, `Mat(M, N)`, and tensor-style type applications
 - Generic structs, constructor inference, and phantom-type-safe annotations
 - `trait` / `impl` support with compile-time specialization for WGSL emission
-- Multi-stage WGSL pipeline: `AST -> HIR -> MIR -> WGSL`
+- Multi-stage WGSL pipeline with entry-point-aware HIR and CFG-style MIR: `AST -> HIR -> MIR -> WGSL`
+- WGSL sampler lowering for uniforms, function parameters, and immutable local aliases
 - Source-aware LSP support: diagnostics, hover, completion, goto-definition, semantic tokens
 - Browser playground with Monaco, wasm compilation, and worker-backed diagnostics
 - C API surface for embedding the compiler in other tools
@@ -369,7 +370,7 @@ Lexer -> Layout Resolver -> Parser -> AST
 | Dependent dimensions | Implemented for `Vec(N)` / `Mat(M, N)` matching and WGSL type lowering |
 | Generic structs + phantom tags | Implemented |
 | `trait` / `impl` specialization | Implemented as compile-time static dispatch |
-| WGSL pipeline | Implemented as `AST -> HIR -> MIR -> WGSL` |
+| WGSL pipeline | Implemented as `AST -> HIR -> MIR -> WGSL`, with entry-point HIR and CFG-based MIR lowering |
 | GLSL ES 3.0 backend | Implemented |
 | LSP | Implemented |
 | Playground | Implemented |
