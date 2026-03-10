@@ -25,7 +25,7 @@ Shader languages are powerful, but they are rarely pleasant to read or write.
 - Algebraic data type declarations and constructor registration
 - `match` parsing and semantic checking, including constructor patterns and non-exhaustive warnings
 - Dependent-dimension-aware type matching for signatures such as `Vec(N)` and `Mat(M, N)`
-- Generic struct parsing and generic function signature matching
+- Generic struct constructors, field access, and phantom-type-safe annotations
 - WGSL emission path staged through `HIR -> MIR` wrapper modules
 - GLSL ES 3.00 and WGSL backends
 - Standalone LSP server target: `zwgsl-lsp`
@@ -139,7 +139,7 @@ It currently provides:
 | HM local inference | Implemented for local lambdas / let-polymorphism |
 | ADT + match typing | Implemented |
 | Dependent dimension matching | Implemented for signature / call matching |
-| Generic struct parsing | Implemented |
+| Generic structs + phantom tags | Constructor inference and type checking implemented |
 | Trait / impl basis | Minimal parser + constraint registry |
 | WGSL HIR / MIR staging | Thin wrapper layers in place |
 | LSP server | Source-aware diagnostics / hover / completion / goto-definition |

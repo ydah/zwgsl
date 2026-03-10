@@ -94,6 +94,12 @@ pub const TypeDefInfo = struct {
     variants: []const VariantInfo,
 };
 
+pub const StructInfo = struct {
+    name: []const u8,
+    params: []const []const u8,
+    fields: []const ast.StructField,
+};
+
 pub const ConstructorInfo = struct {
     name: []const u8,
     parent_name: []const u8,
@@ -110,6 +116,7 @@ pub const TypedProgram = struct {
     expr_types: std.AutoHashMap(*ast.Expr, types.Type),
     function_signatures: std.AutoHashMap(*ast.FunctionDef, FunctionSignature),
     where_bindings: std.AutoHashMap(*ast.FunctionDef, []const *const ast.LetBinding),
+    struct_defs: std.StringHashMap(StructInfo),
     type_defs: std.StringHashMap(TypeDefInfo),
     constructors: std.StringHashMap(ConstructorInfo),
     global_functions: []const *ast.FunctionDef = &.{},
@@ -134,6 +141,10 @@ pub const TypedProgram = struct {
 
     pub fn typeDef(self: *const TypedProgram, name: []const u8) ?TypeDefInfo {
         return self.type_defs.get(name);
+    }
+
+    pub fn structDef(self: *const TypedProgram, name: []const u8) ?StructInfo {
+        return self.struct_defs.get(name);
     }
 
     pub fn constructor(self: *const TypedProgram, name: []const u8) ?ConstructorInfo {
@@ -166,6 +177,7 @@ const Analyzer = struct {
     diagnostics: *diagnostics.DiagnosticList,
     typed: *TypedProgram,
     struct_fields: std.StringHashMap([]const ast.StructField),
+    struct_defs: std.StringHashMap(StructInfo),
     type_defs: std.StringHashMap(TypeDefInfo),
     constructors: std.StringHashMap(ConstructorInfo),
     traits: typeclass.TraitRegistry,
@@ -188,6 +200,7 @@ const Analyzer = struct {
             .expr_types = std.AutoHashMap(*ast.Expr, types.Type).init(allocator),
             .function_signatures = std.AutoHashMap(*ast.FunctionDef, FunctionSignature).init(allocator),
             .where_bindings = std.AutoHashMap(*ast.FunctionDef, []const *const ast.LetBinding).init(allocator),
+            .struct_defs = std.StringHashMap(StructInfo).init(allocator),
             .type_defs = std.StringHashMap(TypeDefInfo).init(allocator),
             .constructors = std.StringHashMap(ConstructorInfo).init(allocator),
         };
@@ -199,6 +212,7 @@ const Analyzer = struct {
             .diagnostics = diagnostic_list,
             .typed = typed,
             .struct_fields = std.StringHashMap([]const ast.StructField).init(allocator),
+            .struct_defs = std.StringHashMap(StructInfo).init(allocator),
             .type_defs = std.StringHashMap(TypeDefInfo).init(allocator),
             .constructors = std.StringHashMap(ConstructorInfo).init(allocator),
             .traits = typeclass.TraitRegistry.init(allocator),
@@ -240,6 +254,13 @@ const Analyzer = struct {
                         try self.report(struct_def.position, "redefinition of struct '{s}'", .{struct_def.name});
                     } else {
                         try self.struct_fields.put(struct_def.name, struct_def.fields);
+                        const info: StructInfo = .{
+                            .name = struct_def.name,
+                            .params = struct_def.params,
+                            .fields = struct_def.fields,
+                        };
+                        try self.struct_defs.put(struct_def.name, info);
+                        try self.typed.struct_defs.put(struct_def.name, info);
                     }
                 },
                 .type_def => |type_def| try self.registerTypeDef(type_def),
@@ -1101,16 +1122,8 @@ const Analyzer = struct {
                 if (builtins.resolveMethod(member.name, target_type, &.{})) |builtin_resolution| {
                     break :blk builtin_resolution.return_type;
                 }
-                if (target_type == .struct_type) {
-                    const fields = self.struct_fields.get(target_type.struct_type) orelse {
-                        try self.report(expr.position, "unknown struct type '{s}'", .{target_type.struct_type});
-                        break :blk types.builtinType(.error_type);
-                    };
-                    for (fields) |field| {
-                        if (sameName(field.name, member.name)) {
-                            break :blk try self.resolveTypeName(field.type_name, field.position);
-                        }
-                    }
+                if (try self.resolveStructFieldType(target_type, member.name)) |field_type| {
+                    break :blk field_type;
                 }
                 try self.report(expr.position, "member '{s}' does not exist on {s}", .{ member.name, target_type.glslName() });
                 break :blk types.builtinType(.error_type);
@@ -1147,6 +1160,9 @@ const Analyzer = struct {
                         break :blk types.builtinType(.error_type);
                     },
                     .member => |member| {
+                        if (sameName(member.name, "new")) {
+                            break :blk try self.resolveStructConstructorCall(scope, member.target, call.args, context, expr.position);
+                        }
                         const receiver_type = try self.analyzeExpr(scope, member.target, context);
                         if (builtins.resolveMethod(member.name, receiver_type, arg_types.items)) |resolution| {
                             break :blk resolution.return_type;
@@ -1337,6 +1353,178 @@ const Analyzer = struct {
         };
     }
 
+    fn resolveStructFieldType(self: *Analyzer, target_type: types.Type, field_name: []const u8) anyerror!?types.Type {
+        const struct_info, const struct_args = switch (target_type) {
+            .struct_type => |name| .{ self.struct_defs.get(name) orelse return null, null },
+            .type_app => |app_ty| .{ self.struct_defs.get(app_ty.name) orelse return null, app_ty.args },
+            else => return null,
+        };
+
+        for (struct_info.fields) |field| {
+            if (!sameName(field.name, field_name)) continue;
+            const base_type = try self.resolveTypeNameWithParams(field.type_name, field.position, struct_info.params);
+            if (struct_args) |args| {
+                return try self.instantiateParamType(base_type, args);
+            }
+            return base_type;
+        }
+        return null;
+    }
+
+    fn resolveStructConstructorCall(
+        self: *Analyzer,
+        scope: *Scope,
+        target_expr: *ast.Expr,
+        value_args: []const *ast.Expr,
+        context: *FunctionContext,
+        position: ast.Position,
+    ) anyerror!types.Type {
+        const target = try self.resolveStructConstructorTarget(target_expr, position);
+        var arg_types = std.ArrayListUnmanaged(types.Type){};
+        defer arg_types.deinit(self.allocator);
+        for (value_args) |arg| {
+            try arg_types.append(self.allocator, try self.analyzeExpr(scope, arg, context));
+        }
+
+        if (target.info.fields.len != arg_types.items.len) {
+            try self.report(position, "struct '{s}' constructor expects {d} fields", .{ target.info.name, target.info.fields.len });
+            return types.builtinType(.error_type);
+        }
+
+        if (target.explicit_args) |explicit_args| {
+            if (explicit_args.len != target.info.params.len) {
+                try self.report(position, "struct '{s}' expects {d} type arguments", .{ target.info.name, target.info.params.len });
+                return types.builtinType(.error_type);
+            }
+
+            for (target.info.fields, arg_types.items) |field, arg_type| {
+                const expected_type = try self.instantiateParamType(
+                    try self.resolveTypeNameWithParams(field.type_name, field.position, target.info.params),
+                    explicit_args,
+                );
+                if (!self.typesCompatible(expected_type, arg_type)) {
+                    try self.report(position, "cannot assign value of type {s} to {s}", .{ arg_type.glslName(), expected_type.glslName() });
+                    return types.builtinType(.error_type);
+                }
+            }
+
+            return .{
+                .type_app = .{
+                    .name = target.info.name,
+                    .args = explicit_args,
+                },
+            };
+        }
+
+        if (target.info.params.len == 0) {
+            for (target.info.fields, arg_types.items) |field, arg_type| {
+                const expected_type = try self.resolveTypeName(field.type_name, field.position);
+                if (!self.typesCompatible(expected_type, arg_type)) {
+                    try self.report(position, "cannot assign value of type {s} to {s}", .{ arg_type.glslName(), expected_type.glslName() });
+                    return types.builtinType(.error_type);
+                }
+            }
+            return .{ .struct_type = target.info.name };
+        }
+
+        var substitution = unify.Substitution.init(self.allocator);
+        defer substitution.deinit();
+        for (target.info.fields, arg_types.items) |field, arg_type| {
+            const field_type = try self.resolveTypeNameWithParams(field.type_name, field.position, target.info.params);
+            unify.unify(&substitution, field_type, arg_type) catch {
+                try self.report(position, "cannot infer constructor '{s}' from provided field values", .{target.info.name});
+                return types.builtinType(.error_type);
+            };
+        }
+
+        const generic_return = try self.makeGenericType(target.info.name, target.info.params);
+        const instantiated = substitution.apply(generic_return) catch generic_return;
+        if (containsTypeVar(instantiated)) {
+            try self.report(position, "struct '{s}' requires explicit type arguments for phantom parameters", .{target.info.name});
+            return types.builtinType(.error_type);
+        }
+        return instantiated;
+    }
+
+    fn resolveStructConstructorTarget(
+        self: *Analyzer,
+        expr: *ast.Expr,
+        position: ast.Position,
+    ) anyerror!struct { info: StructInfo, explicit_args: ?[]const types.Type } {
+        switch (expr.data) {
+            .identifier => |name| {
+                const info = self.struct_defs.get(name) orelse {
+                    try self.report(position, "unknown struct '{s}'", .{name});
+                    return .{ .info = .{ .name = name, .params = &.{}, .fields = &.{} }, .explicit_args = null };
+                };
+                return .{ .info = info, .explicit_args = null };
+            },
+            .call => |call| {
+                if (call.callee.data != .identifier) {
+                    try self.report(position, "invalid struct constructor target", .{});
+                    return .{ .info = .{ .name = "", .params = &.{}, .fields = &.{} }, .explicit_args = null };
+                }
+                const name = call.callee.data.identifier;
+                const info = self.struct_defs.get(name) orelse {
+                    try self.report(position, "unknown struct '{s}'", .{name});
+                    return .{ .info = .{ .name = name, .params = &.{}, .fields = &.{} }, .explicit_args = null };
+                };
+                const args = try self.allocator.alloc(types.Type, call.args.len);
+                for (call.args, 0..) |arg, index| {
+                    args[index] = try self.typeFromTypeExpr(arg, position);
+                }
+                return .{ .info = info, .explicit_args = args };
+            },
+            else => {
+                try self.report(position, "invalid struct constructor target", .{});
+                return .{ .info = .{ .name = "", .params = &.{}, .fields = &.{} }, .explicit_args = null };
+            },
+        }
+    }
+
+    fn typeFromTypeExpr(self: *Analyzer, expr: *ast.Expr, position: ast.Position) anyerror!types.Type {
+        return switch (expr.data) {
+            .identifier => |name| blk: {
+                if (types.fromName(name)) |builtin| break :blk builtin;
+                if (self.struct_defs.contains(name) or self.type_defs.contains(name) or self.constructors.contains(name)) {
+                    break :blk .{ .struct_type = name };
+                }
+                try self.report(position, "unknown type expression '{s}'", .{name});
+                break :blk types.builtinType(.error_type);
+            },
+            .integer => |value| if (value >= 0)
+                types.natType(@intCast(value))
+            else blk: {
+                try self.report(position, "type-level naturals must be non-negative", .{});
+                break :blk types.builtinType(.error_type);
+            },
+            .call => |call| blk: {
+                if (call.callee.data != .identifier) {
+                    try self.report(position, "invalid type application", .{});
+                    break :blk types.builtinType(.error_type);
+                }
+                const args = try self.allocator.alloc(types.Type, call.args.len);
+                for (call.args, 0..) |arg, index| {
+                    args[index] = try self.typeFromTypeExpr(arg, position);
+                }
+                break :blk try types.typeApp(self.allocator, call.callee.data.identifier, args);
+            },
+            else => blk: {
+                try self.report(position, "invalid type expression", .{});
+                break :blk types.builtinType(.error_type);
+            },
+        };
+    }
+
+    fn instantiateParamType(self: *Analyzer, base_type: types.Type, args: []const types.Type) anyerror!types.Type {
+        var substitution = unify.Substitution.init(self.allocator);
+        defer substitution.deinit();
+        for (args, 0..) |arg, index| {
+            try substitution.bindings.put(@intCast(index), arg);
+        }
+        return substitution.apply(base_type);
+    }
+
     fn findFunction(
         self: *Analyzer,
         name: []const u8,
@@ -1483,7 +1671,7 @@ const TypeSpecParser = struct {
 
         if (types.fromName(name)) |builtin| return builtin;
         if (self.paramIndex(name)) |id| return types.typeVar(id);
-        if (self.analyzer.struct_fields.contains(name) or self.analyzer.type_defs.contains(name)) {
+        if (self.analyzer.struct_fields.contains(name) or self.analyzer.type_defs.contains(name) or self.analyzer.constructors.contains(name)) {
             return .{ .struct_type = name };
         }
         if (self.param_sink) |sink| {
@@ -1513,7 +1701,7 @@ const TypeSpecParser = struct {
             };
         }
 
-        if (!self.analyzer.struct_fields.contains(name) and !self.analyzer.type_defs.contains(name) and !std.mem.eql(u8, name, "Vec") and !std.mem.eql(u8, name, "Mat") and !std.mem.eql(u8, name, "Ten") and !std.mem.eql(u8, name, "Tensor")) {
+        if (!self.analyzer.struct_fields.contains(name) and !self.analyzer.type_defs.contains(name) and !self.analyzer.constructors.contains(name) and !std.mem.eql(u8, name, "Vec") and !std.mem.eql(u8, name, "Mat") and !std.mem.eql(u8, name, "Ten") and !std.mem.eql(u8, name, "Tensor")) {
             try self.analyzer.report(self.position, "unknown type '{s}'", .{name});
             return types.builtinType(.error_type);
         }
@@ -1590,6 +1778,25 @@ fn compoundOperator(tag: @import("token.zig").TokenTag) @import("token.zig").Tok
 
 fn sameName(lhs: []const u8, rhs: []const u8) bool {
     return (lhs.len == rhs.len and lhs.ptr == rhs.ptr) or std.mem.eql(u8, lhs, rhs);
+}
+
+fn containsTypeVar(ty: types.Type) bool {
+    return switch (ty) {
+        .type_var => true,
+        .function => |function| blk: {
+            for (function.params) |param| {
+                if (containsTypeVar(param)) break :blk true;
+            }
+            break :blk containsTypeVar(function.return_type.*);
+        },
+        .type_app => |app_ty| blk: {
+            for (app_ty.args) |arg| {
+                if (containsTypeVar(arg)) break :blk true;
+            }
+            break :blk false;
+        },
+        else => false,
+    };
 }
 
 fn constraintTypeVar(params: []const []const u8, name: []const u8) ?u32 {

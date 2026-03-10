@@ -430,3 +430,68 @@ test "sema rejects unsatisfied trait constraints" {
 
     try std.testing.expect(analyzed.diagnostics.items.items.len > 0);
 }
+
+test "sema infers generic struct constructors and field access" {
+    var analyzed = try analyzeSource(
+        \\struct Pair(a, b)
+        \\  first: a
+        \\  second: b
+        \\end
+        \\
+        \\def first_value -> Vec3
+        \\  let pair = Pair.new(vec3(1.0), 0.5)
+        \\  pair.first
+        \\end
+    );
+    defer analyzed.arena.deinit();
+
+    try std.testing.expectEqual(@as(usize, 0), analyzed.diagnostics.items.items.len);
+    const function = analyzed.program.items[1].function;
+    const expr = function.body[1].data.expression;
+    try std.testing.expect(analyzed.typed.exprType(expr).eql(zwgsl.types.builtinType(.vec3)));
+}
+
+test "sema supports explicit phantom struct parameters" {
+    var analyzed = try analyzeSource(
+        \\type Space
+        \\  WorldSpace
+        \\  ViewSpace
+        \\end
+        \\
+        \\struct Tagged(space, value_type)
+        \\  value: value_type
+        \\end
+        \\
+        \\def world_to_view(pos: Tagged(WorldSpace, Vec3)) -> Tagged(ViewSpace, Vec3)
+        \\  Tagged(ViewSpace, Vec3).new(pos.value)
+        \\end
+    );
+    defer analyzed.arena.deinit();
+
+    try std.testing.expectEqual(@as(usize, 0), analyzed.diagnostics.items.items.len);
+}
+
+test "sema rejects phantom struct parameter mismatches" {
+    var analyzed = try analyzeSource(
+        \\type Space
+        \\  WorldSpace
+        \\  ViewSpace
+        \\end
+        \\
+        \\struct Tagged(space, value_type)
+        \\  value: value_type
+        \\end
+        \\
+        \\def world_to_view(pos: Tagged(WorldSpace, Vec3)) -> Tagged(ViewSpace, Vec3)
+        \\  Tagged(ViewSpace, Vec3).new(pos.value)
+        \\end
+        \\
+        \\def main
+        \\  let view_pos = Tagged(ViewSpace, Vec3).new(vec3(1.0))
+        \\  world_to_view(view_pos)
+        \\end
+    );
+    defer analyzed.arena.deinit();
+
+    try std.testing.expect(analyzed.diagnostics.items.items.len > 0);
+}
