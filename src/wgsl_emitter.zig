@@ -25,6 +25,126 @@ const SamplerAlias = struct {
     target: []const u8,
 };
 
+const EmitFunctionContext = struct {
+    definitions: std.StringHashMap(*const mir.Instruction),
+    use_counts: std.StringHashMap(usize),
+
+    fn init(allocator: std.mem.Allocator) EmitFunctionContext {
+        return .{
+            .definitions = std.StringHashMap(*const mir.Instruction).init(allocator),
+            .use_counts = std.StringHashMap(usize).init(allocator),
+        };
+    }
+
+    fn build(allocator: std.mem.Allocator, function: mir.Function) !EmitFunctionContext {
+        var context = EmitFunctionContext.init(allocator);
+
+        for (function.blocks) |*block| {
+            for (block.instructions) |*instruction| {
+                if (instruction.result) |result| {
+                    if (isTemporaryValue(result.name)) {
+                        try context.definitions.put(result.name, instruction);
+                    }
+                }
+            }
+        }
+
+        for (function.blocks) |block| {
+            for (block.instructions) |instruction| {
+                try context.recordInstructionUses(instruction);
+            }
+            try context.recordTerminatorUses(block.terminator);
+        }
+
+        return context;
+    }
+
+    fn deinit(self: *EmitFunctionContext) void {
+        self.definitions.deinit();
+        self.use_counts.deinit();
+    }
+
+    fn definition(self: *const EmitFunctionContext, name: []const u8) ?*const mir.Instruction {
+        return self.definitions.get(name);
+    }
+
+    fn useCount(self: *const EmitFunctionContext, name: []const u8) usize {
+        return self.use_counts.get(name) orelse 0;
+    }
+
+    fn recordInstructionUses(self: *EmitFunctionContext, instruction: mir.Instruction) !void {
+        switch (instruction.data) {
+            .local_alloc => |alloc| {
+                if (alloc.init) |value| try self.recordValueUse(value);
+            },
+            .copy => |copy| try self.recordValueUse(copy.value),
+            .load => |place| try self.recordPlaceUse(place),
+            .store => |store| {
+                try self.recordPlaceUse(store.target);
+                try self.recordValueUse(store.value);
+            },
+            .unary => |unary| try self.recordValueUse(unary.operand),
+            .binary => |binary| {
+                try self.recordValueUse(binary.lhs);
+                try self.recordValueUse(binary.rhs);
+            },
+            .call => |call| {
+                for (call.args) |arg| {
+                    try self.recordValueUse(arg);
+                }
+            },
+            .field => |field| try self.recordValueUse(field.target),
+            .index => |index_expr| {
+                try self.recordValueUse(index_expr.target);
+                try self.recordValueUse(index_expr.index);
+            },
+        }
+    }
+
+    fn recordTerminatorUses(self: *EmitFunctionContext, terminator: mir.Terminator) !void {
+        switch (terminator) {
+            .none, .jump, .discard => {},
+            .return_stmt => |value| {
+                if (value) |returned_value| try self.recordValueUse(returned_value);
+            },
+            .if_term => |if_term| try self.recordValueUse(if_term.condition),
+            .switch_term => |switch_term| try self.recordValueUse(switch_term.selector),
+        }
+    }
+
+    fn recordValueUse(self: *EmitFunctionContext, value: *const mir.Value) !void {
+        switch (value.data) {
+            .identifier => |name| {
+                const entry = try self.use_counts.getOrPut(name);
+                if (entry.found_existing) {
+                    entry.value_ptr.* += 1;
+                } else {
+                    entry.value_ptr.* = 1;
+                }
+            },
+            else => {},
+        }
+    }
+
+    fn recordPlaceUse(self: *EmitFunctionContext, place: *const mir.Place) !void {
+        switch (place.data) {
+            .identifier => |name| {
+                const entry = try self.use_counts.getOrPut(name);
+                if (entry.found_existing) {
+                    entry.value_ptr.* += 1;
+                } else {
+                    entry.value_ptr.* = 1;
+                }
+            },
+            .field => |field| try self.recordPlaceUse(field.target),
+            .index => |index_expr| {
+                try self.recordPlaceUse(index_expr.target);
+                try self.recordValueUse(index_expr.index);
+            },
+        }
+    }
+};
+
 pub fn emit(allocator: std.mem.Allocator, module: *const mir.Module, options: EmitOptions) anyerror!Output {
     return .{
         .vertex = if (module.entryPoint(.vertex)) |entry_point| try emitStage(allocator, module, entry_point, options) else null,
@@ -197,6 +317,9 @@ fn emitFunction(
 ) anyerror!void {
     try emitDebugComment(writer, options, function.source_line, 0);
 
+    var function_context = try EmitFunctionContext.build(allocator, function);
+    defer function_context.deinit();
+
     const name = if (stage != null and is_entry_main) internalMainName(stage.?) else function.name;
     try writer.print("fn {s}(", .{name});
     var wrote_param = false;
@@ -226,7 +349,7 @@ fn emitFunction(
     try writer.writeAll(" {\n");
     var sampler_aliases = std.ArrayListUnmanaged(SamplerAlias){};
     defer sampler_aliases.deinit(allocator);
-    try emitBlockRegion(writer, allocator, module, function, function.entry_block, null, 1, options, uniforms, current_functions, function.params, &sampler_aliases);
+    try emitBlockRegion(writer, allocator, module, function, &function_context, function.entry_block, null, 1, options, uniforms, current_functions, function.params, &sampler_aliases);
     try writer.writeAll("}\n");
 }
 
@@ -304,6 +427,7 @@ fn emitBlockRegion(
     allocator: std.mem.Allocator,
     module: *const mir.Module,
     function: mir.Function,
+    function_context: *const EmitFunctionContext,
     start_label: []const u8,
     stop_label: ?[]const u8,
     indent: usize,
@@ -321,7 +445,7 @@ fn emitBlockRegion(
 
         const block = findBlock(function.blocks, label) orelse return error.InvalidBlockGraph;
         for (block.instructions) |instruction| {
-            try emitInstruction(writer, allocator, module, instruction, indent, options, uniforms, current_functions, current_params, sampler_aliases);
+            try emitInstruction(writer, allocator, module, instruction, function_context, indent, options, uniforms, current_functions, current_params, sampler_aliases);
         }
 
         switch (block.terminator) {
@@ -330,9 +454,9 @@ fn emitBlockRegion(
             .return_stmt => |value| {
                 try emitDebugComment(writer, options, block.source_line, indent);
                 try writeIndent(writer, indent);
-                if (value) |expr| {
+                if (value) |returned_value| {
                     try writer.writeAll("return ");
-                    try emitExpr(writer, module, expr, 0, uniforms, current_functions, current_params, sampler_aliases.items);
+                    try emitValue(writer, module, function_context, returned_value, 0, uniforms, current_functions, current_params, sampler_aliases.items);
                     try writer.writeAll(";\n");
                 } else {
                     try writer.writeAll("return;\n");
@@ -349,14 +473,14 @@ fn emitBlockRegion(
                 try emitDebugComment(writer, options, block.source_line, indent);
                 try writeIndent(writer, indent);
                 try writer.writeAll("if (");
-                try emitExpr(writer, module, if_term.condition, 0, uniforms, current_functions, current_params, sampler_aliases.items);
+                try emitValue(writer, module, function_context, if_term.condition, 0, uniforms, current_functions, current_params, sampler_aliases.items);
                 try writer.writeAll(") {\n");
                 const alias_checkpoint = sampler_aliases.items.len;
-                try emitBlockRegion(writer, allocator, module, function, if_term.then_block, if_term.merge_block, indent + 1, options, uniforms, current_functions, current_params, sampler_aliases);
+                try emitBlockRegion(writer, allocator, module, function, function_context, if_term.then_block, if_term.merge_block, indent + 1, options, uniforms, current_functions, current_params, sampler_aliases);
                 sampler_aliases.items.len = alias_checkpoint;
                 try writeIndent(writer, indent);
                 try writer.writeAll("} else {\n");
-                try emitBlockRegion(writer, allocator, module, function, if_term.else_block, if_term.merge_block, indent + 1, options, uniforms, current_functions, current_params, sampler_aliases);
+                try emitBlockRegion(writer, allocator, module, function, function_context, if_term.else_block, if_term.merge_block, indent + 1, options, uniforms, current_functions, current_params, sampler_aliases);
                 sampler_aliases.items.len = alias_checkpoint;
                 try writeIndent(writer, indent);
                 try writer.writeAll("}\n");
@@ -366,13 +490,13 @@ fn emitBlockRegion(
                 try emitDebugComment(writer, options, block.source_line, indent);
                 try writeIndent(writer, indent);
                 try writer.writeAll("switch (");
-                try emitExpr(writer, module, switch_term.selector, 0, uniforms, current_functions, current_params, sampler_aliases.items);
+                try emitValue(writer, module, function_context, switch_term.selector, 0, uniforms, current_functions, current_params, sampler_aliases.items);
                 try writer.writeAll(") {\n");
                 for (switch_term.cases) |case_target| {
                     try writeIndent(writer, indent + 1);
                     try writer.print("case {d}: {{\n", .{case_target.value});
                     const alias_checkpoint = sampler_aliases.items.len;
-                    try emitBlockRegion(writer, allocator, module, function, case_target.block, switch_term.merge_block, indent + 2, options, uniforms, current_functions, current_params, sampler_aliases);
+                    try emitBlockRegion(writer, allocator, module, function, function_context, case_target.block, switch_term.merge_block, indent + 2, options, uniforms, current_functions, current_params, sampler_aliases);
                     sampler_aliases.items.len = alias_checkpoint;
                     try writeIndent(writer, indent + 1);
                     try writer.writeAll("}\n");
@@ -380,7 +504,7 @@ fn emitBlockRegion(
                 try writeIndent(writer, indent + 1);
                 try writer.writeAll("default: {\n");
                 const alias_checkpoint = sampler_aliases.items.len;
-                try emitBlockRegion(writer, allocator, module, function, switch_term.default_block, switch_term.merge_block, indent + 2, options, uniforms, current_functions, current_params, sampler_aliases);
+                try emitBlockRegion(writer, allocator, module, function, function_context, switch_term.default_block, switch_term.merge_block, indent + 2, options, uniforms, current_functions, current_params, sampler_aliases);
                 sampler_aliases.items.len = alias_checkpoint;
                 try writeIndent(writer, indent + 1);
                 try writer.writeAll("}\n");
@@ -397,6 +521,7 @@ fn emitInstruction(
     allocator: std.mem.Allocator,
     module: *const mir.Module,
     instruction: mir.Instruction,
+    function_context: *const EmitFunctionContext,
     indent: usize,
     options: EmitOptions,
     uniforms: []const mir.Global,
@@ -405,67 +530,183 @@ fn emitInstruction(
     sampler_aliases: *std.ArrayListUnmanaged(SamplerAlias),
 ) anyerror!void {
     switch (instruction.data) {
-        .var_decl => |decl| {
-            if (decl.ty.isSampler()) {
-                const value = decl.value orelse return error.UnsupportedTextureSource;
-                if (decl.mutable) return error.UnsupportedSamplerValue;
-                const target = resolveSamplerIdentifier(uniforms, current_params, sampler_aliases.items, value) orelse return error.UnsupportedTextureSource;
+        .local_alloc => |alloc| {
+            if (alloc.ty.isSampler()) return error.UnsupportedSamplerValue;
+            try emitDebugComment(writer, options, instruction.source_line, indent);
+            try writeIndent(writer, indent);
+            try writer.print("{s} {s}: {s}", .{
+                if (alloc.mutable) "var" else "let",
+                alloc.name,
+                alloc.ty.wgslName(),
+            });
+            if (alloc.init) |value| {
+                try writer.writeAll(" = ");
+                try emitValue(writer, module, function_context, value, 0, uniforms, current_functions, current_params, sampler_aliases.items);
+            }
+            try writer.writeAll(";\n");
+        },
+        .copy => |copy| {
+            const result = instruction.result orelse return error.InvalidMirInstruction;
+            if (result.ty.isSampler()) {
+                const target = resolveSamplerIdentifier(uniforms, current_params, sampler_aliases.items, copy.value) orelse return error.UnsupportedTextureSource;
                 try sampler_aliases.append(allocator, .{
-                    .name = decl.name,
+                    .name = result.name,
                     .target = target,
                 });
                 return;
             }
+            if (shouldInlineInstruction(module, function_context, instruction, current_functions)) return;
+            if (isUnusedTemporary(function_context, result.name)) return;
 
             try emitDebugComment(writer, options, instruction.source_line, indent);
             try writeIndent(writer, indent);
-            try writer.print("{s} {s}: {s}", .{
-                if (decl.mutable) "var" else "let",
-                decl.name,
-                decl.ty.wgslName(),
-            });
-            if (decl.value) |value| {
-                try writer.writeAll(" = ");
-                try emitExpr(writer, module, value, 0, uniforms, current_functions, current_params, sampler_aliases.items);
+            try writer.print("let {s}: {s} = ", .{ result.name, result.ty.wgslName() });
+            try emitValue(writer, module, function_context, copy.value, 0, uniforms, current_functions, current_params, sampler_aliases.items);
+            try writer.writeAll(";\n");
+        },
+        .load => |place| {
+            const result = instruction.result orelse return error.InvalidMirInstruction;
+            if (shouldInlineInstruction(module, function_context, instruction, current_functions)) return;
+            if (isUnusedTemporary(function_context, result.name)) return;
+            try emitDebugComment(writer, options, instruction.source_line, indent);
+            try writeIndent(writer, indent);
+            try writer.print("let {s}: {s} = ", .{ result.name, result.ty.wgslName() });
+            try emitPlace(writer, module, function_context, place, 0, uniforms, current_functions, current_params, sampler_aliases.items);
+            try writer.writeAll(";\n");
+        },
+        .store => |store| {
+            try emitDebugComment(writer, options, instruction.source_line, indent);
+            try writeIndent(writer, indent);
+            if (matchCompoundStore(function_context, store)) |compound| {
+                try emitPlace(writer, module, function_context, store.target, 0, uniforms, current_functions, current_params, sampler_aliases.items);
+                try writer.print(" {s} ", .{compoundAssignOp(compound.operator)});
+                try emitValue(writer, module, function_context, compound.rhs, 0, uniforms, current_functions, current_params, sampler_aliases.items);
+                try writer.writeAll(";\n");
+                return;
             }
+            try emitPlace(writer, module, function_context, store.target, 0, uniforms, current_functions, current_params, sampler_aliases.items);
+            try writer.writeAll(" = ");
+            try emitValue(writer, module, function_context, store.value, 0, uniforms, current_functions, current_params, sampler_aliases.items);
             try writer.writeAll(";\n");
         },
-        .assign => |assignment| {
+        .unary => |unary| {
+            const result = instruction.result orelse return error.InvalidMirInstruction;
+            if (shouldInlineInstruction(module, function_context, instruction, current_functions)) return;
+            if (isUnusedTemporary(function_context, result.name)) return;
             try emitDebugComment(writer, options, instruction.source_line, indent);
             try writeIndent(writer, indent);
-            try emitExpr(writer, module, assignment.target, 0, uniforms, current_functions, current_params, sampler_aliases.items);
-            try writer.print(" {s} ", .{assignmentOp(assignment.operator)});
-            try emitExpr(writer, module, assignment.value, 0, uniforms, current_functions, current_params, sampler_aliases.items);
+            try writer.print("let {s}: {s} = {s}", .{ result.name, result.ty.wgslName(), unaryOp(unary.operator) });
+            try emitValue(writer, module, function_context, unary.operand, unaryPrecedence(), uniforms, current_functions, current_params, sampler_aliases.items);
             try writer.writeAll(";\n");
         },
-        .expr => |expr| {
+        .binary => |binary| {
+            const result = instruction.result orelse return error.InvalidMirInstruction;
+            if (shouldInlineInstruction(module, function_context, instruction, current_functions)) return;
+            if (isUnusedTemporary(function_context, result.name)) return;
+            const precedence = binaryPrecedence(binary.operator);
             try emitDebugComment(writer, options, instruction.source_line, indent);
             try writeIndent(writer, indent);
-            try emitExpr(writer, module, expr, 0, uniforms, current_functions, current_params, sampler_aliases.items);
+            try writer.print("let {s}: {s} = ", .{ result.name, result.ty.wgslName() });
+            try emitValue(writer, module, function_context, binary.lhs, precedence, uniforms, current_functions, current_params, sampler_aliases.items);
+            try writer.print(" {s} ", .{binaryOp(binary.operator)});
+            try emitValue(writer, module, function_context, binary.rhs, precedence + 1, uniforms, current_functions, current_params, sampler_aliases.items);
             try writer.writeAll(";\n");
+        },
+        .call => |call| {
+            if (instruction.result) |result| {
+                if (shouldInlineInstruction(module, function_context, instruction, current_functions)) return;
+                if (isUnusedTemporary(function_context, result.name)) {
+                    try emitDebugComment(writer, options, instruction.source_line, indent);
+                    try writeIndent(writer, indent);
+                    try emitCallExpr(writer, module, function_context, call, result.ty, uniforms, current_functions, current_params, sampler_aliases.items);
+                    try writer.writeAll(";\n");
+                    return;
+                }
+            }
+
+            try emitDebugComment(writer, options, instruction.source_line, indent);
+            try writeIndent(writer, indent);
+            if (instruction.result) |result| {
+                try writer.print("let {s}: {s} = ", .{ result.name, result.ty.wgslName() });
+            }
+            try emitCallExpr(
+                writer,
+                module,
+                function_context,
+                call,
+                if (instruction.result) |result| result.ty else null,
+                uniforms,
+                current_functions,
+                current_params,
+                sampler_aliases.items,
+            );
+            try writer.writeAll(";\n");
+        },
+        .field => |field| {
+            const result = instruction.result orelse return error.InvalidMirInstruction;
+            if (shouldInlineInstruction(module, function_context, instruction, current_functions)) return;
+            if (isUnusedTemporary(function_context, result.name)) return;
+            try emitDebugComment(writer, options, instruction.source_line, indent);
+            try writeIndent(writer, indent);
+            try writer.print("let {s}: {s} = ", .{ result.name, result.ty.wgslName() });
+            try emitValue(writer, module, function_context, field.target, fieldPrecedence(), uniforms, current_functions, current_params, sampler_aliases.items);
+            try writer.print(".{s};\n", .{field.name});
+        },
+        .index => |index_expr| {
+            const result = instruction.result orelse return error.InvalidMirInstruction;
+            if (shouldInlineInstruction(module, function_context, instruction, current_functions)) return;
+            if (isUnusedTemporary(function_context, result.name)) return;
+            try emitDebugComment(writer, options, instruction.source_line, indent);
+            try writeIndent(writer, indent);
+            try writer.print("let {s}: {s} = ", .{ result.name, result.ty.wgslName() });
+            try emitValue(writer, module, function_context, index_expr.target, fieldPrecedence(), uniforms, current_functions, current_params, sampler_aliases.items);
+            try writer.writeByte('[');
+            try emitValue(writer, module, function_context, index_expr.index, 0, uniforms, current_functions, current_params, sampler_aliases.items);
+            try writer.writeAll("];\n");
         },
     }
 }
 
-fn emitExpr(
+fn emitValue(
     writer: anytype,
     module: *const mir.Module,
-    expr: *const mir.Expr,
+    function_context: *const EmitFunctionContext,
+    value: *const mir.Value,
     parent_precedence: u8,
     uniforms: []const mir.Global,
     current_functions: []const mir.Function,
     current_params: []const mir.Param,
     sampler_aliases: []const SamplerAlias,
 ) anyerror!void {
-    const precedence = exprPrecedence(expr);
+    const precedence = valuePrecedence(module, function_context, value, current_functions);
     const wrap = precedence < parent_precedence;
     if (wrap) try writer.writeByte('(');
+    try emitValueInner(writer, module, function_context, value, precedence, uniforms, current_functions, current_params, sampler_aliases);
+    if (wrap) try writer.writeByte(')');
+}
 
-    switch (expr.data) {
-        .integer => |value| try writer.print("{d}", .{value}),
-        .float => |value| try writeFloat(writer, value),
-        .bool => |value| try writer.writeAll(if (value) "true" else "false"),
+fn emitValueInner(
+    writer: anytype,
+    module: *const mir.Module,
+    function_context: *const EmitFunctionContext,
+    value: *const mir.Value,
+    precedence: u8,
+    uniforms: []const mir.Global,
+    current_functions: []const mir.Function,
+    current_params: []const mir.Param,
+    sampler_aliases: []const SamplerAlias,
+) anyerror!void {
+    switch (value.data) {
+        .integer => |int_value| try writer.print("{d}", .{int_value}),
+        .float => |float_value| try writeFloat(writer, float_value),
+        .bool => |bool_value| try writer.writeAll(if (bool_value) "true" else "false"),
         .identifier => |name| {
+            if (function_context.definition(name)) |definition| {
+                if (shouldInlineInstruction(module, function_context, definition.*, current_functions)) {
+                    try emitInstructionExpr(writer, module, function_context, definition.*, precedence, uniforms, current_functions, current_params, sampler_aliases);
+                    return;
+                }
+            }
             if (resolveSamplerName(uniforms, current_params, sampler_aliases, name) != null) return error.UnsupportedSamplerValue;
             if (isInoutParam(current_params, name)) {
                 try writer.print("(*{s})", .{name});
@@ -473,66 +714,104 @@ fn emitExpr(
                 try writer.writeAll(name);
             }
         },
-        .unary => |unary| {
-            try writer.print("{s}", .{unaryOp(unary.operator)});
-            try emitExpr(writer, module, unary.operand, precedence, uniforms, current_functions, current_params, sampler_aliases);
-        },
-        .binary => |binary| {
-            try emitExpr(writer, module, binary.lhs, precedence, uniforms, current_functions, current_params, sampler_aliases);
-            try writer.print(" {s} ", .{binaryOp(binary.operator)});
-            try emitExpr(writer, module, binary.rhs, precedence + 1, uniforms, current_functions, current_params, sampler_aliases);
-        },
-        .call => |call| {
-            if (std.mem.eql(u8, call.name, "texture")) {
-                try emitTextureCall(writer, module, call, uniforms, current_functions, current_params, sampler_aliases);
-                if (wrap) try writer.writeByte(')');
-                return;
-            }
-            if (std.mem.eql(u8, call.name, "mod")) {
-                try emitModCall(writer, module, call, uniforms, current_functions, current_params, sampler_aliases);
-                if (wrap) try writer.writeByte(')');
-                return;
-            }
+    }
+}
 
-            try writer.print("{s}(", .{callName(call.name, expr.ty)});
-            const callee = findFunction(current_functions, call.name) orelse findFunction(module.global_functions, call.name);
-            for (call.args, 0..) |arg, index| {
-                if (callee) |function| {
-                    if (index < function.params.len and function.params[index].ty.isSampler()) {
-                        if (index > 0) try writer.writeAll(", ");
-                        try emitSamplerArg(writer, module, arg, uniforms, current_functions, current_params, sampler_aliases);
-                        continue;
-                    }
-                    if (index < function.params.len and function.params[index].is_inout) {
-                        if (index > 0) try writer.writeAll(", ");
-                        try emitInoutArg(writer, module, arg, uniforms, current_functions, current_params, sampler_aliases);
-                        continue;
-                    }
-                }
-                if (index > 0) try writer.writeAll(", ");
-                try emitExpr(writer, module, arg, 0, uniforms, current_functions, current_params, sampler_aliases);
+fn emitPlace(
+    writer: anytype,
+    module: *const mir.Module,
+    function_context: *const EmitFunctionContext,
+    place: *const mir.Place,
+    parent_precedence: u8,
+    uniforms: []const mir.Global,
+    current_functions: []const mir.Function,
+    current_params: []const mir.Param,
+    sampler_aliases: []const SamplerAlias,
+) anyerror!void {
+    const precedence = placePrecedence(place);
+    const wrap = precedence < parent_precedence;
+    if (wrap) try writer.writeByte('(');
+    try emitPlaceInner(writer, module, function_context, place, uniforms, current_functions, current_params, sampler_aliases);
+    if (wrap) try writer.writeByte(')');
+}
+
+fn emitPlaceInner(
+    writer: anytype,
+    module: *const mir.Module,
+    function_context: *const EmitFunctionContext,
+    place: *const mir.Place,
+    uniforms: []const mir.Global,
+    current_functions: []const mir.Function,
+    current_params: []const mir.Param,
+    sampler_aliases: []const SamplerAlias,
+) anyerror!void {
+    switch (place.data) {
+        .identifier => |name| {
+            if (isInoutParam(current_params, name)) {
+                try writer.print("(*{s})", .{name});
+            } else {
+                try writer.writeAll(name);
             }
-            try writer.writeByte(')');
         },
         .field => |field| {
-            try emitExpr(writer, module, field.target, precedence, uniforms, current_functions, current_params, sampler_aliases);
+            try emitPlace(writer, module, function_context, field.target, fieldPrecedence(), uniforms, current_functions, current_params, sampler_aliases);
             try writer.print(".{s}", .{field.name});
         },
         .index => |index_expr| {
-            try emitExpr(writer, module, index_expr.target, precedence, uniforms, current_functions, current_params, sampler_aliases);
+            try emitPlace(writer, module, function_context, index_expr.target, fieldPrecedence(), uniforms, current_functions, current_params, sampler_aliases);
             try writer.writeByte('[');
-            try emitExpr(writer, module, index_expr.index, 0, uniforms, current_functions, current_params, sampler_aliases);
+            try emitValue(writer, module, function_context, index_expr.index, 0, uniforms, current_functions, current_params, sampler_aliases);
             try writer.writeByte(']');
         },
     }
+}
 
-    if (wrap) try writer.writeByte(')');
+fn emitCallExpr(
+    writer: anytype,
+    module: *const mir.Module,
+    function_context: *const EmitFunctionContext,
+    call: mir.Call,
+    result_type: ?types.Type,
+    uniforms: []const mir.Global,
+    current_functions: []const mir.Function,
+    current_params: []const mir.Param,
+    sampler_aliases: []const SamplerAlias,
+) anyerror!void {
+    if (std.mem.eql(u8, call.name, "texture")) {
+        try emitTextureCall(writer, module, function_context, call, uniforms, current_functions, current_params, sampler_aliases);
+        return;
+    }
+    if (std.mem.eql(u8, call.name, "mod")) {
+        try emitModCall(writer, module, function_context, call, uniforms, current_functions, current_params, sampler_aliases);
+        return;
+    }
+
+    try writer.print("{s}(", .{callName(call.name, result_type orelse types.builtinType(.void))});
+    const callee = findFunction(current_functions, call.name) orelse findFunction(module.global_functions, call.name);
+    for (call.args, 0..) |arg, index| {
+        if (callee) |function| {
+            if (index < function.params.len and function.params[index].ty.isSampler()) {
+                if (index > 0) try writer.writeAll(", ");
+                try emitSamplerArg(writer, arg, uniforms, current_params, sampler_aliases);
+                continue;
+            }
+            if (index < function.params.len and function.params[index].is_inout) {
+                if (index > 0) try writer.writeAll(", ");
+                try emitInoutArg(writer, module, function_context, arg, uniforms, current_functions, current_params, sampler_aliases);
+                continue;
+            }
+        }
+        if (index > 0) try writer.writeAll(", ");
+        try emitValue(writer, module, function_context, arg, 0, uniforms, current_functions, current_params, sampler_aliases);
+    }
+    try writer.writeByte(')');
 }
 
 fn emitTextureCall(
     writer: anytype,
     module: *const mir.Module,
-    call: mir.Expr.Call,
+    function_context: *const EmitFunctionContext,
+    call: mir.Call,
     uniforms: []const mir.Global,
     current_functions: []const mir.Function,
     current_params: []const mir.Param,
@@ -542,29 +821,31 @@ fn emitTextureCall(
     const sampler_name = resolveSamplerIdentifier(uniforms, current_params, sampler_aliases, call.args[0]) orelse return error.UnsupportedTextureSource;
 
     try writer.print("textureSample({s}_texture, {s}_sampler, ", .{ sampler_name, sampler_name });
-    try emitExpr(writer, module, call.args[1], 0, uniforms, current_functions, current_params, sampler_aliases);
+    try emitValue(writer, module, function_context, call.args[1], 0, uniforms, current_functions, current_params, sampler_aliases);
     try writer.writeByte(')');
 }
 
 fn emitModCall(
     writer: anytype,
     module: *const mir.Module,
-    call: mir.Expr.Call,
+    function_context: *const EmitFunctionContext,
+    call: mir.Call,
     uniforms: []const mir.Global,
     current_functions: []const mir.Function,
     current_params: []const mir.Param,
     sampler_aliases: []const SamplerAlias,
 ) anyerror!void {
     std.debug.assert(call.args.len == 2);
-    try emitExpr(writer, module, call.args[0], 6, uniforms, current_functions, current_params, sampler_aliases);
+    try emitValue(writer, module, function_context, call.args[0], binaryPrecedence(.percent), uniforms, current_functions, current_params, sampler_aliases);
     try writer.writeAll(" % ");
-    try emitExpr(writer, module, call.args[1], 7, uniforms, current_functions, current_params, sampler_aliases);
+    try emitValue(writer, module, function_context, call.args[1], binaryPrecedence(.percent) + 1, uniforms, current_functions, current_params, sampler_aliases);
 }
 
 fn emitInoutArg(
     writer: anytype,
     module: *const mir.Module,
-    arg: *const mir.Expr,
+    function_context: *const EmitFunctionContext,
+    arg: *const mir.Value,
     uniforms: []const mir.Global,
     current_functions: []const mir.Function,
     current_params: []const mir.Param,
@@ -576,60 +857,199 @@ fn emitInoutArg(
     }
 
     try writer.writeByte('&');
-    try emitExpr(writer, module, arg, 0, uniforms, current_functions, current_params, sampler_aliases);
+    try emitValue(writer, module, function_context, arg, 0, uniforms, current_functions, current_params, sampler_aliases);
 }
 
 fn emitSamplerArg(
     writer: anytype,
+    arg: *const mir.Value,
+    uniforms: []const mir.Global,
+    current_params: []const mir.Param,
+    sampler_aliases: []const SamplerAlias,
+) anyerror!void {
+    const sampler_name = resolveSamplerIdentifier(uniforms, current_params, sampler_aliases, arg) orelse return error.UnsupportedTextureSource;
+    try writer.print("{s}_texture, {s}_sampler", .{ sampler_name, sampler_name });
+}
+
+fn emitInstructionExpr(
+    writer: anytype,
     module: *const mir.Module,
-    arg: *const mir.Expr,
+    function_context: *const EmitFunctionContext,
+    instruction: mir.Instruction,
+    parent_precedence: u8,
     uniforms: []const mir.Global,
     current_functions: []const mir.Function,
     current_params: []const mir.Param,
     sampler_aliases: []const SamplerAlias,
 ) anyerror!void {
-    _ = module;
-    _ = current_functions;
-
-    const sampler_name = resolveSamplerIdentifier(uniforms, current_params, sampler_aliases, arg) orelse return error.UnsupportedTextureSource;
-    try writer.print("{s}_texture, {s}_sampler", .{ sampler_name, sampler_name });
+    switch (instruction.data) {
+        .copy => |copy| try emitValue(writer, module, function_context, copy.value, parent_precedence, uniforms, current_functions, current_params, sampler_aliases),
+        .load => |place| try emitPlace(writer, module, function_context, place, parent_precedence, uniforms, current_functions, current_params, sampler_aliases),
+        .unary => |unary| {
+            try writer.print("{s}", .{unaryOp(unary.operator)});
+            try emitValue(writer, module, function_context, unary.operand, unaryPrecedence(), uniforms, current_functions, current_params, sampler_aliases);
+        },
+        .binary => |binary| {
+            const precedence = binaryPrecedence(binary.operator);
+            try emitValue(writer, module, function_context, binary.lhs, precedence, uniforms, current_functions, current_params, sampler_aliases);
+            try writer.print(" {s} ", .{binaryOp(binary.operator)});
+            try emitValue(writer, module, function_context, binary.rhs, precedence + 1, uniforms, current_functions, current_params, sampler_aliases);
+        },
+        .call => |call| try emitCallExpr(writer, module, function_context, call, if (instruction.result) |result| result.ty else null, uniforms, current_functions, current_params, sampler_aliases),
+        .field => |field| {
+            try emitValue(writer, module, function_context, field.target, fieldPrecedence(), uniforms, current_functions, current_params, sampler_aliases);
+            try writer.print(".{s}", .{field.name});
+        },
+        .index => |index_expr| {
+            try emitValue(writer, module, function_context, index_expr.target, fieldPrecedence(), uniforms, current_functions, current_params, sampler_aliases);
+            try writer.writeByte('[');
+            try emitValue(writer, module, function_context, index_expr.index, 0, uniforms, current_functions, current_params, sampler_aliases);
+            try writer.writeByte(']');
+        },
+        .local_alloc, .store => return error.InvalidMirInstruction,
+    }
 }
 
-fn findUniform(uniforms: []const mir.Global, name: []const u8) ?mir.Global {
-    for (uniforms) |uniform| {
-        if (std.mem.eql(u8, uniform.name, name)) return uniform;
-    }
-    return null;
+fn shouldInlineInstruction(
+    module: *const mir.Module,
+    function_context: *const EmitFunctionContext,
+    instruction: mir.Instruction,
+    current_functions: []const mir.Function,
+) bool {
+    const result = instruction.result orelse return false;
+    if (!isTemporaryValue(result.name)) return false;
+    if (function_context.useCount(result.name) != 1) return false;
+
+    return switch (instruction.data) {
+        .copy, .load, .unary, .binary, .field, .index => true,
+        .call => |call| canInlineCall(module, current_functions, call),
+        .local_alloc, .store => false,
+    };
 }
 
-fn findFunction(functions: []const mir.Function, name: []const u8) ?mir.Function {
-    for (functions) |function| {
-        if (std.mem.eql(u8, function.name, name)) return function;
+fn canInlineCall(module: *const mir.Module, current_functions: []const mir.Function, call: mir.Call) bool {
+    const callee = findFunction(current_functions, call.name) orelse findFunction(module.global_functions, call.name);
+    if (callee) |function| {
+        for (function.params) |param| {
+            if (param.is_inout) return false;
+        }
     }
-    return null;
+    return true;
 }
 
-fn findBlock(blocks: []const mir.BasicBlock, label: []const u8) ?*const mir.BasicBlock {
-    for (blocks) |*block| {
-        if (std.mem.eql(u8, block.label, label)) return block;
-    }
-    return null;
+fn isUnusedTemporary(function_context: *const EmitFunctionContext, name: []const u8) bool {
+    return isTemporaryValue(name) and function_context.useCount(name) == 0;
 }
 
-fn isInoutParam(params: []const mir.Param, name: []const u8) bool {
-    for (params) |param| {
-        if (param.is_inout and std.mem.eql(u8, param.name, name)) return true;
-    }
-    return false;
+fn isTemporaryValue(name: []const u8) bool {
+    return std.mem.startsWith(u8, name, "__ssa_");
+}
+
+fn matchCompoundStore(function_context: *const EmitFunctionContext, store: mir.Store) ?struct {
+    operator: token.TokenTag,
+    rhs: *const mir.Value,
+} {
+    const binary_name = switch (store.value.data) {
+        .identifier => |name| name,
+        else => return null,
+    };
+    const binary_instruction = function_context.definition(binary_name) orelse return null;
+    const binary = switch (binary_instruction.data) {
+        .binary => |binary| binary,
+        else => return null,
+    };
+    const load_name = switch (binary.lhs.data) {
+        .identifier => |name| name,
+        else => return null,
+    };
+    const load_instruction = function_context.definition(load_name) orelse return null;
+    const load_place = switch (load_instruction.data) {
+        .load => |place| place,
+        else => return null,
+    };
+    if (load_place != store.target) return null;
+    return .{
+        .operator = binary.operator,
+        .rhs = binary.rhs,
+    };
+}
+
+fn valuePrecedence(
+    module: *const mir.Module,
+    function_context: *const EmitFunctionContext,
+    value: *const mir.Value,
+    current_functions: []const mir.Function,
+) u8 {
+    return switch (value.data) {
+        .integer, .float, .bool => 9,
+        .identifier => |name| blk: {
+            if (function_context.definition(name)) |definition| {
+                if (shouldInlineInstruction(module, function_context, definition.*, current_functions)) {
+                    break :blk instructionPrecedence(definition.*);
+                }
+            }
+            break :blk 9;
+        },
+    };
+}
+
+fn instructionPrecedence(instruction: mir.Instruction) u8 {
+    return switch (instruction.data) {
+        .copy => |copy| switch (copy.value.data) {
+            .integer, .float, .bool, .identifier => 9,
+        },
+        .load => |place| placePrecedence(place),
+        .unary => unaryPrecedence(),
+        .binary => |binary| binaryPrecedence(binary.operator),
+        .call, .field, .index => fieldPrecedence(),
+        .local_alloc, .store => 0,
+    };
+}
+
+fn placePrecedence(place: *const mir.Place) u8 {
+    return switch (place.data) {
+        .identifier => 9,
+        .field, .index => fieldPrecedence(),
+    };
+}
+
+fn fieldPrecedence() u8 {
+    return 8;
+}
+
+fn unaryPrecedence() u8 {
+    return 7;
+}
+
+fn binaryPrecedence(tag: token.TokenTag) u8 {
+    return switch (tag) {
+        .star, .slash, .percent => 6,
+        .plus, .minus => 5,
+        .lt, .gt, .le, .ge => 4,
+        .eq, .neq => 3,
+        .and_and => 2,
+        .or_or => 1,
+        else => 0,
+    };
+}
+
+fn compoundAssignOp(tag: token.TokenTag) []const u8 {
+    return switch (tag) {
+        .plus => "+=",
+        .minus => "-=",
+        .star => "*=",
+        .slash => "/=",
+        else => "=",
+    };
 }
 
 fn resolveSamplerIdentifier(
     uniforms: []const mir.Global,
     current_params: []const mir.Param,
     sampler_aliases: []const SamplerAlias,
-    expr: *const mir.Expr,
+    value: *const mir.Value,
 ) ?[]const u8 {
-    return switch (expr.data) {
+    return switch (value.data) {
         .identifier => |name| resolveSamplerName(uniforms, current_params, sampler_aliases, name),
         else => null,
     };
@@ -660,6 +1080,34 @@ fn resolveSamplerName(
     }
 
     return null;
+}
+
+fn findUniform(uniforms: []const mir.Global, name: []const u8) ?mir.Global {
+    for (uniforms) |uniform| {
+        if (std.mem.eql(u8, uniform.name, name)) return uniform;
+    }
+    return null;
+}
+
+fn findFunction(functions: []const mir.Function, name: []const u8) ?mir.Function {
+    for (functions) |function| {
+        if (std.mem.eql(u8, function.name, name)) return function;
+    }
+    return null;
+}
+
+fn findBlock(blocks: []const mir.BasicBlock, label: []const u8) ?*const mir.BasicBlock {
+    for (blocks) |*block| {
+        if (std.mem.eql(u8, block.label, label)) return block;
+    }
+    return null;
+}
+
+fn isInoutParam(params: []const mir.Param, name: []const u8) bool {
+    for (params) |param| {
+        if (param.is_inout and std.mem.eql(u8, param.name, name)) return true;
+    }
+    return false;
 }
 
 fn samplerTextureType(ty: types.Type) ?[]const u8 {
@@ -727,23 +1175,6 @@ fn callName(name: []const u8, ty: types.Type) []const u8 {
         };
     }
     return name;
-}
-
-fn exprPrecedence(expr: *const mir.Expr) u8 {
-    return switch (expr.data) {
-        .integer, .float, .bool, .identifier => 9,
-        .call, .field, .index => 8,
-        .unary => 7,
-        .binary => |binary| switch (binary.operator) {
-            .star, .slash, .percent => 6,
-            .plus, .minus => 5,
-            .lt, .gt, .le, .ge => 4,
-            .eq, .neq => 3,
-            .and_and => 2,
-            .or_or => 1,
-            else => 0,
-        },
-    };
 }
 
 fn writeFloat(writer: anytype, value: f64) !void {

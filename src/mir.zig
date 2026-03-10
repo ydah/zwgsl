@@ -109,41 +109,51 @@ pub const BasicBlock = struct {
 };
 
 pub const Instruction = struct {
+    result: ?Result = null,
     source_line: ?u32 = null,
     source_column: ?u32 = null,
     data: Data,
 
+    pub const Result = struct {
+        name: []const u8,
+        ty: types.Type,
+    };
+
     pub const Data = union(enum) {
-        var_decl: VarDecl,
-        assign: Assign,
-        expr: *Expr,
+        local_alloc: LocalAlloc,
+        copy: Copy,
+        load: *Place,
+        store: Store,
+        unary: Unary,
+        binary: Binary,
+        call: Call,
+        field: ValueField,
+        index: ValueIndex,
     };
 };
 
-pub const VarDecl = struct {
+pub const LocalAlloc = struct {
     name: []const u8,
     ty: types.Type,
     mutable: bool = true,
-    value: ?*Expr = null,
+    init: ?*Value = null,
 };
 
-pub const Assign = struct {
-    target: *Expr,
-    operator: token.TokenTag,
-    value: *Expr,
+pub const Copy = struct {
+    value: *Value,
 };
 
 pub const Terminator = union(enum) {
     none: void,
     jump: []const u8,
-    return_stmt: ?*Expr,
+    return_stmt: ?*Value,
     discard: void,
     if_term: IfTerm,
     switch_term: SwitchTerm,
 };
 
 pub const IfTerm = struct {
-    condition: *Expr,
+    condition: *Value,
     then_block: []const u8,
     else_block: []const u8,
     merge_block: []const u8,
@@ -157,13 +167,13 @@ pub const SwitchTarget = struct {
 };
 
 pub const SwitchTerm = struct {
-    selector: *Expr,
+    selector: *Value,
     cases: []const SwitchTarget,
     default_block: []const u8,
     merge_block: []const u8,
 };
 
-pub const Expr = struct {
+pub const Value = struct {
     ty: types.Type,
     source_line: ?u32 = null,
     source_column: ?u32 = null,
@@ -174,36 +184,75 @@ pub const Expr = struct {
         float: f64,
         bool: bool,
         identifier: []const u8,
-        unary: Unary,
-        binary: Binary,
-        call: Call,
+    };
+};
+
+pub const Place = struct {
+    ty: types.Type,
+    source_line: ?u32 = null,
+    source_column: ?u32 = null,
+    data: Data,
+
+    pub const Data = union(enum) {
+        identifier: []const u8,
         field: Field,
         index: Index,
     };
 
-    pub const Unary = struct {
-        operator: token.TokenTag,
-        operand: *Expr,
-    };
-
-    pub const Binary = struct {
-        operator: token.TokenTag,
-        lhs: *Expr,
-        rhs: *Expr,
-    };
-
-    pub const Call = struct {
-        name: []const u8,
-        args: []const *Expr,
-    };
-
     pub const Field = struct {
-        target: *Expr,
+        target: *Place,
         name: []const u8,
     };
 
     pub const Index = struct {
-        target: *Expr,
-        index: *Expr,
+        target: *Place,
+        index: *Value,
     };
 };
+
+pub const Store = struct {
+    target: *Place,
+    value: *Value,
+};
+
+pub const Unary = struct {
+    operator: token.TokenTag,
+    operand: *Value,
+};
+
+pub const Binary = struct {
+    operator: token.TokenTag,
+    lhs: *Value,
+    rhs: *Value,
+};
+
+pub const Call = struct {
+    name: []const u8,
+    args: []const *Value,
+};
+
+pub const ValueField = struct {
+    target: *Value,
+    name: []const u8,
+};
+
+pub const ValueIndex = struct {
+    target: *Value,
+    index: *Value,
+};
+
+pub fn resultValue(
+    allocator: std.mem.Allocator,
+    result: Instruction.Result,
+    source_line: ?u32,
+    source_column: ?u32,
+) !*Value {
+    const value = try allocator.create(Value);
+    value.* = .{
+        .ty = result.ty,
+        .source_line = source_line,
+        .source_column = source_column,
+        .data = .{ .identifier = result.name },
+    };
+    return value;
+}
