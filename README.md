@@ -326,6 +326,10 @@ npm install
 npm run dev
 ```
 
+The repository also includes a GitHub Pages workflow that publishes the production
+build to `https://ydah.github.io/zwgsl/` when Pages is enabled with `GitHub Actions`
+as the publishing source.
+
 Current capabilities:
 
 - Monaco language registration for `zwgsl`
@@ -333,6 +337,13 @@ Current capabilities:
 - compiler-backed diagnostics, hover, completion, and goto-definition from the wasm build
 - WebGPU preview surface with animated `iTime` / `iResolution` uniforms, generated controls, and sampler placeholders
 - `npm run sync-wasm` to refresh the wasm payload from `zig-out/bin/zwgsl.wasm`
+
+For a GitHub Pages build, set the base path before running Vite:
+
+```sh
+cd playground
+PLAYGROUND_BASE_PATH=/zwgsl/ npm run build
+```
 
 ## Architecture
 

@@ -1,0 +1,68 @@
+name: Deploy Playground
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      PLAYGROUND_BASE_PATH: /zwgsl/
+      ZIG_VERSION: 0.13.0
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: playground/package-lock.json
+
+      - name: Install Zig
+        run: |
+          curl -L "https://ziglang.org/download/${ZIG_VERSION}/zig-linux-x86_64-${ZIG_VERSION}.tar.xz" -o zig.tar.xz
+          tar -xf zig.tar.xz
+          echo "${GITHUB_WORKSPACE}/zig-linux-x86_64-${ZIG_VERSION}" >> "${GITHUB_PATH}"
+
+      - name: Install playground dependencies
+        working-directory: playground
+        run: npm ci
+
+      - name: Build playground
+        working-directory: playground
+        run: npm run build
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: playground/dist
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

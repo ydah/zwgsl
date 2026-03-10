@@ -144,15 +144,17 @@ const createLoadedCompiler = async () => {
 };
 
 const loadWasmExports = async (): Promise<WasmExports | null> => {
+  const wasmUrl = `${import.meta.env.BASE_URL}zwgsl.wasm`;
+
   try {
-    const response = await fetch("/zwgsl.wasm");
+    const response = await fetch(wasmUrl);
     if (!response.ok) return null;
 
     try {
       const wasm = await WebAssembly.instantiateStreaming(response, {});
       return wasm.instance.exports as WasmExports;
     } catch {
-      const fallbackResponse = await fetch("/zwgsl.wasm");
+      const fallbackResponse = await fetch(wasmUrl);
       if (!fallbackResponse.ok) return null;
       const bytes = await fallbackResponse.arrayBuffer();
       const wasm = await WebAssembly.instantiate(bytes, {});
