@@ -9,7 +9,7 @@
     "build": "npm run sync-wasm && vite build"
   },
   "dependencies": {
-    "monaco-editor": "^0.54.0"
+    "monaco-editor": "^0.55.1"
   },
   "devDependencies": {
     "typescript": "^5.9.2",
