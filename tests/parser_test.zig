@@ -291,7 +291,32 @@ test "parser handles match expressions" {
     try std.testing.expectEqual(.match_expr, std.meta.activeTag(expr.data));
     try std.testing.expectEqual(@as(usize, 2), expr.data.match_expr.arms.len);
     try std.testing.expect(expr.data.match_expr.arms[0].guard != null);
-    try std.testing.expectEqual(.wildcard, std.meta.activeTag(expr.data.match_expr.arms[1].pattern));
+    try std.testing.expectEqual(@as(u32, 3), expr.data.match_expr.arms[0].position.line);
+    try std.testing.expectEqual(.wildcard, std.meta.activeTag(expr.data.match_expr.arms[1].pattern.data));
+    try std.testing.expectEqual(@as(u32, 5), expr.data.match_expr.arms[1].pattern.position.line);
+}
+
+test "parser records nested pattern positions" {
+    var parsed = try parseProgram(
+        \\def area(shape: Shape) -> Float
+        \\  match shape
+        \\  when Some(Circle(radius))
+        \\    radius
+        \\  when _
+        \\    0.0
+        \\  end
+        \\end
+    );
+    defer parsed.arena.deinit();
+
+    const match_expr = parsed.program.items[0].function.body[0].data.expression.data.match_expr;
+    const constructor = match_expr.arms[0].pattern.data.constructor;
+    const nested = constructor.args[0].data.constructor;
+    try std.testing.expectEqualStrings("Some", constructor.name);
+    try std.testing.expectEqual(@as(u32, 3), constructor.position.line);
+    try std.testing.expectEqualStrings("Circle", nested.name);
+    try std.testing.expectEqual(@as(u32, 3), nested.position.line);
+    try std.testing.expectEqualStrings("radius", nested.args[0].data.binding);
 }
 
 test "parser handles trait and impl definitions" {

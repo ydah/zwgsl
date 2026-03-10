@@ -549,3 +549,44 @@ test "sema rejects phantom struct parameter mismatches" {
 
     try std.testing.expect(analyzed.diagnostics.items.items.len > 0);
 }
+
+test "lowering preserves line and column metadata" {
+    var analyzed = try analyzeSource(
+        \\def area(x: Float) -> Float
+        \\  x + 1.0
+        \\end
+    );
+    defer analyzed.arena.deinit();
+
+    try std.testing.expectEqual(@as(usize, 0), analyzed.diagnostics.items.items.len);
+
+    const allocator = analyzed.arena.allocator();
+    const ir_module = try zwgsl.ir_builder.build(allocator, analyzed.typed);
+    const hir_module = try zwgsl.hir_builder.build(allocator, analyzed.typed);
+    const mir_module = try zwgsl.mir_builder.build(allocator, hir_module);
+
+    const ir_function = ir_module.global_functions[0];
+    try std.testing.expectEqual(@as(?u32, 1), ir_function.source_line);
+    try std.testing.expectEqual(@as(?u32, 1), ir_function.source_column);
+    try std.testing.expectEqual(@as(?u32, 10), ir_function.params[0].source_column);
+    try std.testing.expectEqual(@as(?u32, 2), ir_function.body[0].source_line);
+    try std.testing.expectEqual(@as(?u32, 5), ir_function.body[0].source_column);
+    try std.testing.expectEqual(@as(?u32, 2), ir_function.body[0].data.return_stmt.?.source_line);
+    try std.testing.expectEqual(@as(?u32, 5), ir_function.body[0].data.return_stmt.?.source_column);
+
+    const hir_function = hir_module.global_functions[0];
+    try std.testing.expectEqual(@as(?u32, 1), hir_function.source_line);
+    try std.testing.expectEqual(@as(?u32, 1), hir_function.source_column);
+    try std.testing.expectEqual(@as(?u32, 2), hir_function.body[0].source_line);
+    try std.testing.expectEqual(@as(?u32, 5), hir_function.body[0].source_column);
+    try std.testing.expectEqual(@as(?u32, 2), hir_function.body[0].data.return_stmt.?.source_line);
+    try std.testing.expectEqual(@as(?u32, 5), hir_function.body[0].data.return_stmt.?.source_column);
+
+    const mir_function = mir_module.global_functions[0];
+    try std.testing.expectEqual(@as(?u32, 1), mir_function.source_line);
+    try std.testing.expectEqual(@as(?u32, 1), mir_function.source_column);
+    try std.testing.expectEqual(@as(?u32, 2), mir_function.body[0].source_line);
+    try std.testing.expectEqual(@as(?u32, 5), mir_function.body[0].source_column);
+    try std.testing.expectEqual(@as(?u32, 2), mir_function.body[0].data.return_stmt.?.source_line);
+    try std.testing.expectEqual(@as(?u32, 5), mir_function.body[0].data.return_stmt.?.source_column);
+}
