@@ -27,7 +27,7 @@ fn phong_strength(normal: vec3f, light_dir: vec3f) -> f32 {
 
 fn _zwgsl_vertex_main() {
     let world_pos: vec4f = model_matrix * vec4f(position, 1.0);
-    v_normal = mat3x3f(model_matrix) * normal;
+    v_normal = mat3x3f(model_matrix[0].xyz, model_matrix[1].xyz, model_matrix[2].xyz) * normal;
     v_world_pos = world_pos.xyz;
     gl_Position = projection_matrix * view_matrix * world_pos;
 }

@@ -69,7 +69,7 @@ test "hello triangle example compiles to WGSL" {
 test "phong example compiles to WGSL" {
     try expectCompilesPathToWgsl("examples/phong.zw", &.{
         "fn phong_strength(normal: vec3f, light_dir: vec3f) -> f32",
-        "v_normal = mat3x3f(model_matrix) * normal;",
+        "v_normal = mat3x3f(model_matrix[0].xyz, model_matrix[1].xyz, model_matrix[2].xyz) * normal;",
         "gl_Position = projection_matrix * view_matrix * world_pos;",
     }, &.{
         "let light: f32 = phong_strength(v_normal, light_dir);",
