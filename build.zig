@@ -31,6 +31,38 @@ pub fn build(b: *std.Build) void {
     shared_lib.linkLibC();
     b.installArtifact(shared_lib);
 
+    const lsp_server = b.addExecutable(.{
+        .name = "zwgsl-lsp",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/lsp/server.zig"),
+            .imports = &.{
+                .{
+                    .name = "zwgsl",
+                    .module = lib_module,
+                },
+            },
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    lsp_server.linkLibC();
+    b.installArtifact(lsp_server);
+
+    const wasm_lib = b.addLibrary(.{
+        .name = "zwgsl-wasm",
+        .linkage = .static,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/lib.zig"),
+            .target = b.resolveTargetQuery(.{
+                .cpu_arch = .wasm32,
+                .os_tag = .freestanding,
+            }),
+            .optimize = .ReleaseSmall,
+        }),
+    });
+    const wasm_step = b.step("wasm", "Build the freestanding wasm32 library");
+    wasm_step.dependOn(&wasm_lib.step);
+
     const tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("tests/test_runner.zig"),

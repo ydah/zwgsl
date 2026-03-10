@@ -1,8 +1,10 @@
 const std = @import("std");
 const diagnostics = @import("diagnostics.zig");
 const glsl_emitter = @import("glsl_emitter.zig");
+const hir_builder = @import("hir_builder.zig");
 const ir_builder = @import("ir_builder.zig");
 const lexer = @import("lexer.zig");
+const mir_builder = @import("mir_builder.zig");
 const parser = @import("parser.zig");
 const sema = @import("sema.zig");
 const string_pool = @import("string_pool.zig");
@@ -77,23 +79,29 @@ pub fn compile(allocator: std.mem.Allocator, source: []const u8, options: Option
         );
     }
 
-    const module = try ir_builder.build(allocator, typed);
     const emitted = switch (options.target) {
-        .glsl_es_300 => try glsl_emitter.emit(allocator, module, .{
-            .emit_debug_comments = options.emit_debug_comments != 0,
-            .optimize_output = options.optimize_output != 0,
-            .source = source,
-        }),
-        .wgsl => wgsl_emitter.emit(allocator, module, .{
-            .emit_debug_comments = options.emit_debug_comments != 0,
-            .optimize_output = options.optimize_output != 0,
-            .source = source,
-        }) catch |err| switch (err) {
-            error.UnsupportedInOutParams => return singleError(allocator, "WGSL backend does not support inout parameters yet", 0, 0),
-            error.UnsupportedSamplerType => return singleError(allocator, "WGSL backend encountered an unsupported sampler type", 0, 0),
-            error.UnsupportedTextureBuiltin => return singleError(allocator, "WGSL backend encountered an unsupported texture() call", 0, 0),
-            error.UnsupportedTextureSource => return singleError(allocator, "WGSL backend only supports texture() on sampler uniforms", 0, 0),
-            else => return err,
+        .glsl_es_300 => blk: {
+            const module = try ir_builder.build(allocator, typed);
+            break :blk try glsl_emitter.emit(allocator, module, .{
+                .emit_debug_comments = options.emit_debug_comments != 0,
+                .optimize_output = options.optimize_output != 0,
+                .source = source,
+            });
+        },
+        .wgsl => blk: {
+            const hir_module = try hir_builder.build(allocator, typed);
+            const mir_module = try mir_builder.build(allocator, hir_module);
+            break :blk wgsl_emitter.emit(allocator, mir_module, .{
+                .emit_debug_comments = options.emit_debug_comments != 0,
+                .optimize_output = options.optimize_output != 0,
+                .source = source,
+            }) catch |err| switch (err) {
+                error.UnsupportedInOutParams => return singleError(allocator, "WGSL backend does not support inout parameters yet", 0, 0),
+                error.UnsupportedSamplerType => return singleError(allocator, "WGSL backend encountered an unsupported sampler type", 0, 0),
+                error.UnsupportedTextureBuiltin => return singleError(allocator, "WGSL backend encountered an unsupported texture() call", 0, 0),
+                error.UnsupportedTextureSource => return singleError(allocator, "WGSL backend only supports texture() on sampler uniforms", 0, 0),
+                else => return err,
+            };
         },
     };
 

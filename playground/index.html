@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>zwgsl Playground</title>
+    <script type="module" src="/src/main.ts"></script>
+  </head>
+  <body>
+    <div id="app">
+      <header class="chrome">
+        <div>
+          <p class="eyebrow">Ruby-inspired shading language</p>
+          <h1>zwgsl Playground</h1>
+        </div>
+        <button id="compile-button" type="button">Compile</button>
+      </header>
+      <main class="grid">
+        <section class="panel editor-panel">
+          <div class="panel-header">
+            <span>Source</span>
+            <span id="status">idle</span>
+          </div>
+          <div id="editor"></div>
+        </section>
+        <section class="stack">
+          <section class="panel">
+            <div class="panel-header">
+              <span>WGSL</span>
+            </div>
+            <pre id="wgsl-output"></pre>
+          </section>
+          <section class="panel preview-panel">
+            <div class="panel-header">
+              <span>Preview</span>
+            </div>
+            <canvas id="preview-canvas"></canvas>
+          </section>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>
