@@ -1,0 +1,185 @@
+version "300 es"
+precision :fragment, :highp
+
+uniform :time, Float
+uniform :resolution, Vec2
+
+def cross2(a: Vec2, b: Vec2) -> Float
+  a.x * b.y - b.x * a.y
+end
+
+def bezier_distance(m: Vec2, n: Vec2, o: Vec2, p: Vec3) -> Vec2
+  q = p.xy
+  m0 = m - q
+  n0 = n - q
+  o0 = o - q
+  x = cross2(m0, o0)
+  y = 2.0 * cross2(n0, m0)
+  z = 2.0 * cross2(o0, n0)
+  i = o0 - m0
+  j = o0 - n0
+  k = n0 - m0
+  s = 2.0 * (x * i + y * j + z * k)
+  r = m0 + (y * z - x * x) * vec2(s.y, -s.x) / dot(s, s)
+  t = clamp((cross2(r, i) + 2.0 * cross2(k, r)) / (x + x + y + z), 0.0, 1.0)
+  curve = m0 + t * (k + k + t * (j - k))
+  vec2(sqrt(dot(curve, curve) + p.z * p.z), t)
+end
+
+def smooth_min(a: Float, b: Float, k: Float) -> Float
+  h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0)
+  mix(b, a, h) - k * h * (1.0 - h)
+end
+
+def body_segment(a: Vec2, b: Vec2, c: Vec2, profile: Vec3) -> Float
+  (bezier_distance(a, b, c, profile).x - 0.015) * 0.7
+end
+
+def teapot_body_distance(p: Vec3) -> Float
+  min(min(min(seg0, seg1), min(seg2, seg3)), min(min(seg4, seg5), seg6))
+where
+  profile = vec3(sqrt(max(dot(p, p) - p.y * p.y, 0.0)), p.y, 0.0)
+  seg0 = body_segment(vec2(0.0, 0.0), vec2(0.64, 0.0), vec2(0.64, 0.03), profile)
+  seg1 = body_segment(vec2(0.64, 0.03), vec2(0.8, 0.12), vec2(0.8, 0.3), profile)
+  seg2 = body_segment(vec2(0.8, 0.3), vec2(0.8, 0.48), vec2(0.64, 0.9), profile)
+  seg3 = body_segment(vec2(0.64, 0.9), vec2(0.6, 0.93), vec2(0.56, 0.9), profile)
+  seg4 = body_segment(vec2(0.56, 0.9), vec2(0.56, 0.96), vec2(0.12, 1.02), profile)
+  seg5 = body_segment(vec2(0.12, 1.02), vec2(0.0, 1.05), vec2(0.16, 1.14), profile)
+  seg6 = body_segment(vec2(0.16, 1.14), vec2(0.2, 1.2), vec2(0.0, 1.2), profile)
+end
+
+def teapot_attachment_distance(p: Vec3) -> Float
+  min(handle, spout)
+where
+  spout_tip = bezier_distance(vec2(1.0, 0.72), vec2(0.92, 0.48), vec2(0.72, 0.42), p)
+  spout_root = bezier_distance(vec2(1.16, 0.96), vec2(1.04, 0.9), vec2(1.0, 0.72), p)
+  handle_a = bezier_distance(vec2(-0.6, 0.78), vec2(-1.16, 0.84), vec2(-1.16, 0.63), p).x
+  handle_b = bezier_distance(vec2(-1.16, 0.63), vec2(-1.2, 0.42), vec2(-0.72, 0.24), p).x
+  handle = min(handle_a, handle_b) - 0.06
+  spout = max(p.y - 0.9, min(abs(spout_root.x - 0.07) - 0.01, spout_tip.x * (1.0 - 0.75 * spout_tip.y) - 0.08))
+end
+
+def scene_distance(p: Vec3) -> Float
+  smooth_min(teapot_body_distance(p), teapot_attachment_distance(p), 0.02)
+end
+
+def hsv2rgb_smooth(h: Float, s: Float, v: Float) -> Vec3
+  rgb = clamp(abs(mod(h * 6.0 + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0, 0.0, 1.0)
+  smooth = rgb * rgb * (3.0 - 2.0 * rgb)
+  v * mix(vec3(1.0), smooth, s)
+end
+
+def tangent_from_normal(n: Vec3) -> Vec3
+  anchor = mix(vec3(0.0, 0.0, 1.0), vec3(1.0, 0.0, 0.0), step(0.999, abs(n.z)))
+  normalize(cross(anchor, n))
+end
+
+def bitangent_from_normal(n: Vec3, t: Vec3) -> Vec3
+  normalize(cross(n, t))
+end
+
+def compute_brdf(n: Vec3, l: Vec3, h: Vec3, r: Vec3, t: Vec3, b: Vec3) -> Vec3
+  clamp(intensity * vec3(0.45, 0.54, 1.0), 0.0, 1.0)
+where
+  one_over_pi = 0.31830988618
+  lobe = vec2(0.45, 0.048)
+  alpha = vec2(0.045, 0.068)
+  scale = vec3(1.0, 20.0, 10.0)
+  e1 = dot(h, t) / alpha.x
+  e2 = dot(h, b) / alpha.y
+  denom = max(1.0 + dot(h, n), 0.001)
+  exponent = -2.0 * ((e1 * e1 + e2 * e2) / denom)
+  cos_theta_i = max(dot(n, l), 0.001)
+  cos_theta_r = max(dot(n, r), 0.001)
+  brdf = lobe.x * one_over_pi + lobe.y * (1.0 / sqrt(cos_theta_i * cos_theta_r)) * (1.0 / (4.0 * 3.14159265359 * alpha.x * alpha.y)) * exp(exponent)
+  intensity = scale.x * lobe.x * one_over_pi + scale.y * lobe.y * cos_theta_i * brdf + scale.z * max(dot(h, n), 0.0) * lobe.y
+end
+
+def estimate_normal(p: Vec3, ray: Vec3, travel: Float) -> Vec3
+  normalize(grad - max(0.0, dot(grad, ray)) * ray)
+where
+  pitch = 0.4 * travel / max(resolution.x, 1.0)
+  d = vec2(-1.0, 1.0) * pitch
+  p0 = p + vec3(d.x, d.x, d.x)
+  p1 = p + vec3(d.x, d.y, d.y)
+  p2 = p + vec3(d.y, d.x, d.y)
+  p3 = p + vec3(d.y, d.y, d.x)
+  f0 = scene_distance(p0)
+  f1 = scene_distance(p1)
+  f2 = scene_distance(p2)
+  f3 = scene_distance(p3)
+  grad = p0 * f0 + p1 * f1 + p2 * f2 + p3 * f3 - p * (f0 + f1 + f2 + f3)
+end
+
+def shade(uv: Vec2) -> Vec3
+  screen = uv + uv - 1.0
+  pixel = vec2(screen.x * resolution.x / max(resolution.y, 1.0), screen.y)
+  orbit = vec2(0.35 * sin(time * 0.23), 0.18 * cos(time * 0.17))
+  camera_angle = 5.0 + 0.2 * time + orbit.x
+  origin = 2.9 * vec3(cos(camera_angle), 0.7 - orbit.y, sin(camera_angle))
+  forward = normalize(vec3(0.0, 1.0, 0.0) * 0.4 - origin)
+  right = normalize(cross(forward, vec3(0.0, 1.0, 0.0)))
+  up = cross(right, forward)
+  ray = normalize(pixel.x * right + pixel.y * up + forward + forward)
+  bg = mix(hsv2rgb_smooth(0.5 + time * 0.02, 0.35, 0.4), hsv2rgb_smooth(-0.5 + time * 0.02, 0.35, 0.7), uv.y)
+  vignette = pow(16.0 * uv.x * uv.y * (1.0 - uv.x) * (1.0 - uv.y), 0.16)
+  color: Vec3 = bg
+  travel: Float = 0.0
+  march_step: Float = 0.1
+  marching: Bool = true
+
+  48.times do |i|
+    if marching && travel < 4.7
+      march_step = scene_distance(origin + ray * travel)
+      if march_step < 0.0005
+        marching = false
+      else
+        travel += march_step
+      end
+    end
+  end
+
+  if marching == false && travel < 4.7
+    hit_pos = origin + ray * travel
+    normal = estimate_normal(hit_pos, ray, travel)
+    light_dir = normalize(vec3(1.0, 0.72, 1.0))
+    view_dir = normalize(origin - hit_pos)
+    half_dir = normalize(light_dir + view_dir)
+    reflected = normalize(reflect(vec3(0.0) - light_dir, normal))
+    tangent = tangent_from_normal(normal)
+    bitangent = bitangent_from_normal(normal, tangent)
+    shadow: Float = 1.0
+    shadow_t: Float = 0.0
+
+    20.times do |j|
+      shadow_t += 0.02
+      shadow = min(shadow, scene_distance(hit_pos + light_dir * shadow_t) / shadow_t)
+    end
+
+    highlight = pow(max(dot(reflect(vec3(0.0) - light_dir, normal), view_dir), 0.0), 32.0)
+    color = compute_brdf(normal, light_dir, half_dir, reflected, tangent, bitangent) * (0.35 + 0.65 * clamp(3.0 * shadow, 0.0, 1.0)) + vec3(0.15 * highlight)
+  end
+
+  clamp(color * vignette, 0.0, 1.0)
+end
+
+vertex do
+  input :position, Vec3, location: 0
+  input :uv, Vec2, location: 1
+  varying :v_uv, Vec2
+
+  def main
+    self.v_uv = uv
+    gl_Position = vec4(position, 1.0)
+  end
+end
+
+fragment do
+  varying :v_uv, Vec2
+  output :frag_color, Vec4, location: 0
+
+  def main
+    color = shade(v_uv)
+    frag_color = vec4(color, 1.0)
+  end
+end
