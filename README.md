@@ -27,8 +27,8 @@ syntax while still targeting modern GPU backends.
 - Pattern matching with constructor, wildcard, binding, literal, and guarded arms
 - Dependent dimension matching for `Vec(N)`, `Mat(M, N)`, and tensor-style type applications
 - Generic structs, constructor inference, and phantom-type-safe annotations
-- `trait` / `impl` support with compile-time specialization for WGSL emission
-- Multi-stage WGSL pipeline with entry-point-aware HIR and CFG-style MIR: `AST -> HIR -> MIR -> WGSL`
+- `trait` / `impl` support with compile-time specialization and inline trait methods in WGSL output
+- Multi-stage WGSL pipeline with entry-point-aware HIR and SSA-style CFG MIR: `AST -> HIR -> MIR -> WGSL`
 - WGSL sampler lowering for uniforms, function parameters, and immutable local aliases
 - Source-aware LSP support: diagnostics, hover, completion, goto-definition, semantic tokens
 - Browser playground with Monaco, wasm compilation, and compiler-backed worker tooling
@@ -110,7 +110,7 @@ fn phong_strength(normal: vec3f, light_dir: vec3f) -> f32 {
 }
 
 fn __zwgsl_vertex_main() {
-    var world_pos: vec4f = model_matrix * vec4f(position, 1.0);
+    let world_pos: vec4f = model_matrix * vec4f(position, 1.0);
     v_normal = mat3x3f(model_matrix) * normal;
     v_world_pos = world_pos.xyz;
     gl_Position = projection_matrix * view_matrix * world_pos;
@@ -156,8 +156,8 @@ fn phong_strength(normal: vec3f, light_dir: vec3f) -> f32 {
 }
 
 fn __zwgsl_fragment_main() {
-    var light_dir: vec3f = light_pos - v_world_pos;
-    var light: f32 = phong_strength(v_normal, light_dir);
+    let light_dir: vec3f = light_pos - v_world_pos;
+    let light: f32 = phong_strength(v_normal, light_dir);
     frag_color = vec4f(base_color.rgb * (0.2 + 0.8 * light), base_color.a);
 }
 
@@ -351,6 +351,7 @@ flowchart TD
 
     HIR --> MIR
     MIR --> WGSLEmitter["WGSL Emitter"]
+    WGSLEmitter --> WGSL["WGSL / WebGPU"]
 
     IR --> GLSLEmitter["GLSL Emitter"]
     GLSLEmitter --> GLSL["GLSL ES 3.0"]
