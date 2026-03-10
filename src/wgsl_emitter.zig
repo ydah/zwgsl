@@ -14,7 +14,6 @@ pub const EmitOptions = struct {
 pub const Output = glsl_emitter.Output;
 
 pub const EmitError = error{
-    UnsupportedInOutParams,
     UnsupportedSamplerType,
     UnsupportedTextureBuiltin,
     UnsupportedTextureSource,
@@ -44,12 +43,12 @@ fn emitStage(allocator: std.mem.Allocator, module: *const mir.Module, stage: mir
     }
 
     for (module.global_functions) |function| {
-        try emitFunction(writer, function, options, null, module.uniforms);
+        try emitFunction(writer, module, function, options, null, module.uniforms, &.{});
         try writer.writeByte('\n');
     }
 
     for (stage.functions) |function| {
-        try emitFunction(writer, function, options, stage.stage, module.uniforms);
+        try emitFunction(writer, module, function, options, stage.stage, module.uniforms, stage.functions);
         try writer.writeByte('\n');
     }
 
@@ -169,25 +168,33 @@ fn emitUserStruct(writer: anytype, struct_decl: mir.StructDecl) !void {
     try writer.writeAll("};\n");
 }
 
-fn emitFunction(writer: anytype, function: mir.Function, options: EmitOptions, stage: ?ast.Stage, uniforms: []const mir.Global) anyerror!void {
-    for (function.params) |param| {
-        if (param.is_inout) return error.UnsupportedInOutParams;
-    }
-
+fn emitFunction(
+    writer: anytype,
+    module: *const mir.Module,
+    function: mir.Function,
+    options: EmitOptions,
+    stage: ?ast.Stage,
+    uniforms: []const mir.Global,
+    current_functions: []const mir.Function,
+) anyerror!void {
     try emitDebugComment(writer, options, function.source_line, 0);
 
     const name = if (stage != null and function.isMain()) internalMainName(stage.?) else function.name;
     try writer.print("fn {s}(", .{name});
     for (function.params, 0..) |param, index| {
         if (index > 0) try writer.writeAll(", ");
-        try writer.print("{s}: {s}", .{ param.name, param.ty.wgslName() });
+        if (param.is_inout) {
+            try writer.print("{s}: ptr<function, {s}>", .{ param.name, param.ty.wgslName() });
+        } else {
+            try writer.print("{s}: {s}", .{ param.name, param.ty.wgslName() });
+        }
     }
     try writer.writeByte(')');
     if (!function.return_type.isVoid()) {
         try writer.print(" -> {s}", .{function.return_type.wgslName()});
     }
     try writer.writeAll(" {\n");
-    try emitStatements(writer, function.body, 1, options, uniforms);
+    try emitStatements(writer, module, function.body, 1, options, uniforms, current_functions, function.params);
     try writer.writeAll("}\n");
 }
 
@@ -260,7 +267,16 @@ fn emitEntryPoint(writer: anytype, module: *const mir.Module, stage: mir.Stage) 
     }
 }
 
-fn emitStatements(writer: anytype, statements: []const mir.Statement, indent: usize, options: EmitOptions, uniforms: []const mir.Global) anyerror!void {
+fn emitStatements(
+    writer: anytype,
+    module: *const mir.Module,
+    statements: []const mir.Statement,
+    indent: usize,
+    options: EmitOptions,
+    uniforms: []const mir.Global,
+    current_functions: []const mir.Function,
+    current_params: []const mir.Param,
+) anyerror!void {
     for (statements) |statement| {
         try emitDebugComment(writer, options, statement.source_line, indent);
         try writeIndent(writer, indent);
@@ -273,24 +289,24 @@ fn emitStatements(writer: anytype, statements: []const mir.Statement, indent: us
                 });
                 if (decl.value) |value| {
                     try writer.writeAll(" = ");
-                    try emitExpr(writer, value, 0, uniforms);
+                    try emitExpr(writer, module, value, 0, uniforms, current_functions, current_params);
                 }
                 try writer.writeAll(";\n");
             },
             .assign => |assignment| {
-                try emitExpr(writer, assignment.target, 0, uniforms);
+                try emitExpr(writer, module, assignment.target, 0, uniforms, current_functions, current_params);
                 try writer.print(" {s} ", .{assignmentOp(assignment.operator)});
-                try emitExpr(writer, assignment.value, 0, uniforms);
+                try emitExpr(writer, module, assignment.value, 0, uniforms, current_functions, current_params);
                 try writer.writeAll(";\n");
             },
             .expr => |expr| {
-                try emitExpr(writer, expr, 0, uniforms);
+                try emitExpr(writer, module, expr, 0, uniforms, current_functions, current_params);
                 try writer.writeAll(";\n");
             },
             .return_stmt => |value| {
                 if (value) |expr| {
                     try writer.writeAll("return ");
-                    try emitExpr(writer, expr, 0, uniforms);
+                    try emitExpr(writer, module, expr, 0, uniforms, current_functions, current_params);
                     try writer.writeAll(";\n");
                 } else {
                     try writer.writeAll("return;\n");
@@ -299,14 +315,14 @@ fn emitStatements(writer: anytype, statements: []const mir.Statement, indent: us
             .discard => try writer.writeAll("discard;\n"),
             .if_stmt => |if_stmt| {
                 try writer.writeAll("if (");
-                try emitExpr(writer, if_stmt.condition, 0, uniforms);
+                try emitExpr(writer, module, if_stmt.condition, 0, uniforms, current_functions, current_params);
                 try writer.writeAll(") {\n");
-                try emitStatements(writer, if_stmt.then_body, indent + 1, options, uniforms);
+                try emitStatements(writer, module, if_stmt.then_body, indent + 1, options, uniforms, current_functions, current_params);
                 try writeIndent(writer, indent);
                 try writer.writeAll("}");
                 if (if_stmt.else_body.len > 0) {
                     try writer.writeAll(" else {\n");
-                    try emitStatements(writer, if_stmt.else_body, indent + 1, options, uniforms);
+                    try emitStatements(writer, module, if_stmt.else_body, indent + 1, options, uniforms, current_functions, current_params);
                     try writeIndent(writer, indent);
                     try writer.writeAll("}");
                 }
@@ -314,18 +330,18 @@ fn emitStatements(writer: anytype, statements: []const mir.Statement, indent: us
             },
             .switch_stmt => |switch_stmt| {
                 try writer.writeAll("switch (");
-                try emitExpr(writer, switch_stmt.selector, 0, uniforms);
+                try emitExpr(writer, module, switch_stmt.selector, 0, uniforms, current_functions, current_params);
                 try writer.writeAll(") {\n");
                 for (switch_stmt.cases) |case_stmt| {
                     try writeIndent(writer, indent + 1);
                     try writer.print("case {d}: {{\n", .{case_stmt.value});
-                    try emitStatements(writer, case_stmt.body, indent + 2, options, uniforms);
+                    try emitStatements(writer, module, case_stmt.body, indent + 2, options, uniforms, current_functions, current_params);
                     try writeIndent(writer, indent + 1);
                     try writer.writeAll("}\n");
                 }
                 try writeIndent(writer, indent + 1);
                 try writer.writeAll("default: {\n");
-                try emitStatements(writer, switch_stmt.default_body, indent + 2, options, uniforms);
+                try emitStatements(writer, module, switch_stmt.default_body, indent + 2, options, uniforms, current_functions, current_params);
                 try writeIndent(writer, indent + 1);
                 try writer.writeAll("}\n");
                 try writeIndent(writer, indent);
@@ -335,7 +351,15 @@ fn emitStatements(writer: anytype, statements: []const mir.Statement, indent: us
     }
 }
 
-fn emitExpr(writer: anytype, expr: *const mir.Expr, parent_precedence: u8, uniforms: []const mir.Global) anyerror!void {
+fn emitExpr(
+    writer: anytype,
+    module: *const mir.Module,
+    expr: *const mir.Expr,
+    parent_precedence: u8,
+    uniforms: []const mir.Global,
+    current_functions: []const mir.Function,
+    current_params: []const mir.Param,
+) anyerror!void {
     const precedence = exprPrecedence(expr);
     const wrap = precedence < parent_precedence;
     if (wrap) try writer.writeByte('(');
@@ -344,38 +368,51 @@ fn emitExpr(writer: anytype, expr: *const mir.Expr, parent_precedence: u8, unifo
         .integer => |value| try writer.print("{d}", .{value}),
         .float => |value| try writeFloat(writer, value),
         .bool => |value| try writer.writeAll(if (value) "true" else "false"),
-        .identifier => |name| try writer.writeAll(name),
+        .identifier => |name| {
+            if (isInoutParam(current_params, name)) {
+                try writer.print("(*{s})", .{name});
+            } else {
+                try writer.writeAll(name);
+            }
+        },
         .unary => |unary| {
             try writer.print("{s}", .{unaryOp(unary.operator)});
-            try emitExpr(writer, unary.operand, precedence, uniforms);
+            try emitExpr(writer, module, unary.operand, precedence, uniforms, current_functions, current_params);
         },
         .binary => |binary| {
-            try emitExpr(writer, binary.lhs, precedence, uniforms);
+            try emitExpr(writer, module, binary.lhs, precedence, uniforms, current_functions, current_params);
             try writer.print(" {s} ", .{binaryOp(binary.operator)});
-            try emitExpr(writer, binary.rhs, precedence + 1, uniforms);
+            try emitExpr(writer, module, binary.rhs, precedence + 1, uniforms, current_functions, current_params);
         },
         .call => |call| {
             if (std.mem.eql(u8, call.name, "texture")) {
-                try emitTextureCall(writer, call, uniforms);
+                try emitTextureCall(writer, module, call, uniforms, current_functions, current_params);
                 if (wrap) try writer.writeByte(')');
                 return;
             }
 
             try writer.print("{s}(", .{callName(call.name, expr.ty)});
+            const callee = findFunction(current_functions, call.name) orelse findFunction(module.global_functions, call.name);
             for (call.args, 0..) |arg, index| {
                 if (index > 0) try writer.writeAll(", ");
-                try emitExpr(writer, arg, 0, uniforms);
+                if (callee) |function| {
+                    if (index < function.params.len and function.params[index].is_inout) {
+                        try emitInoutArg(writer, module, arg, uniforms, current_functions, current_params);
+                        continue;
+                    }
+                }
+                try emitExpr(writer, module, arg, 0, uniforms, current_functions, current_params);
             }
             try writer.writeByte(')');
         },
         .field => |field| {
-            try emitExpr(writer, field.target, precedence, uniforms);
+            try emitExpr(writer, module, field.target, precedence, uniforms, current_functions, current_params);
             try writer.print(".{s}", .{field.name});
         },
         .index => |index_expr| {
-            try emitExpr(writer, index_expr.target, precedence, uniforms);
+            try emitExpr(writer, module, index_expr.target, precedence, uniforms, current_functions, current_params);
             try writer.writeByte('[');
-            try emitExpr(writer, index_expr.index, 0, uniforms);
+            try emitExpr(writer, module, index_expr.index, 0, uniforms, current_functions, current_params);
             try writer.writeByte(']');
         },
     }
@@ -383,7 +420,14 @@ fn emitExpr(writer: anytype, expr: *const mir.Expr, parent_precedence: u8, unifo
     if (wrap) try writer.writeByte(')');
 }
 
-fn emitTextureCall(writer: anytype, call: mir.Expr.Call, uniforms: []const mir.Global) anyerror!void {
+fn emitTextureCall(
+    writer: anytype,
+    module: *const mir.Module,
+    call: mir.Expr.Call,
+    uniforms: []const mir.Global,
+    current_functions: []const mir.Function,
+    current_params: []const mir.Param,
+) anyerror!void {
     if (call.args.len != 2) return error.UnsupportedTextureBuiltin;
     const sampler_name = switch (call.args[0].data) {
         .identifier => |name| name,
@@ -394,8 +438,25 @@ fn emitTextureCall(writer: anytype, call: mir.Expr.Call, uniforms: []const mir.G
     if (!uniform.ty.isSampler()) return error.UnsupportedTextureBuiltin;
 
     try writer.print("textureSample({s}_texture, {s}_sampler, ", .{ sampler_name, sampler_name });
-    try emitExpr(writer, call.args[1], 0, uniforms);
+    try emitExpr(writer, module, call.args[1], 0, uniforms, current_functions, current_params);
     try writer.writeByte(')');
+}
+
+fn emitInoutArg(
+    writer: anytype,
+    module: *const mir.Module,
+    arg: *const mir.Expr,
+    uniforms: []const mir.Global,
+    current_functions: []const mir.Function,
+    current_params: []const mir.Param,
+) anyerror!void {
+    if (arg.data == .identifier and isInoutParam(current_params, arg.data.identifier)) {
+        try writer.writeAll(arg.data.identifier);
+        return;
+    }
+
+    try writer.writeByte('&');
+    try emitExpr(writer, module, arg, 0, uniforms, current_functions, current_params);
 }
 
 fn findUniform(uniforms: []const mir.Global, name: []const u8) ?mir.Global {
@@ -403,6 +464,20 @@ fn findUniform(uniforms: []const mir.Global, name: []const u8) ?mir.Global {
         if (std.mem.eql(u8, uniform.name, name)) return uniform;
     }
     return null;
+}
+
+fn findFunction(functions: []const mir.Function, name: []const u8) ?mir.Function {
+    for (functions) |function| {
+        if (std.mem.eql(u8, function.name, name)) return function;
+    }
+    return null;
+}
+
+fn isInoutParam(params: []const mir.Param, name: []const u8) bool {
+    for (params) |param| {
+        if (param.is_inout and std.mem.eql(u8, param.name, name)) return true;
+    }
+    return false;
 }
 
 fn samplerTextureType(ty: types.Type) ?[]const u8 {

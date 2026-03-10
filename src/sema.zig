@@ -1338,11 +1338,13 @@ const Analyzer = struct {
                         if (builtins.resolve(name, arg_types.items)) |resolution| {
                             break :blk resolution.return_type;
                         }
-                        if (self.findFunction(name, arg_types.items, context.stage_functions)) |return_type| {
-                            break :blk return_type;
+                        if (self.findFunction(name, arg_types.items, context.stage_functions)) |match| {
+                            try self.checkInoutCallArgs(call.args, match.signature.params);
+                            break :blk match.return_type;
                         }
-                        if (self.findFunction(name, arg_types.items, self.global_functions.items)) |return_type| {
-                            break :blk return_type;
+                        if (self.findFunction(name, arg_types.items, self.global_functions.items)) |match| {
+                            try self.checkInoutCallArgs(call.args, match.signature.params);
+                            break :blk match.return_type;
                         }
                         try self.report(expr.position, "unknown function '{s}'", .{name});
                         break :blk types.builtinType(.error_type);
@@ -1795,12 +1797,25 @@ const Analyzer = struct {
         return substitution.apply(base_type);
     }
 
+    fn checkInoutCallArgs(
+        self: *Analyzer,
+        args: []const *ast.Expr,
+        params: []const ParamInfo,
+    ) anyerror!void {
+        for (params, args) |param, arg| {
+            if (!param.is_inout) continue;
+            if (!isAddressableExpr(arg)) {
+                try self.report(arg.position, "inout argument must be an assignable expression", .{});
+            }
+        }
+    }
+
     fn findFunction(
         self: *Analyzer,
         name: []const u8,
         arg_types: []const types.Type,
         functions: []const *ast.FunctionDef,
-    ) ?types.Type {
+    ) ?struct { signature: FunctionSignature, return_type: types.Type } {
         function_loop: for (functions) |function| {
             const signature = self.typed.function_signatures.get(function) orelse continue;
             if (!sameName(signature.name, name)) continue;
@@ -1818,7 +1833,10 @@ const Analyzer = struct {
                     continue :function_loop;
                 }
             }
-            return substitution.apply(signature.return_type) catch signature.return_type;
+            return .{
+                .signature = signature,
+                .return_type = substitution.apply(signature.return_type) catch signature.return_type,
+            };
         }
         return null;
     }
@@ -2075,6 +2093,13 @@ fn constraintTypeVar(params: []const []const u8, name: []const u8) ?u32 {
         if (sameName(param, name)) return @intCast(index);
     }
     return null;
+}
+
+fn isAddressableExpr(expr: *const ast.Expr) bool {
+    return switch (expr.data) {
+        .identifier, .member, .index => true,
+        else => false,
+    };
 }
 
 fn collectExprIdentifiers(

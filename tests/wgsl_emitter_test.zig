@@ -247,3 +247,38 @@ test "compiler specializes constrained trait calls for WGSL" {
     try std.testing.expect(std.mem.indexOf(u8, output.compute_source.?, "fn __spec_lerp_Float_Float_Float") != null);
     try std.testing.expect(std.mem.indexOf(u8, output.compute_source.?, "__spec_lerp_Float_Float_Float(1.0, 2.0, 0.5)") != null);
 }
+
+test "compiler lowers inout functions to WGSL pointers" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const source =
+        \\def increment(inout value: Float)
+        \\  value += 1.0
+        \\end
+        \\
+        \\def increment_twice(inout value: Float)
+        \\  increment(value)
+        \\  increment(value)
+        \\end
+        \\
+        \\compute do
+        \\  def main
+        \\    total: Float = 1.0
+        \\    increment_twice(total)
+        \\  end
+        \\end
+    ;
+
+    const output = try zwgsl.compiler.compile(arena.allocator(), source, .{
+        .target = .wgsl,
+    });
+
+    try std.testing.expectEqual(@as(usize, 0), output.errors.len);
+    try std.testing.expect(output.compute_source != null);
+    try std.testing.expect(std.mem.indexOf(u8, output.compute_source.?, "fn increment(value: ptr<function, f32>)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output.compute_source.?, "(*value) += 1.0;") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output.compute_source.?, "fn increment_twice(value: ptr<function, f32>)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output.compute_source.?, "increment(value);") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output.compute_source.?, "increment_twice(&total);") != null);
+}

@@ -96,7 +96,6 @@ pub fn compile(allocator: std.mem.Allocator, source: []const u8, options: Option
                 .optimize_output = options.optimize_output != 0,
                 .source = source,
             }) catch |err| switch (err) {
-                error.UnsupportedInOutParams => return singleError(allocator, "WGSL backend does not support inout parameters yet", 0, 0),
                 error.UnsupportedSamplerType => return singleError(allocator, "WGSL backend encountered an unsupported sampler type", 0, 0),
                 error.UnsupportedTextureBuiltin => return singleError(allocator, "WGSL backend encountered an unsupported texture() call", 0, 0),
                 error.UnsupportedTextureSource => return singleError(allocator, "WGSL backend only supports texture() on sampler uniforms", 0, 0),

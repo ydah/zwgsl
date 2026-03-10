@@ -485,6 +485,22 @@ test "sema type checks impl methods and constrained trait method calls" {
     try std.testing.expectEqual(@as(usize, 0), analyzed.diagnostics.items.items.len);
 }
 
+test "sema rejects non-assignable inout call arguments" {
+    var analyzed = try analyzeSource(
+        \\def increment(inout value: Float)
+        \\  value += 1.0
+        \\end
+        \\
+        \\def run
+        \\  increment(1.0)
+        \\end
+    );
+    defer analyzed.arena.deinit();
+
+    try std.testing.expect(analyzed.diagnostics.items.items.len > 0);
+    try std.testing.expect(std.mem.indexOf(u8, analyzed.diagnostics.items.items[0].message, "inout argument") != null);
+}
+
 test "sema infers generic struct constructors and field access" {
     var analyzed = try analyzeSource(
         \\struct Pair(a, b)
