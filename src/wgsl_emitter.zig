@@ -14,28 +14,34 @@ pub const EmitOptions = struct {
 pub const Output = glsl_emitter.Output;
 
 pub const EmitError = error{
+    UnsupportedSamplerValue,
     UnsupportedSamplerType,
     UnsupportedTextureBuiltin,
     UnsupportedTextureSource,
 };
 
+const SamplerAlias = struct {
+    name: []const u8,
+    target: []const u8,
+};
+
 pub fn emit(allocator: std.mem.Allocator, module: *const mir.Module, options: EmitOptions) anyerror!Output {
     return .{
-        .vertex = if (module.vertex) |stage| try emitStage(allocator, module, stage, options) else null,
-        .fragment = if (module.fragment) |stage| try emitStage(allocator, module, stage, options) else null,
-        .compute = if (module.compute) |stage| try emitStage(allocator, module, stage, options) else null,
+        .vertex = if (module.entryPoint(.vertex)) |entry_point| try emitStage(allocator, module, entry_point, options) else null,
+        .fragment = if (module.entryPoint(.fragment)) |entry_point| try emitStage(allocator, module, entry_point, options) else null,
+        .compute = if (module.entryPoint(.compute)) |entry_point| try emitStage(allocator, module, entry_point, options) else null,
     };
 }
 
-fn emitStage(allocator: std.mem.Allocator, module: *const mir.Module, stage: mir.Stage, options: EmitOptions) anyerror![]const u8 {
+fn emitStage(allocator: std.mem.Allocator, module: *const mir.Module, entry_point: mir.EntryPoint, options: EmitOptions) anyerror![]const u8 {
     var buffer = try std.ArrayList(u8).initCapacity(allocator, 0);
     const writer = buffer.writer(allocator);
 
-    if (stage.stage != .compute) {
-        try emitStageInterfaceStructs(writer, module, stage);
+    if (entry_point.stage != .compute) {
+        try emitStageInterfaceStructs(writer, module, entry_point);
     }
     try emitBindings(writer, module.bindings);
-    try emitPrivateGlobals(writer, stage);
+    try emitPrivateGlobals(writer, entry_point);
 
     for (module.structs) |struct_decl| {
         try emitUserStruct(writer, struct_decl);
@@ -43,28 +49,38 @@ fn emitStage(allocator: std.mem.Allocator, module: *const mir.Module, stage: mir
     }
 
     for (module.global_functions) |function| {
-        try emitFunction(writer, module, function, options, null, module.uniforms, &.{});
+        try emitFunction(writer, allocator, module, function, options, null, false, module.uniforms, module.global_functions);
         try writer.writeByte('\n');
     }
 
-    for (stage.functions) |function| {
-        try emitFunction(writer, module, function, options, stage.stage, module.uniforms, stage.functions);
+    for (entry_point.functions, 0..) |function, index| {
+        try emitFunction(
+            writer,
+            allocator,
+            module,
+            function,
+            options,
+            entry_point.stage,
+            index == entry_point.main_function_index,
+            module.uniforms,
+            entry_point.functions,
+        );
         try writer.writeByte('\n');
     }
 
-    try emitEntryPoint(writer, module, stage);
+    try emitEntryPoint(writer, module, entry_point);
 
     const output = try buffer.toOwnedSlice(allocator);
     if (!options.optimize_output) return output;
     return compactOutput(allocator, output);
 }
 
-fn emitStageInterfaceStructs(writer: anytype, module: *const mir.Module, stage: mir.Stage) !void {
-    switch (stage.stage) {
+fn emitStageInterfaceStructs(writer: anytype, module: *const mir.Module, entry_point: mir.EntryPoint) !void {
+    switch (entry_point.stage) {
         .vertex => {
-            if (stage.inputs.len > 0) {
+            if (entry_point.interface.inputs.len > 0) {
                 try writer.writeAll("struct VertexInput {\n");
-                for (stage.inputs, 0..) |input, index| {
+                for (entry_point.interface.inputs, 0..) |input, index| {
                     try writer.print("    @location({d}) {s}: {s},\n", .{ declLocation(input, index), input.name, input.ty.wgslName() });
                 }
                 try writer.writeAll("};\n\n");
@@ -72,26 +88,26 @@ fn emitStageInterfaceStructs(writer: anytype, module: *const mir.Module, stage: 
 
             try writer.writeAll("struct VertexOutput {\n");
             try writer.writeAll("    @builtin(position) gl_Position: vec4f,\n");
-            for (stage.varyings) |varying| {
+            for (entry_point.interface.varyings) |varying| {
                 try writer.print("    @location({d}) {s}: {s},\n", .{ varyingLocation(module, varying.name), varying.name, varying.ty.wgslName() });
             }
-            for (stage.outputs, 0..) |output, index| {
+            for (entry_point.interface.outputs, 0..) |output, index| {
                 try writer.print("    @location({d}) {s}: {s},\n", .{ declLocation(output, index), output.name, output.ty.wgslName() });
             }
             try writer.writeAll("};\n\n");
         },
         .fragment => {
-            if (stage.varyings.len > 0) {
+            if (entry_point.interface.varyings.len > 0) {
                 try writer.writeAll("struct FragmentInput {\n");
-                for (stage.varyings) |varying| {
+                for (entry_point.interface.varyings) |varying| {
                     try writer.print("    @location({d}) {s}: {s},\n", .{ varyingLocation(module, varying.name), varying.name, varying.ty.wgslName() });
                 }
                 try writer.writeAll("};\n\n");
             }
 
-            if (stage.outputs.len > 0) {
+            if (entry_point.interface.outputs.len > 0) {
                 try writer.writeAll("struct FragmentOutput {\n");
-                for (stage.outputs, 0..) |output, index| {
+                for (entry_point.interface.outputs, 0..) |output, index| {
                     try writer.print("    @location({d}) {s}: {s},\n", .{ declLocation(output, index), output.name, output.ty.wgslName() });
                 }
                 try writer.writeAll("};\n\n");
@@ -126,29 +142,29 @@ fn emitBindings(writer: anytype, bindings: []const mir.Binding) !void {
     if (bindings.len > 0) try writer.writeByte('\n');
 }
 
-fn emitPrivateGlobals(writer: anytype, stage: mir.Stage) !void {
-    switch (stage.stage) {
+fn emitPrivateGlobals(writer: anytype, entry_point: mir.EntryPoint) !void {
+    switch (entry_point.stage) {
         .vertex => {
             try writer.writeAll("var<private> gl_Position: vec4f;\n");
-            for (stage.inputs) |input| {
+            for (entry_point.interface.inputs) |input| {
                 try writer.print("var<private> {s}: {s};\n", .{ input.name, input.ty.wgslName() });
             }
-            for (stage.varyings) |varying| {
+            for (entry_point.interface.varyings) |varying| {
                 try writer.print("var<private> {s}: {s};\n", .{ varying.name, varying.ty.wgslName() });
             }
-            for (stage.outputs) |output| {
+            for (entry_point.interface.outputs) |output| {
                 try writer.print("var<private> {s}: {s};\n", .{ output.name, output.ty.wgslName() });
             }
-            if (stage.inputs.len > 0 or stage.varyings.len > 0 or stage.outputs.len > 0) try writer.writeByte('\n');
+            if (entry_point.interface.inputs.len > 0 or entry_point.interface.varyings.len > 0 or entry_point.interface.outputs.len > 0) try writer.writeByte('\n');
         },
         .fragment => {
-            for (stage.varyings) |varying| {
+            for (entry_point.interface.varyings) |varying| {
                 try writer.print("var<private> {s}: {s};\n", .{ varying.name, varying.ty.wgslName() });
             }
-            for (stage.outputs) |output| {
+            for (entry_point.interface.outputs) |output| {
                 try writer.print("var<private> {s}: {s};\n", .{ output.name, output.ty.wgslName() });
             }
-            if (stage.varyings.len > 0 or stage.outputs.len > 0) try writer.writeByte('\n');
+            if (entry_point.interface.varyings.len > 0 or entry_point.interface.outputs.len > 0) try writer.writeByte('\n');
         },
         .compute => {
             try writer.writeAll("var<private> global_invocation_id: vec3u;\n");
@@ -170,41 +186,58 @@ fn emitUserStruct(writer: anytype, struct_decl: mir.StructDecl) !void {
 
 fn emitFunction(
     writer: anytype,
+    allocator: std.mem.Allocator,
     module: *const mir.Module,
     function: mir.Function,
     options: EmitOptions,
     stage: ?ast.Stage,
+    is_entry_main: bool,
     uniforms: []const mir.Global,
     current_functions: []const mir.Function,
 ) anyerror!void {
     try emitDebugComment(writer, options, function.source_line, 0);
 
-    const name = if (stage != null and function.isMain()) internalMainName(stage.?) else function.name;
+    const name = if (stage != null and is_entry_main) internalMainName(stage.?) else function.name;
     try writer.print("fn {s}(", .{name});
-    for (function.params, 0..) |param, index| {
-        if (index > 0) try writer.writeAll(", ");
+    var wrote_param = false;
+    for (function.params) |param| {
+        if (param.ty.isSampler()) {
+            if (wrote_param) try writer.writeAll(", ");
+            try writer.print("{s}_texture: {s}, {s}_sampler: sampler", .{
+                param.name,
+                samplerTextureType(param.ty) orelse return error.UnsupportedSamplerType,
+                param.name,
+            });
+            wrote_param = true;
+            continue;
+        }
+        if (wrote_param) try writer.writeAll(", ");
         if (param.is_inout) {
             try writer.print("{s}: ptr<function, {s}>", .{ param.name, param.ty.wgslName() });
         } else {
             try writer.print("{s}: {s}", .{ param.name, param.ty.wgslName() });
         }
+        wrote_param = true;
     }
     try writer.writeByte(')');
     if (!function.return_type.isVoid()) {
         try writer.print(" -> {s}", .{function.return_type.wgslName()});
     }
     try writer.writeAll(" {\n");
-    try emitStatements(writer, module, function.body, 1, options, uniforms, current_functions, function.params);
+    var sampler_aliases = std.ArrayListUnmanaged(SamplerAlias){};
+    defer sampler_aliases.deinit(allocator);
+    try emitBlockRegion(writer, allocator, module, function, function.entry_block, null, 1, options, uniforms, current_functions, function.params, &sampler_aliases);
     try writer.writeAll("}\n");
 }
 
-fn emitEntryPoint(writer: anytype, module: *const mir.Module, stage: mir.Stage) !void {
-    switch (stage.stage) {
+fn emitEntryPoint(writer: anytype, module: *const mir.Module, entry_point: mir.EntryPoint) !void {
+    _ = module;
+    switch (entry_point.stage) {
         .vertex => {
             try writer.writeAll("@vertex\n");
-            if (stage.inputs.len > 0) {
+            if (entry_point.interface.inputs.len > 0) {
                 try writer.writeAll("fn main(input: VertexInput) -> VertexOutput {\n");
-                for (stage.inputs) |input| {
+                for (entry_point.interface.inputs) |input| {
                     try writer.print("    {s} = input.{s};\n", .{ input.name, input.name });
                 }
             } else {
@@ -213,10 +246,10 @@ fn emitEntryPoint(writer: anytype, module: *const mir.Module, stage: mir.Stage) 
             try writer.print("    {s}();\n", .{internalMainName(.vertex)});
             try writer.writeAll("    var output: VertexOutput;\n");
             try writer.writeAll("    output.gl_Position = gl_Position;\n");
-            for (stage.varyings) |varying| {
+            for (entry_point.interface.varyings) |varying| {
                 try writer.print("    output.{s} = {s};\n", .{ varying.name, varying.name });
             }
-            for (stage.outputs) |output| {
+            for (entry_point.interface.outputs) |output| {
                 try writer.print("    output.{s} = {s};\n", .{ output.name, output.name });
             }
             try writer.writeAll("    return output;\n");
@@ -224,22 +257,22 @@ fn emitEntryPoint(writer: anytype, module: *const mir.Module, stage: mir.Stage) 
         },
         .fragment => {
             try writer.writeAll("@fragment\n");
-            if (stage.varyings.len > 0) {
+            if (entry_point.interface.varyings.len > 0) {
                 try writer.writeAll("fn main(input: FragmentInput)");
             } else {
                 try writer.writeAll("fn main()");
             }
-            if (stage.outputs.len > 0) {
+            if (entry_point.interface.outputs.len > 0) {
                 try writer.writeAll(" -> FragmentOutput");
             }
             try writer.writeAll(" {\n");
-            for (stage.varyings) |varying| {
+            for (entry_point.interface.varyings) |varying| {
                 try writer.print("    {s} = input.{s};\n", .{ varying.name, varying.name });
             }
             try writer.print("    {s}();\n", .{internalMainName(.fragment)});
-            if (stage.outputs.len > 0) {
+            if (entry_point.interface.outputs.len > 0) {
                 try writer.writeAll("    var output: FragmentOutput;\n");
-                for (stage.outputs) |output| {
+                for (entry_point.interface.outputs) |output| {
                     try writer.print("    output.{s} = {s};\n", .{ output.name, output.name });
                 }
                 try writer.writeAll("    return output;\n");
@@ -247,7 +280,6 @@ fn emitEntryPoint(writer: anytype, module: *const mir.Module, stage: mir.Stage) 
             try writer.writeAll("}\n");
         },
         .compute => {
-            _ = module;
             try writer.writeAll("@compute @workgroup_size(1)\n");
             try writer.writeAll("fn main(\n");
             try writer.writeAll("    @builtin(global_invocation_id) global_invocation_id_input: vec3u,\n");
@@ -267,87 +299,151 @@ fn emitEntryPoint(writer: anytype, module: *const mir.Module, stage: mir.Stage) 
     }
 }
 
-fn emitStatements(
+fn emitBlockRegion(
     writer: anytype,
+    allocator: std.mem.Allocator,
     module: *const mir.Module,
-    statements: []const mir.Statement,
+    function: mir.Function,
+    start_label: []const u8,
+    stop_label: ?[]const u8,
     indent: usize,
     options: EmitOptions,
     uniforms: []const mir.Global,
     current_functions: []const mir.Function,
     current_params: []const mir.Param,
+    sampler_aliases: *std.ArrayListUnmanaged(SamplerAlias),
 ) anyerror!void {
-    for (statements) |statement| {
-        try emitDebugComment(writer, options, statement.source_line, indent);
-        try writeIndent(writer, indent);
-        switch (statement.data) {
-            .var_decl => |decl| {
-                try writer.print("{s} {s}: {s}", .{
-                    if (decl.mutable) "var" else "let",
-                    decl.name,
-                    decl.ty.wgslName(),
-                });
-                if (decl.value) |value| {
-                    try writer.writeAll(" = ");
-                    try emitExpr(writer, module, value, 0, uniforms, current_functions, current_params);
-                }
-                try writer.writeAll(";\n");
-            },
-            .assign => |assignment| {
-                try emitExpr(writer, module, assignment.target, 0, uniforms, current_functions, current_params);
-                try writer.print(" {s} ", .{assignmentOp(assignment.operator)});
-                try emitExpr(writer, module, assignment.value, 0, uniforms, current_functions, current_params);
-                try writer.writeAll(";\n");
-            },
-            .expr => |expr| {
-                try emitExpr(writer, module, expr, 0, uniforms, current_functions, current_params);
-                try writer.writeAll(";\n");
-            },
+    var current: ?[]const u8 = start_label;
+    while (current) |label| {
+        if (stop_label) |stop| {
+            if (std.mem.eql(u8, label, stop)) return;
+        }
+
+        const block = findBlock(function.blocks, label) orelse return error.InvalidBlockGraph;
+        for (block.instructions) |instruction| {
+            try emitInstruction(writer, allocator, module, instruction, indent, options, uniforms, current_functions, current_params, sampler_aliases);
+        }
+
+        switch (block.terminator) {
+            .none => return,
+            .jump => |target| current = target,
             .return_stmt => |value| {
+                try emitDebugComment(writer, options, block.source_line, indent);
+                try writeIndent(writer, indent);
                 if (value) |expr| {
                     try writer.writeAll("return ");
-                    try emitExpr(writer, module, expr, 0, uniforms, current_functions, current_params);
+                    try emitExpr(writer, module, expr, 0, uniforms, current_functions, current_params, sampler_aliases.items);
                     try writer.writeAll(";\n");
                 } else {
                     try writer.writeAll("return;\n");
                 }
+                return;
             },
-            .discard => try writer.writeAll("discard;\n"),
-            .if_stmt => |if_stmt| {
-                try writer.writeAll("if (");
-                try emitExpr(writer, module, if_stmt.condition, 0, uniforms, current_functions, current_params);
-                try writer.writeAll(") {\n");
-                try emitStatements(writer, module, if_stmt.then_body, indent + 1, options, uniforms, current_functions, current_params);
+            .discard => {
+                try emitDebugComment(writer, options, block.source_line, indent);
                 try writeIndent(writer, indent);
-                try writer.writeAll("}");
-                if (if_stmt.else_body.len > 0) {
-                    try writer.writeAll(" else {\n");
-                    try emitStatements(writer, module, if_stmt.else_body, indent + 1, options, uniforms, current_functions, current_params);
-                    try writeIndent(writer, indent);
-                    try writer.writeAll("}");
-                }
-                try writer.writeByte('\n');
+                try writer.writeAll("discard;\n");
+                return;
             },
-            .switch_stmt => |switch_stmt| {
-                try writer.writeAll("switch (");
-                try emitExpr(writer, module, switch_stmt.selector, 0, uniforms, current_functions, current_params);
+            .if_term => |if_term| {
+                try emitDebugComment(writer, options, block.source_line, indent);
+                try writeIndent(writer, indent);
+                try writer.writeAll("if (");
+                try emitExpr(writer, module, if_term.condition, 0, uniforms, current_functions, current_params, sampler_aliases.items);
                 try writer.writeAll(") {\n");
-                for (switch_stmt.cases) |case_stmt| {
+                const alias_checkpoint = sampler_aliases.items.len;
+                try emitBlockRegion(writer, allocator, module, function, if_term.then_block, if_term.merge_block, indent + 1, options, uniforms, current_functions, current_params, sampler_aliases);
+                sampler_aliases.items.len = alias_checkpoint;
+                try writeIndent(writer, indent);
+                try writer.writeAll("} else {\n");
+                try emitBlockRegion(writer, allocator, module, function, if_term.else_block, if_term.merge_block, indent + 1, options, uniforms, current_functions, current_params, sampler_aliases);
+                sampler_aliases.items.len = alias_checkpoint;
+                try writeIndent(writer, indent);
+                try writer.writeAll("}\n");
+                current = if_term.merge_block;
+            },
+            .switch_term => |switch_term| {
+                try emitDebugComment(writer, options, block.source_line, indent);
+                try writeIndent(writer, indent);
+                try writer.writeAll("switch (");
+                try emitExpr(writer, module, switch_term.selector, 0, uniforms, current_functions, current_params, sampler_aliases.items);
+                try writer.writeAll(") {\n");
+                for (switch_term.cases) |case_target| {
                     try writeIndent(writer, indent + 1);
-                    try writer.print("case {d}: {{\n", .{case_stmt.value});
-                    try emitStatements(writer, module, case_stmt.body, indent + 2, options, uniforms, current_functions, current_params);
+                    try writer.print("case {d}: {{\n", .{case_target.value});
+                    const alias_checkpoint = sampler_aliases.items.len;
+                    try emitBlockRegion(writer, allocator, module, function, case_target.block, switch_term.merge_block, indent + 2, options, uniforms, current_functions, current_params, sampler_aliases);
+                    sampler_aliases.items.len = alias_checkpoint;
                     try writeIndent(writer, indent + 1);
                     try writer.writeAll("}\n");
                 }
                 try writeIndent(writer, indent + 1);
                 try writer.writeAll("default: {\n");
-                try emitStatements(writer, module, switch_stmt.default_body, indent + 2, options, uniforms, current_functions, current_params);
+                const alias_checkpoint = sampler_aliases.items.len;
+                try emitBlockRegion(writer, allocator, module, function, switch_term.default_block, switch_term.merge_block, indent + 2, options, uniforms, current_functions, current_params, sampler_aliases);
+                sampler_aliases.items.len = alias_checkpoint;
                 try writeIndent(writer, indent + 1);
                 try writer.writeAll("}\n");
                 try writeIndent(writer, indent);
                 try writer.writeAll("}\n");
+                current = switch_term.merge_block;
             },
         }
+    }
+}
+
+fn emitInstruction(
+    writer: anytype,
+    allocator: std.mem.Allocator,
+    module: *const mir.Module,
+    instruction: mir.Instruction,
+    indent: usize,
+    options: EmitOptions,
+    uniforms: []const mir.Global,
+    current_functions: []const mir.Function,
+    current_params: []const mir.Param,
+    sampler_aliases: *std.ArrayListUnmanaged(SamplerAlias),
+) anyerror!void {
+    switch (instruction.data) {
+        .var_decl => |decl| {
+            if (decl.ty.isSampler()) {
+                const value = decl.value orelse return error.UnsupportedTextureSource;
+                if (decl.mutable) return error.UnsupportedSamplerValue;
+                const target = resolveSamplerIdentifier(uniforms, current_params, sampler_aliases.items, value) orelse return error.UnsupportedTextureSource;
+                try sampler_aliases.append(allocator, .{
+                    .name = decl.name,
+                    .target = target,
+                });
+                return;
+            }
+
+            try emitDebugComment(writer, options, instruction.source_line, indent);
+            try writeIndent(writer, indent);
+            try writer.print("{s} {s}: {s}", .{
+                if (decl.mutable) "var" else "let",
+                decl.name,
+                decl.ty.wgslName(),
+            });
+            if (decl.value) |value| {
+                try writer.writeAll(" = ");
+                try emitExpr(writer, module, value, 0, uniforms, current_functions, current_params, sampler_aliases.items);
+            }
+            try writer.writeAll(";\n");
+        },
+        .assign => |assignment| {
+            try emitDebugComment(writer, options, instruction.source_line, indent);
+            try writeIndent(writer, indent);
+            try emitExpr(writer, module, assignment.target, 0, uniforms, current_functions, current_params, sampler_aliases.items);
+            try writer.print(" {s} ", .{assignmentOp(assignment.operator)});
+            try emitExpr(writer, module, assignment.value, 0, uniforms, current_functions, current_params, sampler_aliases.items);
+            try writer.writeAll(";\n");
+        },
+        .expr => |expr| {
+            try emitDebugComment(writer, options, instruction.source_line, indent);
+            try writeIndent(writer, indent);
+            try emitExpr(writer, module, expr, 0, uniforms, current_functions, current_params, sampler_aliases.items);
+            try writer.writeAll(";\n");
+        },
     }
 }
 
@@ -359,6 +455,7 @@ fn emitExpr(
     uniforms: []const mir.Global,
     current_functions: []const mir.Function,
     current_params: []const mir.Param,
+    sampler_aliases: []const SamplerAlias,
 ) anyerror!void {
     const precedence = exprPrecedence(expr);
     const wrap = precedence < parent_precedence;
@@ -369,6 +466,7 @@ fn emitExpr(
         .float => |value| try writeFloat(writer, value),
         .bool => |value| try writer.writeAll(if (value) "true" else "false"),
         .identifier => |name| {
+            if (resolveSamplerName(uniforms, current_params, sampler_aliases, name) != null) return error.UnsupportedSamplerValue;
             if (isInoutParam(current_params, name)) {
                 try writer.print("(*{s})", .{name});
             } else {
@@ -377,16 +475,16 @@ fn emitExpr(
         },
         .unary => |unary| {
             try writer.print("{s}", .{unaryOp(unary.operator)});
-            try emitExpr(writer, module, unary.operand, precedence, uniforms, current_functions, current_params);
+            try emitExpr(writer, module, unary.operand, precedence, uniforms, current_functions, current_params, sampler_aliases);
         },
         .binary => |binary| {
-            try emitExpr(writer, module, binary.lhs, precedence, uniforms, current_functions, current_params);
+            try emitExpr(writer, module, binary.lhs, precedence, uniforms, current_functions, current_params, sampler_aliases);
             try writer.print(" {s} ", .{binaryOp(binary.operator)});
-            try emitExpr(writer, module, binary.rhs, precedence + 1, uniforms, current_functions, current_params);
+            try emitExpr(writer, module, binary.rhs, precedence + 1, uniforms, current_functions, current_params, sampler_aliases);
         },
         .call => |call| {
             if (std.mem.eql(u8, call.name, "texture")) {
-                try emitTextureCall(writer, module, call, uniforms, current_functions, current_params);
+                try emitTextureCall(writer, module, call, uniforms, current_functions, current_params, sampler_aliases);
                 if (wrap) try writer.writeByte(')');
                 return;
             }
@@ -394,25 +492,31 @@ fn emitExpr(
             try writer.print("{s}(", .{callName(call.name, expr.ty)});
             const callee = findFunction(current_functions, call.name) orelse findFunction(module.global_functions, call.name);
             for (call.args, 0..) |arg, index| {
-                if (index > 0) try writer.writeAll(", ");
                 if (callee) |function| {
+                    if (index < function.params.len and function.params[index].ty.isSampler()) {
+                        if (index > 0) try writer.writeAll(", ");
+                        try emitSamplerArg(writer, module, arg, uniforms, current_functions, current_params, sampler_aliases);
+                        continue;
+                    }
                     if (index < function.params.len and function.params[index].is_inout) {
-                        try emitInoutArg(writer, module, arg, uniforms, current_functions, current_params);
+                        if (index > 0) try writer.writeAll(", ");
+                        try emitInoutArg(writer, module, arg, uniforms, current_functions, current_params, sampler_aliases);
                         continue;
                     }
                 }
-                try emitExpr(writer, module, arg, 0, uniforms, current_functions, current_params);
+                if (index > 0) try writer.writeAll(", ");
+                try emitExpr(writer, module, arg, 0, uniforms, current_functions, current_params, sampler_aliases);
             }
             try writer.writeByte(')');
         },
         .field => |field| {
-            try emitExpr(writer, module, field.target, precedence, uniforms, current_functions, current_params);
+            try emitExpr(writer, module, field.target, precedence, uniforms, current_functions, current_params, sampler_aliases);
             try writer.print(".{s}", .{field.name});
         },
         .index => |index_expr| {
-            try emitExpr(writer, module, index_expr.target, precedence, uniforms, current_functions, current_params);
+            try emitExpr(writer, module, index_expr.target, precedence, uniforms, current_functions, current_params, sampler_aliases);
             try writer.writeByte('[');
-            try emitExpr(writer, module, index_expr.index, 0, uniforms, current_functions, current_params);
+            try emitExpr(writer, module, index_expr.index, 0, uniforms, current_functions, current_params, sampler_aliases);
             try writer.writeByte(']');
         },
     }
@@ -427,18 +531,13 @@ fn emitTextureCall(
     uniforms: []const mir.Global,
     current_functions: []const mir.Function,
     current_params: []const mir.Param,
+    sampler_aliases: []const SamplerAlias,
 ) anyerror!void {
     if (call.args.len != 2) return error.UnsupportedTextureBuiltin;
-    const sampler_name = switch (call.args[0].data) {
-        .identifier => |name| name,
-        else => return error.UnsupportedTextureSource,
-    };
-
-    const uniform = findUniform(uniforms, sampler_name) orelse return error.UnsupportedTextureSource;
-    if (!uniform.ty.isSampler()) return error.UnsupportedTextureBuiltin;
+    const sampler_name = resolveSamplerIdentifier(uniforms, current_params, sampler_aliases, call.args[0]) orelse return error.UnsupportedTextureSource;
 
     try writer.print("textureSample({s}_texture, {s}_sampler, ", .{ sampler_name, sampler_name });
-    try emitExpr(writer, module, call.args[1], 0, uniforms, current_functions, current_params);
+    try emitExpr(writer, module, call.args[1], 0, uniforms, current_functions, current_params, sampler_aliases);
     try writer.writeByte(')');
 }
 
@@ -449,6 +548,7 @@ fn emitInoutArg(
     uniforms: []const mir.Global,
     current_functions: []const mir.Function,
     current_params: []const mir.Param,
+    sampler_aliases: []const SamplerAlias,
 ) anyerror!void {
     if (arg.data == .identifier and isInoutParam(current_params, arg.data.identifier)) {
         try writer.writeAll(arg.data.identifier);
@@ -456,7 +556,23 @@ fn emitInoutArg(
     }
 
     try writer.writeByte('&');
-    try emitExpr(writer, module, arg, 0, uniforms, current_functions, current_params);
+    try emitExpr(writer, module, arg, 0, uniforms, current_functions, current_params, sampler_aliases);
+}
+
+fn emitSamplerArg(
+    writer: anytype,
+    module: *const mir.Module,
+    arg: *const mir.Expr,
+    uniforms: []const mir.Global,
+    current_functions: []const mir.Function,
+    current_params: []const mir.Param,
+    sampler_aliases: []const SamplerAlias,
+) anyerror!void {
+    _ = module;
+    _ = current_functions;
+
+    const sampler_name = resolveSamplerIdentifier(uniforms, current_params, sampler_aliases, arg) orelse return error.UnsupportedTextureSource;
+    try writer.print("{s}_texture, {s}_sampler", .{ sampler_name, sampler_name });
 }
 
 fn findUniform(uniforms: []const mir.Global, name: []const u8) ?mir.Global {
@@ -473,11 +589,57 @@ fn findFunction(functions: []const mir.Function, name: []const u8) ?mir.Function
     return null;
 }
 
+fn findBlock(blocks: []const mir.BasicBlock, label: []const u8) ?*const mir.BasicBlock {
+    for (blocks) |*block| {
+        if (std.mem.eql(u8, block.label, label)) return block;
+    }
+    return null;
+}
+
 fn isInoutParam(params: []const mir.Param, name: []const u8) bool {
     for (params) |param| {
         if (param.is_inout and std.mem.eql(u8, param.name, name)) return true;
     }
     return false;
+}
+
+fn resolveSamplerIdentifier(
+    uniforms: []const mir.Global,
+    current_params: []const mir.Param,
+    sampler_aliases: []const SamplerAlias,
+    expr: *const mir.Expr,
+) ?[]const u8 {
+    return switch (expr.data) {
+        .identifier => |name| resolveSamplerName(uniforms, current_params, sampler_aliases, name),
+        else => null,
+    };
+}
+
+fn resolveSamplerName(
+    uniforms: []const mir.Global,
+    current_params: []const mir.Param,
+    sampler_aliases: []const SamplerAlias,
+    name: []const u8,
+) ?[]const u8 {
+    var alias_index = sampler_aliases.len;
+    while (alias_index > 0) {
+        alias_index -= 1;
+        const alias = sampler_aliases[alias_index];
+        if (std.mem.eql(u8, alias.name, name)) {
+            if (std.mem.eql(u8, alias.target, name)) return alias.target;
+            return resolveSamplerName(uniforms, current_params, sampler_aliases[0..alias_index], alias.target) orelse alias.target;
+        }
+    }
+
+    if (findUniform(uniforms, name)) |uniform| {
+        if (uniform.ty.isSampler()) return uniform.name;
+    }
+
+    for (current_params) |param| {
+        if (param.ty.isSampler() and std.mem.eql(u8, param.name, name)) return param.name;
+    }
+
+    return null;
 }
 
 fn samplerTextureType(ty: types.Type) ?[]const u8 {
@@ -493,13 +655,8 @@ fn samplerTextureType(ty: types.Type) ?[]const u8 {
 }
 
 fn varyingLocation(module: *const mir.Module, name: []const u8) u32 {
-    if (module.vertex) |stage| {
-        for (stage.varyings, 0..) |varying, index| {
-            if (std.mem.eql(u8, varying.name, name)) return @intCast(index);
-        }
-    }
-    if (module.fragment) |stage| {
-        for (stage.varyings, 0..) |varying, index| {
+    for (module.entry_points) |entry_point| {
+        for (entry_point.interface.varyings, 0..) |varying, index| {
             if (std.mem.eql(u8, varying.name, name)) return @intCast(index);
         }
     }

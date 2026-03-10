@@ -96,9 +96,10 @@ pub fn compile(allocator: std.mem.Allocator, source: []const u8, options: Option
                 .optimize_output = options.optimize_output != 0,
                 .source = source,
             }) catch |err| switch (err) {
+                error.UnsupportedSamplerValue => return singleError(allocator, "WGSL backend cannot materialize sampler values outside texture() or sampler arguments", 0, 0),
                 error.UnsupportedSamplerType => return singleError(allocator, "WGSL backend encountered an unsupported sampler type", 0, 0),
                 error.UnsupportedTextureBuiltin => return singleError(allocator, "WGSL backend encountered an unsupported texture() call", 0, 0),
-                error.UnsupportedTextureSource => return singleError(allocator, "WGSL backend only supports texture() on sampler uniforms", 0, 0),
+                error.UnsupportedTextureSource => return singleError(allocator, "WGSL backend requires texture() samplers to resolve to uniforms, parameters, or immutable aliases", 0, 0),
                 else => return err,
             };
         },

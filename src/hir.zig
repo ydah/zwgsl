@@ -8,9 +8,14 @@ pub const Module = struct {
     uniforms: []const Global = &.{},
     structs: []const StructDecl = &.{},
     global_functions: []const Function = &.{},
-    vertex: ?Stage = null,
-    fragment: ?Stage = null,
-    compute: ?Stage = null,
+    entry_points: []const EntryPoint = &.{},
+
+    pub fn entryPoint(self: *const Module, stage: ast.Stage) ?EntryPoint {
+        for (self.entry_points) |entry_point| {
+            if (entry_point.stage == stage) return entry_point;
+        }
+        return null;
+    }
 };
 
 pub const Global = struct {
@@ -35,6 +40,12 @@ pub const StructDecl = struct {
     source_column: ?u32 = null,
 };
 
+pub const StageInterface = struct {
+    inputs: []const Global = &.{},
+    outputs: []const Global = &.{},
+    varyings: []const Global = &.{},
+};
+
 pub const Param = struct {
     name: []const u8,
     ty: types.Type,
@@ -57,15 +68,18 @@ pub const Function = struct {
     }
 };
 
-pub const Stage = struct {
+pub const EntryPoint = struct {
     stage: ast.Stage,
     precision: ?[]const u8 = null,
-    inputs: []const Global = &.{},
-    outputs: []const Global = &.{},
-    varyings: []const Global = &.{},
+    interface: StageInterface = .{},
     functions: []const Function = &.{},
+    main_function_index: usize = 0,
     source_line: ?u32 = null,
     source_column: ?u32 = null,
+
+    pub fn mainFunction(self: EntryPoint) Function {
+        return self.functions[self.main_function_index];
+    }
 };
 
 pub const Statement = struct {

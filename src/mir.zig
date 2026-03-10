@@ -25,9 +25,14 @@ pub const Module = struct {
     bindings: []const Binding = &.{},
     structs: []const StructDecl = &.{},
     global_functions: []const Function = &.{},
-    vertex: ?Stage = null,
-    fragment: ?Stage = null,
-    compute: ?Stage = null,
+    entry_points: []const EntryPoint = &.{},
+
+    pub fn entryPoint(self: *const Module, stage: ast.Stage) ?EntryPoint {
+        for (self.entry_points) |entry_point| {
+            if (entry_point.stage == stage) return entry_point;
+        }
+        return null;
+    }
 };
 
 pub const Global = struct {
@@ -52,6 +57,12 @@ pub const StructDecl = struct {
     source_column: ?u32 = null,
 };
 
+pub const StageInterface = struct {
+    inputs: []const Global = &.{},
+    outputs: []const Global = &.{},
+    varyings: []const Global = &.{},
+};
+
 pub const Param = struct {
     name: []const u8,
     ty: types.Type,
@@ -64,7 +75,8 @@ pub const Function = struct {
     name: []const u8,
     return_type: types.Type,
     params: []const Param,
-    body: []const Statement,
+    entry_block: []const u8,
+    blocks: []const BasicBlock,
     stage: ?ast.Stage = null,
     source_line: ?u32 = null,
     source_column: ?u32 = null,
@@ -74,18 +86,29 @@ pub const Function = struct {
     }
 };
 
-pub const Stage = struct {
+pub const EntryPoint = struct {
     stage: ast.Stage,
     precision: ?[]const u8 = null,
-    inputs: []const Global = &.{},
-    outputs: []const Global = &.{},
-    varyings: []const Global = &.{},
+    interface: StageInterface = .{},
     functions: []const Function = &.{},
+    main_function_index: usize = 0,
+    source_line: ?u32 = null,
+    source_column: ?u32 = null,
+
+    pub fn mainFunction(self: EntryPoint) Function {
+        return self.functions[self.main_function_index];
+    }
+};
+
+pub const BasicBlock = struct {
+    label: []const u8,
+    instructions: []const Instruction,
+    terminator: Terminator = .{ .none = {} },
     source_line: ?u32 = null,
     source_column: ?u32 = null,
 };
 
-pub const Statement = struct {
+pub const Instruction = struct {
     source_line: ?u32 = null,
     source_column: ?u32 = null,
     data: Data,
@@ -94,10 +117,6 @@ pub const Statement = struct {
         var_decl: VarDecl,
         assign: Assign,
         expr: *Expr,
-        if_stmt: IfStmt,
-        switch_stmt: SwitchStmt,
-        return_stmt: ?*Expr,
-        discard: void,
     };
 };
 
@@ -114,23 +133,34 @@ pub const Assign = struct {
     value: *Expr,
 };
 
-pub const IfStmt = struct {
-    condition: *Expr,
-    then_body: []const Statement,
-    else_body: []const Statement,
+pub const Terminator = union(enum) {
+    none: void,
+    jump: []const u8,
+    return_stmt: ?*Expr,
+    discard: void,
+    if_term: IfTerm,
+    switch_term: SwitchTerm,
 };
 
-pub const SwitchCase = struct {
+pub const IfTerm = struct {
+    condition: *Expr,
+    then_block: []const u8,
+    else_block: []const u8,
+    merge_block: []const u8,
+};
+
+pub const SwitchTarget = struct {
     value: i64,
-    body: []const Statement,
+    block: []const u8,
     source_line: ?u32 = null,
     source_column: ?u32 = null,
 };
 
-pub const SwitchStmt = struct {
+pub const SwitchTerm = struct {
     selector: *Expr,
-    cases: []const SwitchCase,
-    default_body: []const Statement,
+    cases: []const SwitchTarget,
+    default_block: []const u8,
+    merge_block: []const u8,
 };
 
 pub const Expr = struct {

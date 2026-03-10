@@ -18,10 +18,28 @@ const Builder = struct {
             .bindings = try self.lowerBindings(module.uniforms),
             .structs = try self.lowerStructs(module.structs),
             .global_functions = try self.lowerFunctions(module.global_functions),
-            .vertex = if (module.vertex) |stage| try self.lowerStage(stage) else null,
-            .fragment = if (module.fragment) |stage| try self.lowerStage(stage) else null,
-            .compute = if (module.compute) |stage| try self.lowerStage(stage) else null,
+            .entry_points = try self.lowerEntryPoints(module.entry_points),
         };
+        return lowered;
+    }
+
+    fn lowerEntryPoints(self: *Builder, entry_points: []const hir.EntryPoint) ![]const mir.EntryPoint {
+        const lowered = try self.allocator.alloc(mir.EntryPoint, entry_points.len);
+        for (entry_points, 0..) |entry_point, index| {
+            lowered[index] = .{
+                .stage = entry_point.stage,
+                .precision = entry_point.precision,
+                .interface = .{
+                    .inputs = try self.lowerGlobals(entry_point.interface.inputs),
+                    .outputs = try self.lowerGlobals(entry_point.interface.outputs),
+                    .varyings = try self.lowerGlobals(entry_point.interface.varyings),
+                },
+                .functions = try self.lowerFunctions(entry_point.functions),
+                .main_function_index = entry_point.main_function_index,
+                .source_line = entry_point.source_line,
+                .source_column = entry_point.source_column,
+            };
+        }
         return lowered;
     }
 
@@ -32,22 +50,22 @@ const Builder = struct {
         var next_binding: u32 = 0;
         for (uniforms) |uniform| {
             if (uniform.ty.isSampler()) {
-            try bindings.append(self.allocator, .{
-                .name = uniform.name,
-                .ty = uniform.ty,
-                .kind = .texture,
-                .binding = next_binding,
-                .source_line = uniform.source_line,
-                .source_column = uniform.source_column,
-            });
-            try bindings.append(self.allocator, .{
-                .name = uniform.name,
-                .ty = uniform.ty,
-                .kind = .sampler,
-                .binding = next_binding + 1,
-                .source_line = uniform.source_line,
-                .source_column = uniform.source_column,
-            });
+                try bindings.append(self.allocator, .{
+                    .name = uniform.name,
+                    .ty = uniform.ty,
+                    .kind = .texture,
+                    .binding = next_binding,
+                    .source_line = uniform.source_line,
+                    .source_column = uniform.source_column,
+                });
+                try bindings.append(self.allocator, .{
+                    .name = uniform.name,
+                    .ty = uniform.ty,
+                    .kind = .sampler,
+                    .binding = next_binding + 1,
+                    .source_line = uniform.source_line,
+                    .source_column = uniform.source_column,
+                });
                 next_binding += 2;
                 continue;
             }
@@ -115,18 +133,45 @@ const Builder = struct {
     }
 
     fn lowerFunction(self: *Builder, function: hir.Function) !mir.Function {
+        var lowerer = FunctionLowerer{
+            .allocator = self.allocator,
+        };
+        return try lowerer.lower(function);
+    }
+};
+
+const FunctionLowerer = struct {
+    allocator: std.mem.Allocator,
+    next_block_id: usize = 0,
+    blocks: std.ArrayListUnmanaged(PendingBlock) = .{},
+
+    fn lower(self: *FunctionLowerer, function: hir.Function) !mir.Function {
+        defer self.deinit();
+
+        const entry_index = try self.newBlock("entry", function.source_line, function.source_column);
+        _ = try self.lowerStatements(entry_index, function.body);
+
+        const finalized_blocks = try self.finalizeBlocks();
         return .{
             .name = function.name,
             .return_type = function.return_type,
             .params = try self.lowerParams(function.params),
-            .body = try self.lowerStatements(function.body),
+            .entry_block = finalized_blocks[entry_index].label,
+            .blocks = finalized_blocks,
             .stage = function.stage,
             .source_line = function.source_line,
             .source_column = function.source_column,
         };
     }
 
-    fn lowerParams(self: *Builder, params: []const hir.Param) ![]const mir.Param {
+    fn deinit(self: *FunctionLowerer) void {
+        for (self.blocks.items) |*block| {
+            block.instructions.deinit(self.allocator);
+        }
+        self.blocks.deinit(self.allocator);
+    }
+
+    fn lowerParams(self: *FunctionLowerer, params: []const hir.Param) ![]const mir.Param {
         const lowered = try self.allocator.alloc(mir.Param, params.len);
         for (params, 0..) |param, index| {
             lowered[index] = .{
@@ -140,82 +185,166 @@ const Builder = struct {
         return lowered;
     }
 
-    fn lowerStage(self: *Builder, stage: hir.Stage) !mir.Stage {
-        return .{
-            .stage = stage.stage,
-            .precision = stage.precision,
-            .inputs = try self.lowerGlobals(stage.inputs),
-            .outputs = try self.lowerGlobals(stage.outputs),
-            .varyings = try self.lowerGlobals(stage.varyings),
-            .functions = try self.lowerFunctions(stage.functions),
-            .source_line = stage.source_line,
-            .source_column = stage.source_column,
-        };
-    }
-
-    fn lowerStatements(self: *Builder, statements: []const hir.Statement) ![]const mir.Statement {
-        const lowered = try self.allocator.alloc(mir.Statement, statements.len);
-        for (statements, 0..) |statement, index| {
-            lowered[index] = try self.lowerStatement(statement);
-        }
-        return lowered;
-    }
-
-    fn lowerStatement(self: *Builder, statement: hir.Statement) anyerror!mir.Statement {
-        return .{
-            .source_line = statement.source_line,
-            .source_column = statement.source_column,
-            .data = switch (statement.data) {
-                .var_decl => |var_decl| .{
-                    .var_decl = .{
-                        .name = var_decl.name,
-                        .ty = var_decl.ty,
-                        .mutable = var_decl.mutable,
-                        .value = if (var_decl.value) |value| try self.lowerExpr(value) else null,
-                    },
-                },
-                .assign => |assign| .{
-                    .assign = .{
-                        .target = try self.lowerExpr(assign.target),
-                        .operator = assign.operator,
-                        .value = try self.lowerExpr(assign.value),
-                    },
-                },
-                .expr => |expr| .{ .expr = try self.lowerExpr(expr) },
-                .if_stmt => |if_stmt| .{
-                    .if_stmt = .{
-                        .condition = try self.lowerExpr(if_stmt.condition),
-                        .then_body = try self.lowerStatements(if_stmt.then_body),
-                        .else_body = try self.lowerStatements(if_stmt.else_body),
-                    },
-                },
-                .switch_stmt => |switch_stmt| .{
-                    .switch_stmt = .{
-                        .selector = try self.lowerExpr(switch_stmt.selector),
-                        .cases = try self.lowerSwitchCases(switch_stmt.cases),
-                        .default_body = try self.lowerStatements(switch_stmt.default_body),
-                    },
-                },
-                .return_stmt => |expr| .{ .return_stmt = if (expr) |value| try self.lowerExpr(value) else null },
-                .discard => .{ .discard = {} },
-            },
-        };
-    }
-
-    fn lowerSwitchCases(self: *Builder, cases: []const hir.SwitchCase) ![]const mir.SwitchCase {
-        const lowered = try self.allocator.alloc(mir.SwitchCase, cases.len);
-        for (cases, 0..) |case_stmt, index| {
-            lowered[index] = .{
-                .value = case_stmt.value,
-                .body = try self.lowerStatements(case_stmt.body),
-                .source_line = case_stmt.source_line,
-                .source_column = case_stmt.source_column,
+    fn finalizeBlocks(self: *FunctionLowerer) ![]const mir.BasicBlock {
+        const finalized = try self.allocator.alloc(mir.BasicBlock, self.blocks.items.len);
+        for (self.blocks.items, 0..) |*block, index| {
+            finalized[index] = .{
+                .label = block.label,
+                .instructions = try block.instructions.toOwnedSlice(self.allocator),
+                .terminator = block.terminator,
+                .source_line = block.source_line,
+                .source_column = block.source_column,
             };
         }
-        return lowered;
+        return finalized;
     }
 
-    fn lowerExpr(self: *Builder, expr: *const hir.Expr) anyerror!*mir.Expr {
+    fn newBlock(self: *FunctionLowerer, prefix: []const u8, source_line: ?u32, source_column: ?u32) !usize {
+        const label = try std.fmt.allocPrint(self.allocator, "{s}_{d}", .{ prefix, self.next_block_id });
+        self.next_block_id += 1;
+        try self.blocks.append(self.allocator, .{
+            .label = label,
+            .source_line = source_line,
+            .source_column = source_column,
+        });
+        return self.blocks.items.len - 1;
+    }
+
+    fn lowerStatements(self: *FunctionLowerer, start_block: usize, statements: []const hir.Statement) anyerror!usize {
+        var current = start_block;
+        for (statements) |statement| {
+            current = switch (statement.data) {
+                .var_decl => blk: {
+                    try self.blocks.items[current].instructions.append(self.allocator, .{
+                        .source_line = statement.source_line,
+                        .source_column = statement.source_column,
+                        .data = .{
+                            .var_decl = .{
+                                .name = statement.data.var_decl.name,
+                                .ty = statement.data.var_decl.ty,
+                                .mutable = statement.data.var_decl.mutable,
+                                .value = if (statement.data.var_decl.value) |value| try self.lowerExpr(value) else null,
+                            },
+                        },
+                    });
+                    break :blk current;
+                },
+                .assign => blk: {
+                    try self.blocks.items[current].instructions.append(self.allocator, .{
+                        .source_line = statement.source_line,
+                        .source_column = statement.source_column,
+                        .data = .{
+                            .assign = .{
+                                .target = try self.lowerExpr(statement.data.assign.target),
+                                .operator = statement.data.assign.operator,
+                                .value = try self.lowerExpr(statement.data.assign.value),
+                            },
+                        },
+                    });
+                    break :blk current;
+                },
+                .expr => blk: {
+                    try self.blocks.items[current].instructions.append(self.allocator, .{
+                        .source_line = statement.source_line,
+                        .source_column = statement.source_column,
+                        .data = .{ .expr = try self.lowerExpr(statement.data.expr) },
+                    });
+                    break :blk current;
+                },
+                .return_stmt => blk: {
+                    self.blocks.items[current].source_line = statement.source_line;
+                    self.blocks.items[current].source_column = statement.source_column;
+                    self.blocks.items[current].terminator = .{
+                        .return_stmt = if (statement.data.return_stmt) |value| try self.lowerExpr(value) else null,
+                    };
+                    break :blk current;
+                },
+                .discard => blk: {
+                    self.blocks.items[current].source_line = statement.source_line;
+                    self.blocks.items[current].source_column = statement.source_column;
+                    self.blocks.items[current].terminator = .{ .discard = {} };
+                    break :blk current;
+                },
+                .if_stmt => try self.lowerIf(current, statement),
+                .switch_stmt => try self.lowerSwitch(current, statement),
+            };
+        }
+        return current;
+    }
+
+    fn lowerIf(self: *FunctionLowerer, current: usize, statement: hir.Statement) anyerror!usize {
+        const then_index = try self.newBlock("if_then", statement.source_line, statement.source_column);
+        const else_index = try self.newBlock("if_else", statement.source_line, statement.source_column);
+        const merge_index = try self.newBlock("if_merge", statement.source_line, statement.source_column);
+        const if_stmt = statement.data.if_stmt;
+
+        self.blocks.items[current].source_line = statement.source_line;
+        self.blocks.items[current].source_column = statement.source_column;
+        self.blocks.items[current].terminator = .{
+            .if_term = .{
+                .condition = try self.lowerExpr(if_stmt.condition),
+                .then_block = self.blocks.items[then_index].label,
+                .else_block = self.blocks.items[else_index].label,
+                .merge_block = self.blocks.items[merge_index].label,
+            },
+        };
+
+        const then_end = try self.lowerStatements(then_index, if_stmt.then_body);
+        self.ensureJumpToMerge(then_end, merge_index);
+
+        const else_end = try self.lowerStatements(else_index, if_stmt.else_body);
+        self.ensureJumpToMerge(else_end, merge_index);
+
+        return merge_index;
+    }
+
+    fn lowerSwitch(self: *FunctionLowerer, current: usize, statement: hir.Statement) anyerror!usize {
+        const switch_stmt = statement.data.switch_stmt;
+        const merge_index = try self.newBlock("switch_merge", statement.source_line, statement.source_column);
+        const default_index = try self.newBlock("switch_default", statement.source_line, statement.source_column);
+
+        var cases = std.ArrayListUnmanaged(mir.SwitchTarget){};
+        defer cases.deinit(self.allocator);
+
+        for (switch_stmt.cases) |case_stmt| {
+            const case_index = try self.newBlock("switch_case", case_stmt.source_line, case_stmt.source_column);
+            try cases.append(self.allocator, .{
+                .value = case_stmt.value,
+                .block = self.blocks.items[case_index].label,
+                .source_line = case_stmt.source_line,
+                .source_column = case_stmt.source_column,
+            });
+
+            const case_end = try self.lowerStatements(case_index, case_stmt.body);
+            self.ensureJumpToMerge(case_end, merge_index);
+        }
+
+        const default_end = try self.lowerStatements(default_index, switch_stmt.default_body);
+        self.ensureJumpToMerge(default_end, merge_index);
+
+        self.blocks.items[current].source_line = statement.source_line;
+        self.blocks.items[current].source_column = statement.source_column;
+        self.blocks.items[current].terminator = .{
+            .switch_term = .{
+                .selector = try self.lowerExpr(switch_stmt.selector),
+                .cases = try cases.toOwnedSlice(self.allocator),
+                .default_block = self.blocks.items[default_index].label,
+                .merge_block = self.blocks.items[merge_index].label,
+            },
+        };
+
+        return merge_index;
+    }
+
+    fn ensureJumpToMerge(self: *FunctionLowerer, block_index: usize, merge_index: usize) void {
+        if (self.blocks.items[block_index].terminator == .none) {
+            self.blocks.items[block_index].terminator = .{
+                .jump = self.blocks.items[merge_index].label,
+            };
+        }
+    }
+
+    fn lowerExpr(self: *FunctionLowerer, expr: *const hir.Expr) anyerror!*mir.Expr {
         const lowered = try self.allocator.create(mir.Expr);
         lowered.* = .{
             .ty = expr.ty,
@@ -262,11 +391,19 @@ const Builder = struct {
         return lowered;
     }
 
-    fn lowerExprSlice(self: *Builder, exprs: []const *hir.Expr) anyerror![]const *mir.Expr {
+    fn lowerExprSlice(self: *FunctionLowerer, exprs: []const *hir.Expr) anyerror![]const *mir.Expr {
         const lowered = try self.allocator.alloc(*mir.Expr, exprs.len);
         for (exprs, 0..) |expr, index| {
             lowered[index] = try self.lowerExpr(expr);
         }
         return lowered;
     }
+};
+
+const PendingBlock = struct {
+    label: []const u8,
+    instructions: std.ArrayListUnmanaged(mir.Instruction) = .{},
+    terminator: mir.Terminator = .{ .none = {} },
+    source_line: ?u32 = null,
+    source_column: ?u32 = null,
 };

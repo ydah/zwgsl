@@ -5,26 +5,59 @@ const ir_builder = @import("ir_builder.zig");
 const sema = @import("sema.zig");
 
 pub fn build(allocator: std.mem.Allocator, typed: *sema.TypedProgram) !*hir.Module {
-    const lowered = try ir_builder.build(allocator, typed);
+    const lowered_ir = try ir_builder.build(allocator, typed);
     var builder = Builder{ .allocator = allocator };
-    return try builder.cloneModule(lowered);
+    return try builder.lowerModule(lowered_ir);
 }
 
 const Builder = struct {
     allocator: std.mem.Allocator,
 
-    fn cloneModule(self: *Builder, module: *const ir.Module) !*hir.Module {
-        const cloned = try self.allocator.create(hir.Module);
-        cloned.* = .{
+    fn lowerModule(self: *Builder, module: *const ir.Module) !*hir.Module {
+        const entry_points = try self.collectEntryPoints(module);
+        const lowered = try self.allocator.create(hir.Module);
+        lowered.* = .{
             .version = module.version,
             .uniforms = try self.cloneGlobals(module.uniforms),
             .structs = try self.cloneStructs(module.structs),
             .global_functions = try self.cloneFunctions(module.global_functions),
-            .vertex = if (module.vertex) |stage| try self.cloneStage(stage) else null,
-            .fragment = if (module.fragment) |stage| try self.cloneStage(stage) else null,
-            .compute = if (module.compute) |stage| try self.cloneStage(stage) else null,
+            .entry_points = entry_points,
         };
-        return cloned;
+        return lowered;
+    }
+
+    fn collectEntryPoints(self: *Builder, module: *const ir.Module) ![]const hir.EntryPoint {
+        var entry_points = std.ArrayListUnmanaged(hir.EntryPoint){};
+        defer entry_points.deinit(self.allocator);
+
+        if (module.vertex) |stage| {
+            try entry_points.append(self.allocator, try self.lowerEntryPoint(stage));
+        }
+        if (module.fragment) |stage| {
+            try entry_points.append(self.allocator, try self.lowerEntryPoint(stage));
+        }
+        if (module.compute) |stage| {
+            try entry_points.append(self.allocator, try self.lowerEntryPoint(stage));
+        }
+
+        return try entry_points.toOwnedSlice(self.allocator);
+    }
+
+    fn lowerEntryPoint(self: *Builder, stage: ir.Stage) !hir.EntryPoint {
+        const functions = try self.cloneFunctions(stage.functions);
+        return .{
+            .stage = stage.stage,
+            .precision = stage.precision,
+            .interface = .{
+                .inputs = try self.cloneGlobals(stage.inputs),
+                .outputs = try self.cloneGlobals(stage.outputs),
+                .varyings = try self.cloneGlobals(stage.varyings),
+            },
+            .functions = functions,
+            .main_function_index = findMainFunctionIndex(functions),
+            .source_line = stage.source_line,
+            .source_column = stage.source_column,
+        };
     }
 
     fn cloneGlobals(self: *Builder, globals: []const ir.Global) ![]const hir.Global {
@@ -99,19 +132,6 @@ const Builder = struct {
             };
         }
         return cloned;
-    }
-
-    fn cloneStage(self: *Builder, stage: ir.Stage) !hir.Stage {
-        return .{
-            .stage = stage.stage,
-            .precision = stage.precision,
-            .inputs = try self.cloneGlobals(stage.inputs),
-            .outputs = try self.cloneGlobals(stage.outputs),
-            .varyings = try self.cloneGlobals(stage.varyings),
-            .functions = try self.cloneFunctions(stage.functions),
-            .source_line = stage.source_line,
-            .source_column = stage.source_column,
-        };
     }
 
     fn cloneStatements(self: *Builder, statements: []const ir.Statement) ![]const hir.Statement {
@@ -231,3 +251,10 @@ const Builder = struct {
         return cloned;
     }
 };
+
+fn findMainFunctionIndex(functions: []const hir.Function) usize {
+    for (functions, 0..) |function, index| {
+        if (function.isMain()) return index;
+    }
+    return 0;
+}

@@ -104,6 +104,62 @@ test "compiler lowers sampler uniforms and texture sampling for WGSL" {
     );
 }
 
+test "compiler lowers sampler parameters for WGSL" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const source =
+        \\uniform :scene_tex, Sampler2D
+        \\
+        \\def sample(scene: Sampler2D, uv: Vec2) -> Vec4
+        \\  texture(scene, uv)
+        \\end
+        \\
+        \\compute do
+        \\  def main
+        \\    uv: Vec2 = vec2(0.5, 0.25)
+        \\    color: Vec4 = sample(scene_tex, uv)
+        \\  end
+        \\end
+    ;
+
+    const output = try zwgsl.compiler.compile(arena.allocator(), source, .{
+        .target = .wgsl,
+    });
+
+    try std.testing.expectEqual(@as(usize, 0), output.errors.len);
+    try std.testing.expect(output.compute_source != null);
+    try std.testing.expect(std.mem.indexOf(u8, output.compute_source.?, "fn sample(scene_texture: texture_2d<f32>, scene_sampler: sampler, uv: vec2f) -> vec4f") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output.compute_source.?, "return textureSample(scene_texture, scene_sampler, uv);") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output.compute_source.?, "sample(scene_tex_texture, scene_tex_sampler, uv)") != null);
+}
+
+test "compiler lowers immutable sampler aliases for WGSL" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const source =
+        \\uniform :scene_tex, Sampler2D
+        \\
+        \\compute do
+        \\  def main
+        \\    uv: Vec2 = vec2(0.5, 0.25)
+        \\    let sampler = scene_tex
+        \\    color: Vec4 = texture(sampler, uv)
+        \\  end
+        \\end
+    ;
+
+    const output = try zwgsl.compiler.compile(arena.allocator(), source, .{
+        .target = .wgsl,
+    });
+
+    try std.testing.expectEqual(@as(usize, 0), output.errors.len);
+    try std.testing.expect(output.compute_source != null);
+    try std.testing.expect(std.mem.indexOf(u8, output.compute_source.?, "textureSample(scene_tex_texture, scene_tex_sampler, uv)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output.compute_source.?, "let sampler") == null);
+}
+
 test "compiler emits WGSL for the phong fixture" {
     try expectWgslFixture(
         "tests/fixtures/phong.zw",

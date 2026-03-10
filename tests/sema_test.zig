@@ -601,8 +601,53 @@ test "lowering preserves line and column metadata" {
     const mir_function = mir_module.global_functions[0];
     try std.testing.expectEqual(@as(?u32, 1), mir_function.source_line);
     try std.testing.expectEqual(@as(?u32, 1), mir_function.source_column);
-    try std.testing.expectEqual(@as(?u32, 2), mir_function.body[0].source_line);
-    try std.testing.expectEqual(@as(?u32, 5), mir_function.body[0].source_column);
-    try std.testing.expectEqual(@as(?u32, 2), mir_function.body[0].data.return_stmt.?.source_line);
-    try std.testing.expectEqual(@as(?u32, 5), mir_function.body[0].data.return_stmt.?.source_column);
+    try std.testing.expectEqual(@as(usize, 1), mir_function.blocks.len);
+    try std.testing.expect(std.mem.eql(u8, mir_function.entry_block, mir_function.blocks[0].label));
+    try std.testing.expectEqual(@as(?u32, 2), mir_function.blocks[0].source_line);
+    try std.testing.expectEqual(@as(?u32, 5), mir_function.blocks[0].source_column);
+    try std.testing.expectEqual(@as(?u32, 2), mir_function.blocks[0].terminator.return_stmt.?.source_line);
+    try std.testing.expectEqual(@as(?u32, 5), mir_function.blocks[0].terminator.return_stmt.?.source_column);
+}
+
+test "HIR and MIR preserve entry points and CFG structure" {
+    var analyzed = try analyzeSource(
+        \\def twice(x: Float) -> Float
+        \\  x * 2.0
+        \\end
+        \\
+        \\compute do
+        \\  def main
+        \\    value: Float = twice(1.0)
+        \\    if value > 1.0
+        \\      value = value + 1.0
+        \\    end
+        \\  end
+        \\end
+    );
+    defer analyzed.arena.deinit();
+
+    try std.testing.expectEqual(@as(usize, 0), analyzed.diagnostics.items.items.len);
+
+    const allocator = analyzed.arena.allocator();
+    const hir_module = try zwgsl.hir_builder.build(allocator, analyzed.typed);
+    const mir_module = try zwgsl.mir_builder.build(allocator, hir_module);
+
+    try std.testing.expectEqual(@as(usize, 1), hir_module.entry_points.len);
+    try std.testing.expectEqual(zwgsl.ast.Stage.compute, hir_module.entry_points[0].stage);
+    try std.testing.expectEqual(@as(usize, 1), hir_module.entry_points[0].functions.len);
+
+    try std.testing.expectEqual(@as(usize, 1), mir_module.entry_points.len);
+    const compute_entry = mir_module.entryPoint(.compute).?;
+    const main_function = compute_entry.mainFunction();
+    try std.testing.expect(main_function.blocks.len >= 4);
+    try std.testing.expect(std.mem.eql(u8, main_function.entry_block, main_function.blocks[0].label));
+
+    var saw_if_term = false;
+    for (main_function.blocks) |block| {
+        if (block.terminator == .if_term) {
+            saw_if_term = true;
+            break;
+        }
+    }
+    try std.testing.expect(saw_if_term);
 }
