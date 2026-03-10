@@ -35,7 +35,7 @@ const runCompile = async () => {
   const result = await compiler.compile(editor.getValue());
   output.textContent = result.wgsl;
   status.textContent = result.diagnostics.length === 0 ? "ok" : `${result.diagnostics.length} issue(s)`;
-  await preview.render(result.wgsl);
+  await preview.render(result);
 };
 
 editor.onDidChangeModelContent(() => {

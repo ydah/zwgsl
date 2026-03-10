@@ -2,8 +2,8 @@
 
 A Ruby-inspired shading language that compiles to WGSL and GLSL ES 3.00.
 Built with Zig, with an indentation-aware lexer, HM-flavored local inference,
-ADT syntax, `match`, dependent dimension type matching, a minimal LSP server,
-and a browser playground scaffold.
+ADT syntax, `match`, dependent dimension type matching, a source-aware LSP server,
+and a browser playground backed by the real wasm compiler build.
 
 ## Why zwgsl?
 
@@ -29,7 +29,7 @@ Shader languages are powerful, but they are rarely pleasant to read or write.
 - WGSL emission path staged through `HIR -> MIR` wrapper modules
 - GLSL ES 3.00 and WGSL backends
 - Standalone LSP server target: `zwgsl-lsp`
-- Vite + Monaco playground scaffold under [`playground/`](./playground)
+- Vite + Monaco playground with a real wasm compiler bridge under [`playground/`](./playground)
 
 ## Example
 
@@ -67,7 +67,7 @@ Run the test suite:
 zig build test
 ```
 
-Build the freestanding wasm-targeted library artifact:
+Build the browser-loadable wasm artifact:
 
 ```sh
 zig build wasm
@@ -106,15 +106,15 @@ The current implementation supports:
 - `initialize`
 - `shutdown`
 - full-sync `didOpen` / `didChange` / `didClose`
-- basic `hover`
-- basic `completion`
-- basic `definition`
+- source-aware `hover`
+- source-aware `completion`
+- source-aware `definition`
 - basic `semanticTokens/full`
 - publish-diagnostics notifications based on compiler errors
 
 ## Playground
 
-The playground scaffold lives under [`playground/`](./playground).
+The playground lives under [`playground/`](./playground).
 
 ```sh
 cd playground
@@ -125,10 +125,10 @@ npm run dev
 It currently provides:
 
 - Monaco editor bootstrapping
-- WGSL output panel
+- live WGSL output from the wasm compiler
 - WebGPU preview canvas
-- worker-based diagnostics hook
-- wasm loader placeholder at `playground/public/zwgsl.wasm`
+- worker-based diagnostics, hover, and completion
+- `npm run sync-wasm` to refresh `playground/public/zwgsl.wasm`
 
 ## Status
 
@@ -142,8 +142,8 @@ It currently provides:
 | Generic struct parsing | Implemented |
 | Trait / impl basis | Minimal parser + constraint registry |
 | WGSL HIR / MIR staging | Thin wrapper layers in place |
-| LSP server | Minimal implementation |
-| Playground | Scaffold in place |
+| LSP server | Source-aware diagnostics / hover / completion / goto-definition |
+| Playground | Monaco + worker diagnostics + wasm compiler bridge |
 
 ## Repository Layout
 

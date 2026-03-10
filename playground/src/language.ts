@@ -33,4 +33,27 @@ export const registerLanguage = (instance: typeof monaco) => {
       ],
     },
   });
+  instance.languages.setLanguageConfiguration("zwgsl", {
+    comments: {
+      lineComment: "#",
+    },
+    brackets: [
+      ["(", ")"],
+      ["[", "]"],
+    ],
+    autoClosingPairs: [
+      { open: "(", close: ")" },
+      { open: "[", close: "]" },
+      { open: "\"", close: "\"" },
+    ],
+    surroundingPairs: [
+      { open: "(", close: ")" },
+      { open: "[", close: "]" },
+      { open: "\"", close: "\"" },
+    ],
+    indentationRules: {
+      increaseIndentPattern: /^\s*(def|do|if|unless|match|when|else|elsif|where|struct|type|trait|impl|vertex|fragment|compute)\b.*$/,
+      decreaseIndentPattern: /^\s*end\b.*$/,
+    },
+  });
 };

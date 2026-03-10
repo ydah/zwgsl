@@ -4,8 +4,9 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build"
+    "sync-wasm": "cd .. && zig build wasm && cp zig-out/bin/zwgsl.wasm playground/public/zwgsl.wasm",
+    "dev": "npm run sync-wasm && vite",
+    "build": "npm run sync-wasm && vite build"
   },
   "dependencies": {
     "monaco-editor": "^0.54.0"

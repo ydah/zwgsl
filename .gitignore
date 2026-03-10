@@ -12,3 +12,4 @@ docgen_tmp/
 *.swo
 *.DS_Store
 *.vscode/
+playground/public/zwgsl.wasm

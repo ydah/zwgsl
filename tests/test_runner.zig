@@ -12,5 +12,6 @@ comptime {
     _ = @import("lsp_test.zig");
     _ = @import("parser_test.zig");
     _ = @import("sema_test.zig");
+    _ = @import("wasm_bridge_test.zig");
     _ = @import("wgsl_emitter_test.zig");
 }
