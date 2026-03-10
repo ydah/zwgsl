@@ -1,0 +1,18 @@
+uniform :mvp, Mat4
+uniform :tint, Vec4
+
+vertex do
+  input :position, Vec3, location: 0
+
+  def main
+    gl_Position = mvp * vec4(position, 1.0)
+  end
+end
+
+fragment do
+  output :frag_color, Vec4, location: 0
+
+  def main
+    frag_color = tint
+  end
+end

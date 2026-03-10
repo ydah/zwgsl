@@ -43,6 +43,33 @@ test "compiler emits WGSL for a basic vertex and fragment shader" {
     );
 }
 
+test "compiler emits WGSL for a basic vertex shader fixture" {
+    try expectWgslFixture(
+        "tests/fixtures/basic_vertex.zw",
+        "tests/fixtures/basic_vertex.wgsl",
+        null,
+        null,
+    );
+}
+
+test "compiler emits WGSL for a basic fragment shader fixture" {
+    try expectWgslFixture(
+        "tests/fixtures/basic_fragment.zw",
+        null,
+        "tests/fixtures/basic_fragment.wgsl",
+        null,
+    );
+}
+
+test "compiler emits WGSL for a shared uniform fixture" {
+    try expectWgslFixture(
+        "tests/fixtures/uniforms.zw",
+        "tests/fixtures/uniforms.vertex.wgsl",
+        "tests/fixtures/uniforms.fragment.wgsl",
+        null,
+    );
+}
+
 test "compiler emits WGSL compute output" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -74,6 +101,33 @@ test "compiler lowers sampler uniforms and texture sampling for WGSL" {
         "tests/fixtures/postprocess.vertex.wgsl",
         "tests/fixtures/postprocess.fragment.wgsl",
         null,
+    );
+}
+
+test "compiler emits WGSL for the phong fixture" {
+    try expectWgslFixture(
+        "tests/fixtures/phong.zw",
+        "tests/fixtures/phong.vertex.wgsl",
+        "tests/fixtures/phong.fragment.wgsl",
+        null,
+    );
+}
+
+test "compiler emits WGSL for dependent dimension fixtures" {
+    try expectWgslFixture(
+        "tests/fixtures/dependent_dim.zw",
+        null,
+        null,
+        "tests/fixtures/dependent_dim.compute.wgsl",
+    );
+}
+
+test "compiler emits WGSL for ADT match fixtures" {
+    try expectWgslFixture(
+        "tests/fixtures/match_shape.zw",
+        null,
+        null,
+        "tests/fixtures/match_shape.compute.wgsl",
     );
 }
 

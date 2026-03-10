@@ -1,0 +1,22 @@
+type Shape
+  Circle(radius: Float)
+  Rect(width: Float, height: Float)
+  Point
+end
+
+def area(shape: Shape) -> Float
+  match shape
+  when Circle(radius)
+    3.14159 * radius * radius
+  when Rect(width, height)
+    width * height
+  when Point
+    0.0
+  end
+end
+
+compute do
+  def main
+    value: Float = area(Circle(2.0))
+  end
+end

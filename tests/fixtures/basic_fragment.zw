@@ -1,0 +1,7 @@
+fragment do
+  output :frag_color, Vec4, location: 0
+
+  def main
+    frag_color = vec4(0.2, 0.4, 0.8, 1.0)
+  end
+end

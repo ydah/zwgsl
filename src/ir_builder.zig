@@ -20,6 +20,7 @@ const Builder = struct {
     typed: *sema.TypedProgram,
     lowered_globals: std.ArrayListUnmanaged(ir.Function) = .{},
     lowered_specializations: std.StringHashMap(void),
+    match_helper_index: usize = 0,
 
     fn run(self: *Builder) anyerror!*ir.Module {
         const module = try self.allocator.create(ir.Module);
@@ -30,6 +31,7 @@ const Builder = struct {
         module.version = self.findVersion();
         module.uniforms = try self.collectUniforms();
         module.structs = try self.collectStructs();
+        try self.lowerAdtConstructors();
         try self.lowerGlobalFunctions();
         try self.lowerImplMethods();
         if (self.typed.vertex_block) |block| {
@@ -90,7 +92,105 @@ const Builder = struct {
             }
         }
 
+        for (self.typed.program.items) |item| {
+            if (item != .type_def) continue;
+            const type_info = self.typed.typeDef(item.type_def.name) orelse continue;
+            if (type_info.params.len > 0) continue;
+
+            var fields = std.ArrayListUnmanaged(ir.StructField){};
+            defer fields.deinit(self.allocator);
+
+            try fields.append(self.allocator, .{
+                .name = "tag",
+                .ty = types.builtinType(.int),
+            });
+            for (type_info.variants) |variant| {
+                for (variant.field_names, variant.field_types, 0..) |field_name, field_type, index| {
+                    try fields.append(self.allocator, .{
+                        .name = try self.adtFieldName(variant.name, field_name, index),
+                        .ty = field_type,
+                    });
+                }
+            }
+
+            try items.append(self.allocator, .{
+                .name = type_info.name,
+                .fields = try fields.toOwnedSlice(self.allocator),
+            });
+        }
+
         return try items.toOwnedSlice(self.allocator);
+    }
+
+    fn lowerAdtConstructors(self: *Builder) anyerror!void {
+        for (self.typed.program.items) |item| {
+            if (item != .type_def) continue;
+            for (item.type_def.variants) |variant| {
+                const info = self.typed.constructor(variant.name) orelse continue;
+                if (containsTypeVar(info.return_type)) continue;
+
+                var params = std.ArrayListUnmanaged(ir.Param){};
+                defer params.deinit(self.allocator);
+                var body = std.ArrayListUnmanaged(ir.Statement){};
+                defer body.deinit(self.allocator);
+
+                const result_name = "__result";
+                try body.append(self.allocator, self.makeStatement(0, .{
+                    .var_decl = .{
+                        .name = result_name,
+                        .ty = info.return_type,
+                        .mutable = true,
+                        .value = null,
+                    },
+                }));
+                try body.append(self.allocator, self.makeStatement(0, .{
+                    .assign = .{
+                        .target = try self.makeExpr(types.builtinType(.int), .{
+                            .field = .{
+                                .target = try self.makeExpr(info.return_type, .{ .identifier = result_name }),
+                                .name = "tag",
+                            },
+                        }),
+                        .operator = .assign,
+                        .value = try self.makeExpr(types.builtinType(.int), .{ .integer = @as(i64, @intCast(info.tag)) }),
+                    },
+                }));
+
+                for (info.field_names, info.field_types, 0..) |field_name, field_type, index| {
+                    const param_name = try std.fmt.allocPrint(self.allocator, "arg_{d}", .{index});
+                    try params.append(self.allocator, .{
+                        .name = param_name,
+                        .ty = field_type,
+                        .is_inout = false,
+                    });
+                    try body.append(self.allocator, self.makeStatement(0, .{
+                        .assign = .{
+                            .target = try self.makeExpr(field_type, .{
+                                .field = .{
+                                    .target = try self.makeExpr(info.return_type, .{ .identifier = result_name }),
+                                    .name = try self.adtFieldName(info.name, field_name, index),
+                                },
+                            }),
+                            .operator = .assign,
+                            .value = try self.makeExpr(field_type, .{ .identifier = param_name }),
+                        },
+                    }));
+                }
+
+                try body.append(self.allocator, self.makeStatement(0, .{
+                    .return_stmt = try self.makeExpr(info.return_type, .{ .identifier = result_name }),
+                }));
+
+                try self.lowered_globals.append(self.allocator, .{
+                    .name = info.name,
+                    .return_type = info.return_type,
+                    .params = try params.toOwnedSlice(self.allocator),
+                    .body = try body.toOwnedSlice(self.allocator),
+                    .stage = null,
+                    .source_line = 0,
+                });
+            }
+        }
     }
 
     fn lowerStage(self: *Builder, block: *ast.ShaderBlock, functions: []const *ast.FunctionDef) anyerror!ir.Stage {
@@ -593,7 +693,256 @@ const Builder = struct {
                     .index = try self.lowerExpr(index_expr.index, context),
                 },
             }),
+            .match_expr => |match_expr| try self.lowerMatchExpr(expr, match_expr, context),
             else => return error.UnsupportedExpression,
+        };
+    }
+
+    fn lowerMatchExpr(
+        self: *Builder,
+        expr: *ast.Expr,
+        match_expr: ast.Expr.MatchExpr,
+        context: *FunctionContext,
+    ) anyerror!*ir.Expr {
+        const helper_name = try std.fmt.allocPrint(self.allocator, "__match_{d}", .{self.match_helper_index});
+        self.match_helper_index += 1;
+
+        const value_type = try self.resolvedExprType(match_expr.value, context);
+        const result_type = try self.resolvedExprType(expr, context);
+
+        var helper_context = FunctionContext.init(self.allocator);
+        helper_context.stage = null;
+        helper_context.stage_functions = self.typed.global_functions;
+        defer helper_context.deinit();
+        try helper_context.locals.put("__match_value", value_type);
+        try self.registerUniforms(&helper_context);
+
+        var body = std.ArrayListUnmanaged(ir.Statement){};
+        defer body.deinit(self.allocator);
+
+        const helper_if = try self.lowerMatchArms(match_expr.arms, 0, value_type, result_type, &helper_context);
+        try body.append(self.allocator, helper_if);
+        if (!result_type.isVoid()) {
+            try body.append(self.allocator, self.makeStatement(expr.position.line, .{
+                .return_stmt = try self.defaultValueExpr(result_type),
+            }));
+        }
+
+        try self.lowered_globals.append(self.allocator, .{
+            .name = helper_name,
+            .return_type = result_type,
+            .params = try self.allocator.dupe(ir.Param, &.{
+                .{
+                    .name = "__match_value",
+                    .ty = value_type,
+                    .is_inout = false,
+                },
+            }),
+            .body = try body.toOwnedSlice(self.allocator),
+            .stage = null,
+            .source_line = expr.position.line,
+        });
+
+        const args = try self.allocator.alloc(*ir.Expr, 1);
+        args[0] = try self.lowerExpr(match_expr.value, context);
+        return try self.makeExpr(result_type, .{
+            .call = .{
+                .name = helper_name,
+                .args = args,
+            },
+        });
+    }
+
+    fn lowerMatchArms(
+        self: *Builder,
+        arms: []const ast.MatchArm,
+        index: usize,
+        value_type: types.Type,
+        result_type: types.Type,
+        context: *FunctionContext,
+    ) anyerror!ir.Statement {
+        var arm_context = try context.clone(self.allocator);
+        defer arm_context.deinit();
+
+        const match_value = try self.makeExpr(value_type, .{ .identifier = "__match_value" });
+        var condition = try self.patternCondition(arms[index].pattern, match_value, value_type, &arm_context);
+        if (arms[index].guard) |guard| {
+            const guard_expr = try self.lowerExpr(guard, &arm_context);
+            condition = try self.makeExpr(types.builtinType(.bool), .{
+                .binary = .{
+                    .operator = .and_and,
+                    .lhs = condition,
+                    .rhs = guard_expr,
+                },
+            });
+        }
+
+        var then_body = std.ArrayListUnmanaged(ir.Statement){};
+        defer then_body.deinit(self.allocator);
+        const lowered_body = try self.lowerStatementList(arms[index].body, &arm_context);
+        for (lowered_body) |statement| {
+            try then_body.append(self.allocator, statement);
+        }
+        try self.finalizeImplicitReturn(&then_body, result_type, arms[index].body[arms[index].body.len - 1].position.line);
+
+        const else_body = if (index + 1 < arms.len) blk: {
+            const nested = try self.lowerMatchArms(arms, index + 1, value_type, result_type, context);
+            const items = try self.allocator.alloc(ir.Statement, 1);
+            items[0] = nested;
+            break :blk items;
+        } else if (result_type.isVoid()) &.{} else blk: {
+            const items = try self.allocator.alloc(ir.Statement, 1);
+            items[0] = self.makeStatement(null, .{
+                .return_stmt = try self.defaultValueExpr(result_type),
+            });
+            break :blk items;
+        };
+
+        return self.makeStatement(null, .{
+            .if_stmt = .{
+                .condition = condition,
+                .then_body = try then_body.toOwnedSlice(self.allocator),
+                .else_body = else_body,
+            },
+        });
+    }
+
+    fn finalizeImplicitReturn(
+        self: *Builder,
+        body: *std.ArrayListUnmanaged(ir.Statement),
+        result_type: types.Type,
+        source_line: u32,
+    ) anyerror!void {
+        if (result_type.isVoid() or body.items.len == 0) return;
+        if (body.items[body.items.len - 1].data != .expr) return;
+
+        body.items[body.items.len - 1] = self.makeStatement(source_line, .{
+            .return_stmt = body.items[body.items.len - 1].data.expr,
+        });
+    }
+
+    fn patternCondition(
+        self: *Builder,
+        pattern: ast.Pattern,
+        target: *ir.Expr,
+        target_type: types.Type,
+        context: *FunctionContext,
+    ) anyerror!*ir.Expr {
+        return switch (pattern) {
+            .wildcard => try self.makeExpr(types.builtinType(.bool), .{ .bool = true }),
+            .binding => |name| blk: {
+                try context.loop_bindings.put(name, .{ .expr = target });
+                break :blk try self.makeExpr(types.builtinType(.bool), .{ .bool = true });
+            },
+            .integer => |value| try self.makeExpr(types.builtinType(.bool), .{
+                .binary = .{
+                    .operator = .eq,
+                    .lhs = target,
+                    .rhs = try self.makeExpr(types.builtinType(.int), .{ .integer = value }),
+                },
+            }),
+            .float => |value| try self.makeExpr(types.builtinType(.bool), .{
+                .binary = .{
+                    .operator = .eq,
+                    .lhs = target,
+                    .rhs = try self.makeExpr(types.builtinType(.float), .{ .float = value }),
+                },
+            }),
+            .bool => |value| try self.makeExpr(types.builtinType(.bool), .{
+                .binary = .{
+                    .operator = .eq,
+                    .lhs = target,
+                    .rhs = try self.makeExpr(types.builtinType(.bool), .{ .bool = value }),
+                },
+            }),
+            .symbol => return error.UnsupportedPatternSymbol,
+            .constructor => |constructor| blk: {
+                const info = self.typed.constructor(constructor.name) orelse return error.UnknownConstructor;
+
+                var substitution = unify.Substitution.init(self.allocator);
+                defer substitution.deinit();
+                try unify.unify(&substitution, info.return_type, target_type);
+
+                var condition = try self.makeExpr(types.builtinType(.bool), .{
+                    .binary = .{
+                        .operator = .eq,
+                        .lhs = try self.makeExpr(types.builtinType(.int), .{
+                            .field = .{
+                                .target = target,
+                                .name = "tag",
+                            },
+                        }),
+                        .rhs = try self.makeExpr(types.builtinType(.int), .{ .integer = @as(i64, @intCast(info.tag)) }),
+                    },
+                });
+
+                for (constructor.args, info.field_names, info.field_types, 0..) |arg_pattern, field_name, field_type, field_index| {
+                    const resolved_field_type = try substitution.apply(field_type);
+                    const field_expr = try self.makeExpr(resolved_field_type, .{
+                        .field = .{
+                            .target = target,
+                            .name = try self.adtFieldName(constructor.name, field_name, field_index),
+                        },
+                    });
+                    const nested_condition = try self.patternCondition(arg_pattern, field_expr, resolved_field_type, context);
+                    condition = try self.makeExpr(types.builtinType(.bool), .{
+                        .binary = .{
+                            .operator = .and_and,
+                            .lhs = condition,
+                            .rhs = nested_condition,
+                        },
+                    });
+                }
+
+                break :blk condition;
+            },
+        };
+    }
+
+    fn defaultValueExpr(self: *Builder, ty: types.Type) anyerror!*ir.Expr {
+        return switch (ty) {
+            .builtin => |builtin| switch (builtin) {
+                .float => try self.makeExpr(ty, .{ .float = 0.0 }),
+                .int => try self.makeExpr(ty, .{ .integer = 0 }),
+                .uint => try self.makeExpr(ty, .{ .integer = 0 }),
+                .bool => try self.makeExpr(ty, .{ .bool = false }),
+                .vec2,
+                .vec3,
+                .vec4,
+                .ivec2,
+                .ivec3,
+                .ivec4,
+                .uvec2,
+                .uvec3,
+                .uvec4,
+                .mat2,
+                .mat3,
+                .mat4,
+                => blk: {
+                    const name = constructorNameForType(ty) orelse return error.UnsupportedDefaultValue;
+                    const args = try self.allocator.alloc(*ir.Expr, 1);
+                    args[0] = try self.defaultValueExpr(ty.componentType() orelse types.builtinType(.float));
+                    break :blk try self.makeExpr(ty, .{
+                        .call = .{
+                            .name = name,
+                            .args = args,
+                        },
+                    });
+                },
+                else => return error.UnsupportedDefaultValue,
+            },
+            .type_app => blk: {
+                const name = constructorNameForType(ty) orelse return error.UnsupportedDefaultValue;
+                const args = try self.allocator.alloc(*ir.Expr, 1);
+                args[0] = try self.defaultValueExpr(ty.componentType() orelse types.builtinType(.float));
+                break :blk try self.makeExpr(ty, .{
+                    .call = .{
+                        .name = name,
+                        .args = args,
+                    },
+                });
+            },
+            else => return error.UnsupportedDefaultValue,
         };
     }
 
@@ -761,6 +1110,13 @@ const Builder = struct {
             .ty = types.fromName(decl.type_name) orelse .{ .struct_type = decl.type_name },
             .location = decl.location,
         };
+    }
+
+    fn adtFieldName(self: *Builder, variant_name: []const u8, field_name: []const u8, index: usize) anyerror![]const u8 {
+        if (field_name.len > 0) {
+            return try std.fmt.allocPrint(self.allocator, "__{s}_{s}", .{ variant_name, field_name });
+        }
+        return try std.fmt.allocPrint(self.allocator, "__{s}_{d}", .{ variant_name, index });
     }
 
     fn findPrecision(self: *Builder, stage: ast.Stage) ?[]const u8 {
@@ -933,4 +1289,49 @@ fn appendTypeMangle(writer: anytype, ty: types.Type) !void {
             try appendTypeMangle(writer, function.return_type.*);
         },
     }
+}
+
+fn constructorNameForType(ty: types.Type) ?[]const u8 {
+    return switch (ty) {
+        .builtin => |builtin| switch (builtin) {
+            .float => "float",
+            .int => "int",
+            .uint => "uint",
+            .bool => "bool",
+            .vec2 => "vec2",
+            .vec3 => "vec3",
+            .vec4 => "vec4",
+            .ivec2 => "ivec2",
+            .ivec3 => "ivec3",
+            .ivec4 => "ivec4",
+            .uvec2 => "uvec2",
+            .uvec3 => "uvec3",
+            .uvec4 => "uvec4",
+            .mat2 => "mat2",
+            .mat3 => "mat3",
+            .mat4 => "mat4",
+            else => null,
+        },
+        .type_app => |app_ty| if (std.mem.eql(u8, app_ty.name, "Vec")) switch (app_ty.args[0]) {
+            .nat => |len| switch (len) {
+                2 => "vec2",
+                3 => "vec3",
+                4 => "vec4",
+                else => null,
+            },
+            else => null,
+        } else if (std.mem.eql(u8, app_ty.name, "Mat") and app_ty.args.len == 2) switch (app_ty.args[0]) {
+            .nat => |rows| switch (app_ty.args[1]) {
+                .nat => |cols| if (rows == cols) switch (rows) {
+                    2 => "mat2",
+                    3 => "mat3",
+                    4 => "mat4",
+                    else => null,
+                } else null,
+                else => null,
+            },
+            else => null,
+        } else null,
+        else => null,
+    };
 }

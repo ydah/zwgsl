@@ -1,0 +1,7 @@
+vertex do
+  input :position, Vec3, location: 0
+
+  def main
+    gl_Position = vec4(position, 1.0)
+  end
+end

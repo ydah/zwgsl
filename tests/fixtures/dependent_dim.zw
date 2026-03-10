@@ -1,0 +1,7 @@
+compute do
+  def main
+    transform: Mat(4, 4) = mat4(1.0)
+    value: Vec(4) = vec4(1.0)
+    energy: Float = dot(value, value)
+  end
+end
