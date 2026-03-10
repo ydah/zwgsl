@@ -385,17 +385,19 @@ const Analyzer = struct {
     fn registerFunction(self: *Analyzer, function: *ast.FunctionDef, stage: ?ast.Stage) anyerror!void {
         var params = std.ArrayListUnmanaged(ParamInfo){};
         defer params.deinit(self.allocator);
+        var generic_params = std.ArrayListUnmanaged([]const u8){};
+        defer generic_params.deinit(self.allocator);
 
         for (function.params) |param| {
             try params.append(self.allocator, .{
                 .name = param.name,
-                .ty = try self.resolveTypeName(param.type_name, param.position),
+                .ty = try self.resolveTypeNameCollectingParams(param.type_name, param.position, &generic_params),
                 .is_inout = param.is_inout,
             });
         }
 
         const return_type = if (function.return_type) |name|
-            try self.resolveTypeName(name, function.position)
+            try self.resolveTypeNameCollectingParams(name, function.position, &generic_params)
         else if (sameName(function.name, "main"))
             types.builtinType(.void)
         else
@@ -610,14 +612,14 @@ const Analyzer = struct {
         var saw_value_return = false;
         for (context.return_types.items) |return_type| {
             saw_value_return = true;
-            if (!types.isAssignable(signature.return_type, return_type)) {
+            if (!self.typesCompatible(signature.return_type, return_type)) {
                 try self.report(function.position, "return type mismatch in '{s}'", .{function.name});
             }
         }
 
         if (!saw_value_return) {
             if (last_expr_type) |expr_type| {
-                if (!types.isAssignable(signature.return_type, expr_type)) {
+                if (!self.typesCompatible(signature.return_type, expr_type)) {
                     try self.report(function.position, "implicit return type mismatch in '{s}'", .{function.name});
                 }
             } else {
@@ -643,7 +645,7 @@ const Analyzer = struct {
             .typed_assignment => |typed_assignment| {
                 const target_type = try self.resolveTypeName(typed_assignment.type_name, stmt.position);
                 const value_type = try self.analyzeExpr(scope, typed_assignment.value, context);
-                if (!types.isAssignable(target_type, value_type)) {
+                if (!self.typesCompatible(target_type, value_type)) {
                     try self.report(stmt.position, "cannot assign value of type {s} to {s}", .{ value_type.glslName(), target_type.glslName() });
                 }
                 if (!try scope.put(typed_assignment.name, .{
@@ -754,7 +756,7 @@ const Analyzer = struct {
         const value_type = scheme.ty;
         const target_type = if (binding.type_name) |type_name| blk: {
             const annotated = try self.resolveTypeName(type_name, binding.position);
-            if (!types.isAssignable(annotated, value_type)) {
+            if (!self.typesCompatible(annotated, value_type)) {
                 try self.report(binding.position, "cannot assign value of type {s} to {s}", .{ value_type.glslName(), annotated.glslName() });
             }
             break :blk annotated;
@@ -912,12 +914,12 @@ const Analyzer = struct {
                     }
                     try self.rememberExprType(assignment.target, symbol.ty);
                     if (assignment.operator == .assign) {
-                        if (!types.isAssignable(symbol.ty, value_type)) {
+                        if (!self.typesCompatible(symbol.ty, value_type)) {
                             try self.report(assignment.target.position, "cannot assign value of type {s} to {s}", .{ value_type.glslName(), symbol.ty.glslName() });
                         }
                     } else {
                         const result_type = types.resolveOp(compoundOperator(assignment.operator), symbol.ty, value_type) orelse types.builtinType(.error_type);
-                        if (!types.isAssignable(symbol.ty, result_type)) {
+                        if (!self.typesCompatible(symbol.ty, result_type)) {
                             try self.report(assignment.target.position, "compound assignment has incompatible types", .{});
                         }
                     }
@@ -939,7 +941,7 @@ const Analyzer = struct {
             else => {
                 const target_type = try self.analyzeExpr(scope, assignment.target, context);
                 if (assignment.operator == .assign) {
-                    if (!types.isAssignable(target_type, value_type)) {
+                    if (!self.typesCompatible(target_type, value_type)) {
                         try self.report(assignment.target.position, "cannot assign value of type {s} to {s}", .{ value_type.glslName(), target_type.glslName() });
                     }
                 } else {
@@ -1059,11 +1061,11 @@ const Analyzer = struct {
                         if (builtins.resolve(name, arg_types.items)) |resolution| {
                             break :blk resolution.return_type;
                         }
-                        if (self.findFunction(name, arg_types.items, context.stage_functions)) |signature| {
-                            break :blk signature.return_type;
+                        if (self.findFunction(name, arg_types.items, context.stage_functions)) |return_type| {
+                            break :blk return_type;
                         }
-                        if (self.findFunction(name, arg_types.items, self.global_functions.items)) |signature| {
-                            break :blk signature.return_type;
+                        if (self.findFunction(name, arg_types.items, self.global_functions.items)) |return_type| {
+                            break :blk return_type;
                         }
                         try self.report(expr.position, "unknown function '{s}'", .{name});
                         break :blk types.builtinType(.error_type);
@@ -1152,7 +1154,7 @@ const Analyzer = struct {
 
             const body_type = arm_result orelse types.builtinType(.void);
             if (result_type) |existing| {
-                if (!types.isAssignable(existing, body_type) and !types.isAssignable(body_type, existing)) {
+                if (!self.typesCompatible(existing, body_type) and !self.typesCompatible(body_type, existing)) {
                     try self.report(position, "match arms must evaluate to compatible types", .{});
                     result_type = types.builtinType(.error_type);
                 }
@@ -1264,20 +1266,19 @@ const Analyzer = struct {
         name: []const u8,
         arg_types: []const types.Type,
         functions: []const *ast.FunctionDef,
-    ) ?FunctionSignature {
-        for (functions) |function| {
+    ) ?types.Type {
+        function_loop: for (functions) |function| {
             const signature = self.typed.function_signatures.get(function) orelse continue;
             if (!sameName(signature.name, name)) continue;
             if (signature.params.len != arg_types.len) continue;
 
-            var matched = true;
+            var substitution = unify.Substitution.init(self.allocator);
+            defer substitution.deinit();
+
             for (signature.params, arg_types) |param, arg_type| {
-                if (!types.isAssignable(param.ty, arg_type)) {
-                    matched = false;
-                    break;
-                }
+                unify.unify(&substitution, param.ty, arg_type) catch continue :function_loop;
             }
-            if (matched) return signature;
+            return substitution.apply(signature.return_type) catch signature.return_type;
         }
         return null;
     }
@@ -1307,6 +1308,28 @@ const Analyzer = struct {
         return resolved;
     }
 
+    fn resolveTypeNameCollectingParams(
+        self: *Analyzer,
+        name: []const u8,
+        position: ast.Position,
+        params: *std.ArrayListUnmanaged([]const u8),
+    ) anyerror!types.Type {
+        var parser = TypeSpecParser{
+            .analyzer = self,
+            .input = name,
+            .position = position,
+            .params = &.{},
+            .param_sink = params,
+        };
+        const resolved = try parser.parseType();
+        parser.skipSpaces();
+        if (!parser.eof()) {
+            try self.report(position, "invalid type annotation '{s}'", .{name});
+            return types.builtinType(.error_type);
+        }
+        return resolved;
+    }
+
     fn makeGenericType(self: *Analyzer, name: []const u8, params: []const []const u8) anyerror!types.Type {
         if (params.len == 0) return .{ .struct_type = name };
 
@@ -1320,6 +1343,13 @@ const Analyzer = struct {
                 .args = args,
             },
         };
+    }
+
+    fn typesCompatible(self: *Analyzer, expected: types.Type, actual: types.Type) bool {
+        var substitution = unify.Substitution.init(self.allocator);
+        defer substitution.deinit();
+        unify.unify(&substitution, expected, actual) catch return false;
+        return true;
     }
 
     fn rememberExprType(self: *Analyzer, expr: *ast.Expr, ty: types.Type) anyerror!void {
@@ -1337,6 +1367,7 @@ const TypeSpecParser = struct {
     index: usize = 0,
     position: ast.Position,
     params: []const []const u8,
+    param_sink: ?*std.ArrayListUnmanaged([]const u8) = null,
 
     fn parseType(self: *TypeSpecParser) anyerror!types.Type {
         self.skipSpaces();
@@ -1372,6 +1403,10 @@ const TypeSpecParser = struct {
         if (self.paramIndex(name)) |id| return types.typeVar(id);
         if (self.analyzer.struct_fields.contains(name) or self.analyzer.type_defs.contains(name)) {
             return .{ .struct_type = name };
+        }
+        if (self.param_sink) |sink| {
+            try sink.append(self.analyzer.allocator, name);
+            return types.typeVar(@intCast(sink.items.len - 1));
         }
         try self.analyzer.report(self.position, "unknown type '{s}'", .{name});
         return types.builtinType(.error_type);
@@ -1424,6 +1459,11 @@ const TypeSpecParser = struct {
     }
 
     fn paramIndex(self: *TypeSpecParser, name: []const u8) ?u32 {
+        if (self.param_sink) |sink| {
+            for (sink.items, 0..) |param, index| {
+                if (sameName(param, name)) return @intCast(index);
+            }
+        }
         for (self.params, 0..) |param, index| {
             if (sameName(param, name)) return @intCast(index);
         }

@@ -48,6 +48,7 @@ pub const StructField = struct {
 pub const StructDef = struct {
     position: Position,
     name: []const u8,
+    params: []const []const u8 = &.{},
     fields: []const StructField,
 };
 

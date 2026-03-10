@@ -258,6 +258,22 @@ test "parser handles algebraic type definitions" {
     try std.testing.expectEqualStrings("Point", definition.variants[1].name);
 }
 
+test "parser handles generic struct definitions" {
+    var parsed = try parseProgram(
+        \\struct Pair(a, b)
+        \\  first: a
+        \\  second: b
+        \\end
+    );
+    defer parsed.arena.deinit();
+
+    const definition = parsed.program.items[0].struct_def;
+    try std.testing.expectEqualStrings("Pair", definition.name);
+    try std.testing.expectEqual(@as(usize, 2), definition.params.len);
+    try std.testing.expectEqualStrings("a", definition.params[0]);
+    try std.testing.expectEqualStrings("b", definition.params[1]);
+}
+
 test "parser handles match expressions" {
     var parsed = try parseProgram(
         \\def classify(value: Float) -> Float

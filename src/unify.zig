@@ -82,6 +82,20 @@ pub fn unify(substitution: *Substitution, lhs: types.Type, rhs: types.Type) !voi
     if (left.eql(right)) return;
 
     switch (left) {
+        .builtin => |builtin| if (try types.builtinAsApp(substitution.allocator, builtin)) |expanded| {
+            return unify(substitution, expanded, right);
+        },
+        else => {},
+    }
+
+    switch (right) {
+        .builtin => |builtin| if (try types.builtinAsApp(substitution.allocator, builtin)) |expanded| {
+            return unify(substitution, left, expanded);
+        },
+        else => {},
+    }
+
+    switch (left) {
         .type_var => |id| return bindVar(substitution, id, right),
         .function => |left_function| switch (right) {
             .function => |right_function| {

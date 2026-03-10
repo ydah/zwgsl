@@ -50,6 +50,7 @@ pub const Type = union(enum) {
         return switch (a) {
             .builtin => |left| switch (b) {
                 .builtin => |right| left == right,
+                .type_app => |right| appEquivalentBuiltin(right, left),
                 else => false,
             },
             .struct_type => |left| switch (b) {
@@ -79,6 +80,7 @@ pub const Type = union(enum) {
                     }
                     break :blk true;
                 },
+                .builtin => |right| appEquivalentBuiltin(left, right),
                 else => false,
             },
             .nat => |left| switch (b) {
@@ -357,6 +359,18 @@ pub fn typeApp(allocator: std.mem.Allocator, name: []const u8, args: []const Typ
     };
 }
 
+pub fn builtinAsApp(allocator: std.mem.Allocator, builtin: Builtin) !?Type {
+    return switch (builtin) {
+        .vec2 => try typeApp(allocator, "Vec", &.{natType(2)}),
+        .vec3 => try typeApp(allocator, "Vec", &.{natType(3)}),
+        .vec4 => try typeApp(allocator, "Vec", &.{natType(4)}),
+        .mat2 => try typeApp(allocator, "Mat", &.{ natType(2), natType(2) }),
+        .mat3 => try typeApp(allocator, "Mat", &.{ natType(3), natType(3) }),
+        .mat4 => try typeApp(allocator, "Mat", &.{ natType(4), natType(4) }),
+        else => null,
+    };
+}
+
 pub fn fromName(name: []const u8) ?Type {
     return mapName(name, true);
 }
@@ -601,4 +615,30 @@ fn natLen(ty: Type) ?u8 {
         .nat => |value| std.math.cast(u8, value),
         else => null,
     };
+}
+
+fn appEquivalentBuiltin(app_ty: TypeApp, builtin: Builtin) bool {
+    if (std.mem.eql(u8, app_ty.name, "Vec") and app_ty.args.len == 1) {
+        const len = natLen(app_ty.args[0]) orelse return false;
+        return switch (builtin) {
+            .vec2 => len == 2,
+            .vec3 => len == 3,
+            .vec4 => len == 4,
+            else => false,
+        };
+    }
+
+    if (std.mem.eql(u8, app_ty.name, "Mat") and app_ty.args.len == 2) {
+        const rows = natLen(app_ty.args[0]) orelse return false;
+        const cols = natLen(app_ty.args[1]) orelse return false;
+        if (rows != cols) return false;
+        return switch (builtin) {
+            .mat2 => rows == 2,
+            .mat3 => rows == 3,
+            .mat4 => rows == 4,
+            else => false,
+        };
+    }
+
+    return false;
 }

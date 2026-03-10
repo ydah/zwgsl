@@ -346,3 +346,37 @@ test "sema warns about non-exhaustive matches" {
     }
     try std.testing.expect(found_warning);
 }
+
+test "sema resolves dependent vector dimensions through function calls" {
+    var analyzed = try analyzeSource(
+        \\def same_dim(a: Vec(N), b: Vec(N)) -> Float
+        \\  dot(a, b)
+        \\end
+        \\
+        \\def main
+        \\  left: Vec(3) = vec3(1.0)
+        \\  right: Vec(3) = vec3(2.0)
+        \\  same_dim(left, right)
+        \\end
+    );
+    defer analyzed.arena.deinit();
+
+    try std.testing.expectEqual(@as(usize, 0), analyzed.diagnostics.items.items.len);
+}
+
+test "sema reports dependent dimension mismatches" {
+    var analyzed = try analyzeSource(
+        \\def same_dim(a: Vec(N), b: Vec(N)) -> Float
+        \\  dot(a, b)
+        \\end
+        \\
+        \\def main
+        \\  left: Vec(3) = vec3(1.0)
+        \\  right: Vec(4) = vec4(2.0)
+        \\  same_dim(left, right)
+        \\end
+    );
+    defer analyzed.arena.deinit();
+
+    try std.testing.expect(analyzed.diagnostics.items.items.len > 0);
+}

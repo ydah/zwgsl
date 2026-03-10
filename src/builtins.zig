@@ -32,8 +32,10 @@ pub fn resolve(name: []const u8, args: []const types.Type) ?Resolution {
         return null;
     }
     if (std.mem.eql(u8, name, "cross")) {
-        if (args.len == 2 and args[0].isBuiltin(.vec3) and args[1].isBuiltin(.vec3)) {
-            return .{ .return_type = types.builtinType(.vec3) };
+        if (args.len == 2 and args[0].eql(args[1]) and args[0].isVector()) {
+            if (args[0].vectorLen()) |len| {
+                if (len == 3) return .{ .return_type = args[0] };
+            }
         }
         return null;
     }
@@ -117,6 +119,12 @@ pub fn resolve(name: []const u8, args: []const types.Type) ?Resolution {
         }
         if (args.len == 2 and args[0].isBuiltin(.sampler3d) and args[1].isBuiltin(.vec3)) {
             return .{ .return_type = types.builtinType(.vec4), .method_callable = false };
+        }
+        return null;
+    }
+    if (std.mem.eql(u8, name, "transpose")) {
+        if (args.len == 1 and args[0].isMatrix()) {
+            return .{ .return_type = args[0] };
         }
         return null;
     }

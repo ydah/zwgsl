@@ -122,6 +122,17 @@ pub const Parser = struct {
     fn parseStructDef(self: *Parser) anyerror!ast.StructDef {
         const start = try self.expect(.kw_struct, "struct");
         const name = try self.expectIdentifier("struct name");
+        var params: std.ArrayListUnmanaged([]const u8) = .{};
+        defer params.deinit(self.allocator);
+        if (self.match(.lparen)) {
+            if (!self.check(.rparen)) {
+                while (true) {
+                    try params.append(self.allocator, try self.expectIdentifier("type parameter"));
+                    if (!self.match(.comma)) break;
+                }
+            }
+            _ = try self.expect(.rparen, "')' after struct parameters");
+        }
         self.consumeNewlines();
 
         var fields: std.ArrayListUnmanaged(ast.StructField) = .{};
@@ -143,6 +154,7 @@ pub const Parser = struct {
         return .{
             .position = positionOf(start),
             .name = name,
+            .params = try params.toOwnedSlice(self.allocator),
             .fields = try fields.toOwnedSlice(self.allocator),
         };
     }
