@@ -20,7 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       PLAYGROUND_BASE_PATH: /zwgsl/
-      ZIG_VERSION: 0.13.0
+      ZIG_VERSION: 0.15.2
 
     steps:
       - name: Checkout
