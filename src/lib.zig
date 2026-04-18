@@ -47,6 +47,12 @@ const ResultStorage = struct {
     compute_source: ?[:0]u8 = null,
 };
 
+fn deinitResultStorage(storage: *ResultStorage) void {
+    storage.arena.deinit();
+    storage.* = undefined;
+    ffi_allocator.destroy(storage);
+}
+
 fn emptyResult() compiler.Result {
     return .{
         .vertex_source = null,
@@ -63,10 +69,8 @@ pub export fn zwgsl_compile(source: [*]const u8, source_len: usize, options: com
     storage.* = .{
         .arena = std.heap.ArenaAllocator.init(ffi_allocator),
     };
-    errdefer {
-        storage.arena.deinit();
-        ffi_allocator.destroy(storage);
-    }
+    var storage_retained = false;
+    defer if (!storage_retained) deinitResultStorage(storage);
 
     const arena = storage.arena.allocator();
     const source_slice = source[0..source_len];
@@ -78,6 +82,7 @@ pub export fn zwgsl_compile(source: [*]const u8, source_len: usize, options: com
             .line = 0,
             .column = 0,
         };
+        storage_retained = true;
         return .{
             .errors = storage.errors.ptr,
             .error_count = 1,
@@ -99,6 +104,7 @@ pub export fn zwgsl_compile(source: [*]const u8, source_len: usize, options: com
         @memcpy(storage.errors, output.errors);
     }
 
+    storage_retained = true;
     return .{
         .vertex_source = if (storage.vertex_source) |value| value.ptr else null,
         .fragment_source = if (storage.fragment_source) |value| value.ptr else null,
@@ -112,8 +118,7 @@ pub export fn zwgsl_compile(source: [*]const u8, source_len: usize, options: com
 pub export fn zwgsl_free(result: *compiler_api.Result) void {
     const internal = result._internal orelse return;
     const storage: *ResultStorage = @ptrCast(@alignCast(internal));
-    storage.arena.deinit();
-    ffi_allocator.destroy(storage);
+    deinitResultStorage(storage);
     result.* = emptyResult();
 }
 
@@ -156,6 +161,18 @@ const WasmJsonStorage = struct {
     arena: std.heap.ArenaAllocator,
 };
 
+fn deinitWasmResultStorage(storage: *WasmResultStorage) void {
+    storage.arena.deinit();
+    storage.* = undefined;
+    ffi_allocator.destroy(storage);
+}
+
+fn deinitWasmJsonStorage(storage: *WasmJsonStorage) void {
+    storage.arena.deinit();
+    storage.* = undefined;
+    ffi_allocator.destroy(storage);
+}
+
 pub export fn zwgsl_wasm_alloc(len: usize) usize {
     if (len == 0) return 0;
     const buffer = ffi_allocator.alloc(u8, len) catch return 0;
@@ -173,10 +190,8 @@ pub export fn zwgsl_wasm_compile(source_ptr: usize, source_len: usize) usize {
     storage.* = .{
         .arena = std.heap.ArenaAllocator.init(ffi_allocator),
     };
-    errdefer {
-        storage.arena.deinit();
-        ffi_allocator.destroy(storage);
-    }
+    var storage_retained = false;
+    defer if (!storage_retained) deinitWasmResultStorage(storage);
 
     const arena = storage.arena.allocator();
     const source: []const u8 = if (source_len == 0)
@@ -196,6 +211,7 @@ pub export fn zwgsl_wasm_compile(source_ptr: usize, source_len: usize) usize {
             .diagnostics_ptr = slicePtrU32(storage.diagnostics),
             .diagnostics_len = 1,
         };
+        storage_retained = true;
         return pointerToInt(&storage.result);
     };
 
@@ -227,6 +243,7 @@ pub export fn zwgsl_wasm_compile(source_ptr: usize, source_len: usize) usize {
         .diagnostics_len = storage.diagnostics.len,
     };
 
+    storage_retained = true;
     return pointerToInt(&storage.result);
 }
 
@@ -234,8 +251,7 @@ pub export fn zwgsl_wasm_result_free(result_ptr: usize) void {
     if (result_ptr == 0) return;
     const result: *WasmCompileResult = @ptrFromInt(result_ptr);
     const storage: *WasmResultStorage = @alignCast(@fieldParentPtr("result", result));
-    storage.arena.deinit();
-    ffi_allocator.destroy(storage);
+    deinitWasmResultStorage(storage);
 }
 
 pub export fn zwgsl_wasm_hover(source_ptr: usize, source_len: usize, line: u32, character: u32) usize {
@@ -254,8 +270,7 @@ pub export fn zwgsl_wasm_json_result_free(result_ptr: usize) void {
     if (result_ptr == 0) return;
     const result: *WasmJsonResult = @ptrFromInt(result_ptr);
     const storage: *WasmJsonStorage = @alignCast(@fieldParentPtr("result", result));
-    storage.arena.deinit();
-    ffi_allocator.destroy(storage);
+    deinitWasmJsonStorage(storage);
 }
 
 const WasmJsonKind = enum {
@@ -275,10 +290,8 @@ fn buildWasmJsonResult(
     storage.* = .{
         .arena = std.heap.ArenaAllocator.init(ffi_allocator),
     };
-    errdefer {
-        storage.arena.deinit();
-        ffi_allocator.destroy(storage);
-    }
+    var storage_retained = false;
+    defer if (!storage_retained) deinitWasmJsonStorage(storage);
 
     const arena = storage.arena.allocator();
     const source = wasmSourceSlice(source_ptr, source_len);
@@ -292,6 +305,7 @@ fn buildWasmJsonResult(
         .json_ptr = slicePtrU32(json),
         .json_len = json.len,
     };
+    storage_retained = true;
     return pointerToInt(&storage.result);
 }
 
