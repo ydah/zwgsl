@@ -12,12 +12,19 @@ pub const StringPool = struct {
     }
 
     pub fn deinit(self: *StringPool) void {
+        var iterator = self.strings.iterator();
+        while (iterator.next()) |entry| {
+            self.allocator.free(entry.key_ptr.*);
+        }
         self.strings.deinit();
+        self.* = undefined;
     }
 
     pub fn intern(self: *StringPool, value: []const u8) ![]const u8 {
         if (self.strings.get(value)) |existing| return existing;
         const duped = try self.allocator.dupe(u8, value);
+        errdefer self.allocator.free(duped);
+
         try self.strings.put(duped, duped);
         return duped;
     }
