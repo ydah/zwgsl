@@ -26,7 +26,6 @@ fn parseProgram(source: []const u8) !struct {
 fn parseProgramWithPool(source: []const u8) !struct {
     arena: std.heap.ArenaAllocator,
     diagnostics: zwgsl.diagnostics.DiagnosticList,
-    pool: zwgsl.string_pool.StringPool,
     program: *zwgsl.ast.Program,
 } {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
@@ -34,7 +33,6 @@ fn parseProgramWithPool(source: []const u8) !struct {
 
     const allocator = arena.allocator();
     var pool = zwgsl.string_pool.StringPool.init(allocator);
-    errdefer pool.deinit();
 
     const tokens = try zwgsl.lexer.Lexer.tokenizeResolvedWithPool(allocator, &pool, source);
     var diagnostic_list = zwgsl.diagnostics.DiagnosticList.init(allocator);
@@ -45,7 +43,6 @@ fn parseProgramWithPool(source: []const u8) !struct {
     return .{
         .arena = arena,
         .diagnostics = diagnostic_list,
-        .pool = pool,
         .program = program,
     };
 }
@@ -344,7 +341,6 @@ test "parser reuses interned identifier slices with a shared string pool" {
         \\end
     );
     defer parsed.arena.deinit();
-    defer parsed.pool.deinit();
 
     const function = parsed.program.items[0].function;
     const lhs = function.body[0].data.expression.data.binary.lhs.data.identifier;
