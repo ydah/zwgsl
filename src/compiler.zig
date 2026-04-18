@@ -58,6 +58,8 @@ pub fn compile(allocator: std.mem.Allocator, source: []const u8, options: Option
 
     const tokens = try lexer.Lexer.tokenizeResolvedWithPool(allocator, &pool, source);
     var diagnostic_list = diagnostics.DiagnosticList.init(allocator);
+    defer diagnostic_list.deinit();
+
     var syntax_parser = parser.Parser.initWithPool(allocator, &pool, source, tokens, &diagnostic_list);
     const program = try syntax_parser.parseProgram();
 
@@ -114,13 +116,18 @@ pub fn compile(allocator: std.mem.Allocator, source: []const u8, options: Option
 
 fn diagnosticsToErrors(allocator: std.mem.Allocator, items: []const diagnostics.Diagnostic) ![]Error {
     const errors = try allocator.alloc(Error, items.len);
+    errdefer allocator.free(errors);
+
     for (items, 0..) |item, index| {
+        errdefer for (errors[0..index]) |initialized| freeErrorMessage(allocator, initialized.message);
+
+        const message = try allocator.dupeZ(u8, item.message);
         errors[index] = .{
             .kind = switch (item.kind) {
                 .@"error" => .semantic,
                 .warning => .semantic,
             },
-            .message = try allocator.dupeZ(u8, item.message),
+            .message = message.ptr,
             .line = item.line,
             .column = item.column,
         };
@@ -130,11 +137,19 @@ fn diagnosticsToErrors(allocator: std.mem.Allocator, items: []const diagnostics.
 
 fn singleError(allocator: std.mem.Allocator, message: []const u8, line: u32, column: u32) !CompileOutput {
     const errors = try allocator.alloc(Error, 1);
+    errdefer allocator.free(errors);
+
+    const owned_message = try allocator.dupeZ(u8, message);
     errors[0] = .{
         .kind = .semantic,
-        .message = try allocator.dupeZ(u8, message),
+        .message = owned_message.ptr,
         .line = line,
         .column = column,
     };
     return .{ .errors = errors };
+}
+
+fn freeErrorMessage(allocator: std.mem.Allocator, message: [*:0]const u8) void {
+    const len = std.mem.len(message);
+    allocator.free(@constCast(message[0..len :0]));
 }
