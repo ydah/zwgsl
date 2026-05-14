@@ -8,6 +8,7 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/lib.zig"),
         .target = target,
         .optimize = optimize,
+        .link_libc = true,
     });
 
     const static_lib = b.addLibrary(.{
@@ -15,7 +16,6 @@ pub fn build(b: *std.Build) void {
         .linkage = .static,
         .root_module = lib_module,
     });
-    static_lib.linkLibC();
     static_lib.installHeader(b.path("include/zwgsl.h"), "zwgsl.h");
     b.installArtifact(static_lib);
 
@@ -26,9 +26,9 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/lib.zig"),
             .target = target,
             .optimize = optimize,
+            .link_libc = true,
         }),
     });
-    shared_lib.linkLibC();
     b.installArtifact(shared_lib);
 
     const lsp_server = b.addExecutable(.{
@@ -43,10 +43,27 @@ pub fn build(b: *std.Build) void {
             },
             .target = target,
             .optimize = optimize,
+            .link_libc = true,
         }),
     });
-    lsp_server.linkLibC();
     b.installArtifact(lsp_server);
+
+    const cli = b.addExecutable(.{
+        .name = "zwgsl",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/cli_main.zig"),
+            .imports = &.{
+                .{
+                    .name = "zwgsl",
+                    .module = lib_module,
+                },
+            },
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        }),
+    });
+    b.installArtifact(cli);
 
     const wasm_exe = b.addExecutable(.{
         .name = "zwgsl",

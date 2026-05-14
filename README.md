@@ -246,10 +246,10 @@ end
 
 ### From Source
 
-Requires Zig 0.13.x or newer.
+Requires Zig 0.15.x.
 
 ```sh
-git clone https://github.com/yourname/zwgsl
+git clone https://github.com/ydah/zwgsl
 cd zwgsl
 zig build -Doptimize=ReleaseFast
 ```
@@ -259,6 +259,17 @@ zig build -Doptimize=ReleaseFast
 ```sh
 zig build test
 ```
+
+### CLI
+
+```sh
+zig build
+zig-out/bin/zwgsl compile --target wgsl examples/hello_triangle.zw
+zig-out/bin/zwgsl check examples/hello_triangle.zw
+```
+
+Use `--target glsl-es-300` for GLSL ES 3.0 output, `--stage` to select a
+single generated stage, and `-o` / `--output` to write compile output to a file.
 
 ### Browser Wasm Build
 
@@ -276,6 +287,7 @@ That installs `zig-out/bin/zwgsl.wasm`, which the playground syncs into
 - `zig-out/lib/libzwgsl.a`
 - `zig-out/lib/libzwgsl.dylib` or the platform equivalent shared library
 - `zig-out/include/zwgsl.h`
+- `zig-out/bin/zwgsl`
 - `zig-out/bin/zwgsl-lsp`
 
 ## C API
