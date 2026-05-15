@@ -38,6 +38,8 @@ syntax while still targeting modern GPU backends.
 
 - [Language Reference](docs/language.md)
 - [Feature Matrix](docs/feature-matrix.md)
+- [Editor Setup](docs/editor-setup.md)
+- [Examples](examples/README.md)
 
 ## Quick Example
 
@@ -324,6 +326,9 @@ zwgsl_free(&result);
 ## LSP
 
 The server entry point is `zwgsl-lsp`, implemented under `src/lsp/`.
+See [Editor Setup](docs/editor-setup.md) for Neovim, Helix, VS Code, and Zed
+configuration notes.
+
 Current editor-facing features:
 
 - full-sync `didOpen` / `didChange` / `didClose`

@@ -1,0 +1,29 @@
+# Examples
+
+The examples are small, complete `.zw` programs that compile through the CLI and
+are also available in the playground sample selector.
+
+## Compile
+
+```sh
+zig build
+zig-out/bin/zwgsl check examples/hello_triangle.zw
+zig-out/bin/zwgsl compile --target wgsl examples/hello_triangle.zw
+```
+
+Use `--target glsl-es-300` for GLSL ES 3.0 output where the shader shape is
+compatible with that backend.
+
+## Samples
+
+| Example | Demonstrates |
+| --- | --- |
+| `hello_triangle.zw` | A minimal vertex and fragment pipeline with inputs, varyings, one matrix uniform, and a color output. |
+| `phong.zw` | Stage interfaces, helper functions, method-chain lowering, and a simple lighting calculation. |
+| `pbr.zw` | Utility functions, scalar uniforms, vector math, and a compact material-style fragment shader. |
+| `postprocess.zw` | Texture sampling with `Sampler2D`, UV varyings, and a fullscreen-style postprocess pass. |
+| `utah_teapot.zw` | A larger animated SDF shader using `where` bindings, loops, helper functions, and generated uniform controls in the playground. |
+
+The playground also includes focused feature fixtures such as dependent dimension
+checking and ADT pattern matching. Those are sourced from `tests/fixtures/` so the
+demo stays aligned with compiler coverage.
