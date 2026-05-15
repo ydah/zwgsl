@@ -206,8 +206,8 @@ test "compiler lowers immutable sampler aliases for WGSL" {
         \\compute do
         \\  def main
         \\    uv: Vec2 = vec2(0.5, 0.25)
-        \\    let sampler = scene_tex
-        \\    color: Vec4 = texture(sampler, uv)
+        \\    let scene_alias = scene_tex
+        \\    color: Vec4 = texture(scene_alias, uv)
         \\  end
         \\end
     ;
@@ -219,7 +219,7 @@ test "compiler lowers immutable sampler aliases for WGSL" {
     try std.testing.expectEqual(@as(usize, 0), output.errors.len);
     try std.testing.expect(output.compute_source != null);
     try std.testing.expect(std.mem.indexOf(u8, output.compute_source.?, "textureSample(scene_tex_texture, scene_tex_sampler, uv)") != null);
-    try std.testing.expect(std.mem.indexOf(u8, output.compute_source.?, "let sampler") == null);
+    try std.testing.expect(std.mem.indexOf(u8, output.compute_source.?, "let scene_alias") == null);
 }
 
 test "compiler lowers mod() calls to WGSL remainder operators" {

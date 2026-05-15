@@ -49,6 +49,10 @@ Identifiers beginning with `_zwgsl` are reserved for compiler-generated WGSL
 helpers and wrappers. The semantic pass warns when source declarations use that
 prefix.
 
+Identifiers that collide with WGSL reserved words or target-side builtin type
+names are also warned on declarations, because they can make generated WGSL
+ambiguous or invalid.
+
 ## Types
 
 ```ebnf

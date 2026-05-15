@@ -86,6 +86,22 @@ test "sema warns about reserved generated identifier prefix" {
     try expectWarningContaining(analyzed.diagnostics.items.items, "identifier '_zwgsl_assigned' uses reserved");
 }
 
+test "sema warns about WGSL reserved identifier names" {
+    var analyzed = try analyzeSource(
+        \\uniform :array, Float
+        \\
+        \\def shade(var: Float) -> Float
+        \\  let override = var
+        \\  override
+        \\end
+    );
+    defer analyzed.arena.deinit();
+
+    try expectWarningContaining(analyzed.diagnostics.items.items, "identifier 'array' collides with a WGSL reserved word");
+    try expectWarningContaining(analyzed.diagnostics.items.items, "identifier 'var' collides with a WGSL reserved word");
+    try expectWarningContaining(analyzed.diagnostics.items.items, "identifier 'override' collides with a WGSL reserved word");
+}
+
 test "sema reports duplicate stage declarations" {
     var analyzed = try analyzeSource(
         \\vertex do

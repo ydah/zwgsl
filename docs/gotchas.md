@@ -24,12 +24,16 @@ backend.
   only have WGSL golden fixture coverage today.
 - GLSL `version` and `precision` declarations do not affect WGSL output.
 
-## Generated Identifier Prefix
+## Generated And Target Identifier Names
 
 Names beginning with `_zwgsl` are reserved for compiler-generated WGSL helpers,
 entry-point wrappers, and uniform wrapper structs. Source code that declares a
 uniform, function, local binding, type, trait, field, variant, stage I/O, or
 pattern binding with that prefix receives a semantic warning.
+
+Names that collide with WGSL reserved words or target-side builtin type names,
+such as `array`, `var`, `fn`, or `vec3f`, also receive a warning. Prefer names
+that are valid and unambiguous in generated WGSL.
 
 Prefer project-specific prefixes for host-facing names. Generated WGSL may still
 contain `_zwgsl` names, but user source should avoid that namespace so future
