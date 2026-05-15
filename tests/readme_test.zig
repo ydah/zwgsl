@@ -45,6 +45,20 @@ test "README quick example compiles through the documented WGSL pipeline" {
     );
 }
 
+test "README quick example snippets match fixtures" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const readme = try std.fs.cwd().readFileAlloc(arena.allocator(), "README.md", 1 << 20);
+    const source = try std.fs.cwd().readFileAlloc(arena.allocator(), "tests/fixtures/phong.zw", 1 << 20);
+    const vertex = try std.fs.cwd().readFileAlloc(arena.allocator(), "tests/fixtures/phong.vertex.wgsl", 1 << 20);
+    const fragment = try std.fs.cwd().readFileAlloc(arena.allocator(), "tests/fixtures/phong.fragment.wgsl", 1 << 20);
+
+    try std.testing.expect(std.mem.indexOf(u8, readme, source) != null);
+    try std.testing.expect(std.mem.indexOf(u8, readme, vertex) != null);
+    try std.testing.expect(std.mem.indexOf(u8, readme, fragment) != null);
+}
+
 test "README pattern matching example compiles" {
     try expectWgslFixture(
         "tests/fixtures/match_shape.zw",
