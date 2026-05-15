@@ -91,6 +91,14 @@ test "compiler emits debug comments with source lines and columns" {
     try std.testing.expect(std.mem.indexOf(u8, output.fragment_source.?, "// zwgsl:21:3: def main") != null);
 }
 
+test "compiler emits GLSL for the hello triangle example" {
+    try expectGlslFixture(
+        "examples/hello_triangle.zw",
+        "tests/fixtures/hello_triangle.vertex.glsl",
+        "tests/fixtures/hello_triangle.fragment.glsl",
+    );
+}
+
 test "compiler optimizes output formatting when requested" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

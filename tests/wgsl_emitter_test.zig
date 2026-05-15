@@ -95,6 +95,15 @@ test "compiler emits WGSL for a basic fragment shader fixture" {
     );
 }
 
+test "compiler emits WGSL for the hello triangle example" {
+    try expectWgslFixture(
+        "examples/hello_triangle.zw",
+        "tests/fixtures/hello_triangle.vertex.wgsl",
+        "tests/fixtures/hello_triangle.fragment.wgsl",
+        null,
+    );
+}
+
 test "compiler emits WGSL for a shared uniform fixture" {
     try expectWgslFixture(
         "tests/fixtures/uniforms.zw",
