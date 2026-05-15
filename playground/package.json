@@ -6,7 +6,8 @@
   "scripts": {
     "sync-wasm": "cd .. && zig build wasm && mkdir -p playground/src/generated && cp zig-out/bin/zwgsl.wasm playground/src/generated/zwgsl.wasm",
     "dev": "npm run sync-wasm && vite",
-    "build": "npm run sync-wasm && vite build"
+    "typecheck": "tsc --noEmit",
+    "build": "npm run sync-wasm && npm run typecheck && vite build"
   },
   "dependencies": {
     "monaco-editor": "^0.55.1"
