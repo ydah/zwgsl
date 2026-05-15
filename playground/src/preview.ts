@@ -915,6 +915,11 @@ const makeUniformCard = (state: UniformState) => {
     return card;
   }
 
+  const colorInput = uniformUsesColorPicker(state.spec) ? makeColorInput(state) : null;
+  if (colorInput) {
+    card.append(colorInput.row);
+  }
+
   const axes = ["x", "y", "z", "w"];
   for (let index = 0; index < state.spec.length; index += 1) {
     const row = document.createElement("label");
@@ -941,6 +946,7 @@ const makeUniformCard = (state: UniformState) => {
       persistUniformValues(state.spec, state.values);
       output.value = formatUniformValue(nextValue, state.spec.kind);
       output.textContent = output.value;
+      if (colorInput && index < 3) syncColorInput(colorInput.input, colorInput.output, state);
     });
 
     state.inputs.push(input);
@@ -951,6 +957,42 @@ const makeUniformCard = (state: UniformState) => {
   }
 
   return card;
+};
+
+const uniformUsesColorPicker = (spec: UniformSpec) =>
+  spec.kind === "f32" &&
+  spec.length >= 3 &&
+  spec.slider !== null &&
+  /color|tint|albedo|base/i.test(spec.name);
+
+const makeColorInput = (state: UniformState) => {
+  const row = document.createElement("label");
+  row.className = "uniform-field uniform-color-field";
+
+  const axis = document.createElement("span");
+  axis.textContent = "rgb";
+
+  const input = document.createElement("input");
+  input.type = "color";
+  input.value = uniformValuesToHex(state.values);
+
+  const output = document.createElement("output");
+  output.value = input.value.toUpperCase();
+  output.textContent = output.value;
+
+  input.addEventListener("input", () => {
+    const next = hexToUniformValues(input.value);
+    for (let index = 0; index < next.length; index += 1) {
+      state.values[index] = next[index];
+      syncUniformControl(state, index);
+    }
+    persistUniformValues(state.spec, state.values);
+    output.value = input.value.toUpperCase();
+    output.textContent = output.value;
+  });
+
+  row.append(axis, input, output);
+  return { row, input, output };
 };
 
 const makeTextureCard = (state: TextureState) => {
@@ -1012,6 +1054,33 @@ const syncValueLabel = (state: UniformState, index: number) => {
   label.value = formatted;
   label.textContent = formatted;
 };
+
+const syncUniformControl = (state: UniformState, index: number) => {
+  const input = state.inputs[index];
+  if (input) input.value = String(state.values[index] ?? 0);
+  syncValueLabel(state, index);
+};
+
+const syncColorInput = (
+  input: HTMLInputElement,
+  output: HTMLOutputElement,
+  state: UniformState,
+) => {
+  input.value = uniformValuesToHex(state.values);
+  output.value = input.value.toUpperCase();
+  output.textContent = output.value;
+};
+
+const uniformValuesToHex = (values: number[]) =>
+  `#${values.slice(0, 3).map(uniformChannelToHex).join("")}`;
+
+const uniformChannelToHex = (value: number) =>
+  Math.round(Math.min(1, Math.max(0, value)) * 255)
+    .toString(16)
+    .padStart(2, "0");
+
+const hexToUniformValues = (hex: string) =>
+  [1, 3, 5].map((offset) => Number.parseInt(hex.slice(offset, offset + 2), 16) / 255);
 
 const encodeUniform = (spec: UniformSpec, values: number[]) => {
   if (spec.kind === "f32") {

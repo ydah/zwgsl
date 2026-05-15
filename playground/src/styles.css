@@ -252,6 +252,14 @@ body {
   width: 100%;
 }
 
+.uniform-color-field input[type="color"] {
+  min-height: 32px;
+  padding: 0;
+  border: 1px solid var(--edge);
+  border-radius: 8px;
+  background: transparent;
+}
+
 .uniform-field output {
   text-align: right;
   font-family: "IBM Plex Mono", ui-monospace, monospace;
