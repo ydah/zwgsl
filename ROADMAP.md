@@ -15,7 +15,8 @@ feature matrix remains the source of truth for implemented behavior.
 ## Tooling
 
 - Add formatter support that can be shared by `zwgsl fmt` and LSP formatting.
-- Add LSP signature help for builtins, user functions, and trait methods.
+- Expand LSP signature help to resolve trait-method overloads from receiver
+  types.
 - Add focused code actions for common fixes such as missing declarations and
   simple type annotations.
 - Evaluate incremental document sync once the document store has range-edit

@@ -16,9 +16,9 @@ Legend:
 | --- | --- | --- | --- | --- |
 | Ruby-like `def` / `do` / `end` blocks | Yes | Yes | Diagnostics, tokens | Yes |
 | Layout-aware statement separation | Yes | Yes | Diagnostics | Yes |
-| Function parameters and return annotations | Yes | Yes | Hover, completion | Yes |
+| Function parameters and return annotations | Yes | Yes | Hover, completion, signature help | Yes |
 | Implicit final-expression returns | Yes | Yes | Diagnostics | Yes |
-| Method chains | Yes | Yes | Hover, completion | Yes |
+| Method chains | Yes | Yes | Hover, completion, signature help for supported builtins | Yes |
 | Postfix `if` / `unless` | Yes | Yes | Diagnostics | Yes |
 | `let` immutable bindings | Yes | Yes | Diagnostics | Yes |
 | Function-local `where` clauses | Yes | Yes | Diagnostics | Yes |
@@ -65,9 +65,9 @@ Legend:
 | Native library | Static and shared `libzwgsl` artifacts are installed by `zig build`. |
 | C API | `zwgsl_compile`, `zwgsl_free`, `zwgsl_version`, `zwgsl_abi_version`, and `zwgsl_options_default` are exposed in `include/zwgsl.h`. |
 | CLI | `zwgsl compile` and `zwgsl check` are available as `zig-out/bin/zwgsl`. |
-| LSP server | `zwgsl-lsp` supports diagnostics, hover, completion, code actions, goto-definition, document symbols, and semantic tokens. |
+| LSP server | `zwgsl-lsp` supports diagnostics, hover, completion, signature help, code actions, goto-definition, document symbols, and semantic tokens. |
 | Browser wasm | `zig build wasm` emits `zig-out/bin/zwgsl.wasm`. |
-| Playground | Monaco editor, compiler-backed diagnostics, WGSL output tabs with resource layout, URL-addressable sample/share links, and WebGPU preview with generated controls and texture upload. |
+| Playground | Monaco editor, compiler-backed diagnostics and language features, WGSL output tabs with resource layout, URL-addressable sample/share links, and WebGPU preview with generated controls and texture upload. |
 | CI | Zig formatting, Zig tests, native build, wasm build, and playground build run in GitHub Actions. |
 | Releases | Version tags package Linux x86_64 CLI, LSP, C library/header, and wasm artifacts with checksums. |
 

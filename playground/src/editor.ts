@@ -19,6 +19,16 @@ type CompletionResult = Array<{
   detail?: string;
 }>;
 
+type SignatureHelpResult = {
+  signatures: Array<{
+    label: string;
+    documentation?: { kind?: string; value: string } | string;
+    parameters?: Array<{ label: string }>;
+  }>;
+  activeSignature: number;
+  activeParameter: number;
+} | null;
+
 type DefinitionResult = {
   line: number;
   column: number;
@@ -127,6 +137,31 @@ export const createEditor = async (element: HTMLElement, value: string) => {
           insertText: item.label,
           range,
         })),
+      };
+    },
+  });
+
+  monaco.languages.registerSignatureHelpProvider("zwgsl", {
+    signatureHelpTriggerCharacters: ["(", ","],
+    async provideSignatureHelp(activeModel, position) {
+      const result = await request<SignatureHelpResult>("signatureHelp", {
+        source: activeModel.getValue(),
+        line: position.lineNumber - 1,
+        character: position.column - 1,
+      });
+      if (!result) return null;
+
+      return {
+        value: {
+          signatures: result.signatures.map((signature) => ({
+            label: signature.label,
+            documentation: signature.documentation,
+            parameters: signature.parameters ?? [],
+          })),
+          activeSignature: result.activeSignature,
+          activeParameter: result.activeParameter,
+        },
+        dispose() {},
       };
     },
   });

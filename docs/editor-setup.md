@@ -110,6 +110,7 @@ Current editor-facing capabilities are:
 - diagnostics from compiler errors and warnings
 - hover for builtins, declarations, and inferred types
 - completion for locals, declarations, builtins, fields, and methods
+- signature help for functions, constructors, and supported builtins
 - code actions for common stage declaration fixes
 - goto-definition for values, functions, and type declarations
 - document symbols for editor outlines

@@ -83,7 +83,7 @@ the backend.
 | --- | --- | --- |
 | CLI | `src/cli_main.zig` | Calls the compiler API for `compile` and `check`. |
 | C API / wasm | `src/lib.zig` | Exposes native ABI functions and wasm exports over the same compiler API. |
-| LSP | `src/lsp/*`, `src/lsp_main.zig` | Reuses lexer/parser/sema for diagnostics and analysis helpers for hover, completion, definition, symbols, and semantic tokens. |
+| LSP | `src/lsp/*`, `src/lsp_main.zig` | Reuses lexer/parser/sema for diagnostics and analysis helpers for hover, completion, signature help, definition, symbols, and semantic tokens. |
 | Playground | `playground/` | Uses the wasm exports and Monaco integration. |
 | Tests | `tests/test_runner.zig` | Aggregates focused parser, sema, emitter, LSP, wasm, fixture, and API tests. |
 

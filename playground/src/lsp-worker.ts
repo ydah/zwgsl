@@ -3,11 +3,12 @@ import {
   type CompletionResult as CompilerCompletionResult,
   type DefinitionResult as CompilerDefinitionResult,
   type HoverResult as CompilerHoverResult,
+  type SignatureHelpResult as CompilerSignatureHelpResult,
 } from "./compiler";
 
 type WorkerRequest = {
   id: number;
-  method: "diagnostics" | "hover" | "completion" | "definition";
+  method: "diagnostics" | "hover" | "completion" | "signatureHelp" | "definition";
   source: string;
   line?: number;
   character?: number;
@@ -34,6 +35,8 @@ type DefinitionResult =
     }
   | null;
 
+type SignatureHelpResult = CompilerSignatureHelpResult;
+
 const compilerPromise = createCompiler();
 
 self.addEventListener("message", async (event: MessageEvent<WorkerRequest>) => {
@@ -55,6 +58,12 @@ self.addEventListener("message", async (event: MessageEvent<WorkerRequest>) => {
   if (method === "completion") {
     const result = await compiler.completion(source, line, character);
     self.postMessage({ id, result: decodeCompletion(result) });
+    return;
+  }
+
+  if (method === "signatureHelp") {
+    const result = await compiler.signatureHelp(source, line, character);
+    self.postMessage({ id, result: decodeSignatureHelp(result) });
     return;
   }
 
@@ -85,6 +94,8 @@ const decodeCompletion = (result: CompilerCompletionResult): CompletionItem[] =>
     kind: item.kind,
     detail: item.detail,
   }));
+
+const decodeSignatureHelp = (result: CompilerSignatureHelpResult): SignatureHelpResult => result;
 
 const decodeDefinition = (result: CompilerDefinitionResult): DefinitionResult => {
   const location = result[0];

@@ -32,7 +32,7 @@ test "wasm bridge compiles compute WGSL and frees storage" {
     try std.testing.expect(std.mem.indexOf(u8, slice, "global_invocation_id") != null);
 }
 
-test "wasm bridge exposes hover completion and definition JSON" {
+test "wasm bridge exposes hover completion signature help and definition JSON" {
     const source =
         \\def helper(v: Vec3) -> Vec3
         \\  normalize(v)
@@ -67,6 +67,14 @@ test "wasm bridge exposes hover completion and definition JSON" {
     const completion_result: *const zwgsl.WasmJsonResult = @ptrFromInt(completion_ptr);
     const completion_json = @as([*]const u8, @ptrFromInt(completion_result.json_ptr))[0..completion_result.json_len];
     try std.testing.expect(std.mem.indexOf(u8, completion_json, "\"helper\"") != null);
+
+    const signature_ptr = zwgsl.zwgsl_wasm_signature_help(input_ptr, source.len, 6, 23);
+    try std.testing.expect(signature_ptr != 0);
+    defer zwgsl.zwgsl_wasm_json_result_free(signature_ptr);
+
+    const signature_result: *const zwgsl.WasmJsonResult = @ptrFromInt(signature_ptr);
+    const signature_json = @as([*]const u8, @ptrFromInt(signature_result.json_ptr))[0..signature_result.json_len];
+    try std.testing.expect(std.mem.indexOf(u8, signature_json, "def helper(v: Vec3) -> Vec3") != null);
 
     const definition_ptr = zwgsl.zwgsl_wasm_definition(input_ptr, source.len, 6, 18);
     try std.testing.expect(definition_ptr != 0);

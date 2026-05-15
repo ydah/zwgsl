@@ -9,6 +9,7 @@ const handler = lsp.handler;
 const hover = lsp.hover;
 const protocol = lsp.protocol;
 const semantic_tokens = lsp.semantic_tokens;
+const signature_help = lsp.signature_help;
 
 test "lsp protocol writes content length framed messages" {
     var buffer: std.ArrayList(u8) = .empty;
@@ -22,7 +23,7 @@ test "lsp protocol writes content length framed messages" {
     try std.testing.expect(std.mem.endsWith(u8, framed, "{\"jsonrpc\":\"2.0\"}"));
 }
 
-test "lsp initialize advertises hover completion definition document symbols and semantic tokens" {
+test "lsp initialize advertises editor-facing capabilities" {
     var state = handler.State.init(std.testing.allocator);
     defer state.deinit();
 
@@ -36,6 +37,7 @@ test "lsp initialize advertises hover completion definition document symbols and
     try std.testing.expect(std.mem.indexOf(u8, response, "\"hoverProvider\":true") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"textDocumentSync\":2") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"completionProvider\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"signatureHelpProvider\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"codeActionProvider\":true") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"definitionProvider\":true") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"documentSymbolProvider\":true") != null);
@@ -276,6 +278,77 @@ test "lsp completion offers member and root suggestions" {
     defer std.testing.allocator.free(root);
     try std.testing.expect(std.mem.indexOf(u8, root, "\"position\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, root, "\"normalize\"") != null);
+}
+
+test "lsp signature help returns user function and builtin constructor signatures" {
+    const source =
+        \\def shade(pos: Vec3, amount: Float) -> Vec3
+        \\  pos
+        \\end
+        \\
+        \\vertex do
+        \\  input :position, Vec3, location: 0
+        \\  def main
+        \\    color = shade(position, 0.5)
+        \\    gl_Position = vec4(position, 1.0)
+        \\  end
+        \\end
+    ;
+
+    const user_signature = try signature_help.response(std.testing.allocator, source, 7, 28);
+    defer std.testing.allocator.free(user_signature);
+    try std.testing.expect(std.mem.indexOf(u8, user_signature, "def shade(pos: Vec3, amount: Float) -> Vec3") != null);
+    try std.testing.expect(std.mem.indexOf(u8, user_signature, "\"activeParameter\":1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, user_signature, "\"label\":\"amount: Float\"") != null);
+
+    const constructor_signature = try signature_help.response(std.testing.allocator, source, 8, 23);
+    defer std.testing.allocator.free(constructor_signature);
+    try std.testing.expect(std.mem.indexOf(u8, constructor_signature, "fn vec4(x: Float, y: Float, z: Float, w: Float) -> Vec4") != null);
+    try std.testing.expect(std.mem.indexOf(u8, constructor_signature, "\"activeParameter\":0") != null);
+}
+
+test "lsp handler serves signature help from open documents" {
+    var state = handler.State.init(std.testing.allocator);
+    defer state.deinit();
+
+    const source =
+        \\def shade(pos: Vec3, amount: Float) -> Vec3
+        \\  pos
+        \\end
+        \\
+        \\vertex do
+        \\  input :position, Vec3, location: 0
+        \\  def main
+        \\    color = shade(position, 0.5)
+        \\  end
+        \\end
+    ;
+    const escaped_source = try jsonString(std.testing.allocator, source);
+    defer std.testing.allocator.free(escaped_source);
+
+    const open_message = try std.mem.concat(
+        std.testing.allocator,
+        u8,
+        &.{
+            "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file:///shader.zw\",\"text\":",
+            escaped_source,
+            "}}}",
+        },
+    );
+    defer std.testing.allocator.free(open_message);
+    const open_response = (try handler.handle(std.testing.allocator, &state, open_message)).?;
+    defer std.testing.allocator.free(open_response);
+
+    const response = (try handler.handle(
+        std.testing.allocator,
+        &state,
+        "{\"jsonrpc\":\"2.0\",\"id\":11,\"method\":\"textDocument/signatureHelp\",\"params\":{\"textDocument\":{\"uri\":\"file:///shader.zw\"},\"position\":{\"line\":7,\"character\":28}}}",
+    )).?;
+    defer std.testing.allocator.free(response);
+
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"id\":11") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "def shade(pos: Vec3, amount: Float) -> Vec3") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"activeParameter\":1") != null);
 }
 
 test "lsp code actions add missing vertex position input" {

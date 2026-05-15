@@ -275,6 +275,10 @@ pub export fn zwgsl_wasm_definition(source_ptr: usize, source_len: usize, line: 
     return buildWasmJsonResult(source_ptr, source_len, line, character, .definition);
 }
 
+pub export fn zwgsl_wasm_signature_help(source_ptr: usize, source_len: usize, line: u32, character: u32) usize {
+    return buildWasmJsonResult(source_ptr, source_len, line, character, .signature_help);
+}
+
 pub export fn zwgsl_wasm_json_result_free(result_ptr: usize) void {
     if (result_ptr == 0) return;
     const result: *WasmJsonResult = @ptrFromInt(result_ptr);
@@ -286,6 +290,7 @@ const WasmJsonKind = enum {
     hover,
     completion,
     definition,
+    signature_help,
 };
 
 fn buildWasmJsonResult(
@@ -308,6 +313,7 @@ fn buildWasmJsonResult(
         .hover => lsp_root.hover.response(arena, source, line, character),
         .completion => lsp_root.completion.response(arena, source, line, character),
         .definition => lsp_root.goto_def.response(arena, "inmemory://playground.zw", source, line, character),
+        .signature_help => lsp_root.signature_help.response(arena, source, line, character),
     } catch defaultWasmJson(arena, kind) catch return 0;
 
     storage.result = .{
@@ -320,7 +326,7 @@ fn buildWasmJsonResult(
 
 fn defaultWasmJson(allocator: std.mem.Allocator, comptime kind: WasmJsonKind) ![]u8 {
     return try allocator.dupe(u8, switch (kind) {
-        .hover, .definition => "null",
+        .hover, .definition, .signature_help => "null",
         .completion => "[]",
     });
 }

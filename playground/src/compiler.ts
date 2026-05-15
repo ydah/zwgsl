@@ -28,6 +28,16 @@ export type CompletionResult = Array<{
   detail?: string;
 }>;
 
+export type SignatureHelpResult = {
+  signatures: Array<{
+    label: string;
+    documentation?: { kind?: string; value: string } | string;
+    parameters?: Array<{ label: string }>;
+  }>;
+  activeSignature: number;
+  activeParameter: number;
+} | null;
+
 export type DefinitionResult = Array<{
   uri: string;
   range: {
@@ -45,6 +55,7 @@ type WasmExports = {
   zwgsl_wasm_hover(ptr: number, size: number, line: number, character: number): number;
   zwgsl_wasm_completion(ptr: number, size: number, line: number, character: number): number;
   zwgsl_wasm_definition(ptr: number, size: number, line: number, character: number): number;
+  zwgsl_wasm_signature_help(ptr: number, size: number, line: number, character: number): number;
   zwgsl_wasm_json_result_free(ptr: number): void;
 };
 
@@ -89,6 +100,9 @@ const createLoadedCompiler = async () => {
       },
       async completion(): Promise<CompletionResult> {
         return [];
+      },
+      async signatureHelp(): Promise<SignatureHelpResult> {
+        return null;
       },
       async definition(): Promise<DefinitionResult> {
         return [];
@@ -146,6 +160,9 @@ const createLoadedCompiler = async () => {
     async completion(source: string, line: number, character: number): Promise<CompletionResult> {
       return invokeJsonRequest(exports, "zwgsl_wasm_completion", source, line, character, []);
     },
+    async signatureHelp(source: string, line: number, character: number): Promise<SignatureHelpResult> {
+      return invokeJsonRequest(exports, "zwgsl_wasm_signature_help", source, line, character, null);
+    },
     async definition(source: string, line: number, character: number): Promise<DefinitionResult> {
       return invokeJsonRequest(exports, "zwgsl_wasm_definition", source, line, character, []);
     },
@@ -201,7 +218,8 @@ const readDiagnostics = (memory: WebAssembly.Memory, ptr: number, len: number) =
 type JsonRequestName =
   | "zwgsl_wasm_hover"
   | "zwgsl_wasm_completion"
-  | "zwgsl_wasm_definition";
+  | "zwgsl_wasm_definition"
+  | "zwgsl_wasm_signature_help";
 
 const invokeJsonRequest = <T>(
   exports: WasmExports,

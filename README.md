@@ -32,7 +32,7 @@ syntax while still targeting modern GPU backends.
 - `trait` / `impl` support with compile-time specialization and inline trait methods in WGSL output
 - Multi-stage WGSL pipeline with entry-point-aware HIR and SSA-style CFG MIR: `AST -> HIR -> MIR -> WGSL`
 - WGSL sampler lowering for uniforms, function parameters, and immutable local aliases
-- Source-aware LSP support: diagnostics, hover, completion, goto-definition, document symbols, semantic tokens
+- Source-aware LSP support: diagnostics, hover, completion, signature help, goto-definition, document symbols, semantic tokens
 - Browser playground with Monaco, wasm compilation, and compiler-backed worker tooling
 - C API surface for embedding the compiler in other tools
 
@@ -352,6 +352,7 @@ Current editor-facing features:
 - diagnostics from compiler errors and warnings
 - hover with source-aware type / declaration info
 - completion for locals, declarations, builtins, fields, and methods
+- signature help for functions, constructors, and supported builtins
 - code actions for common stage declaration fixes
 - goto-definition for values, functions, and type declarations
 - document symbols for stages, declarations, functions, types, traits, and impls
@@ -377,7 +378,7 @@ Current capabilities:
 - sample selector backed by repository examples and focused feature fixtures, with `?sample=<id>` direct links and `?source=<base64url>` share links
 - live WGSL compilation through `zwgsl.wasm`
 - output tabs for combined WGSL, stage-specific WGSL, diagnostics, and generated resource layout
-- compiler-backed diagnostics, hover, completion, and goto-definition from the wasm build
+- compiler-backed diagnostics, hover, completion, signature help, and goto-definition from the wasm build
 - WebGPU preview surface with animated `iTime` / `iResolution` uniforms, persisted generated controls with color pickers, sampler placeholders, and 2D texture upload
 - `npm run sync-wasm` to refresh the generated wasm asset from `zig-out/bin/zwgsl.wasm`
 

@@ -10,3 +10,4 @@ pub const hover = @import("hover.zig");
 pub const protocol = @import("protocol.zig");
 pub const server = @import("server.zig");
 pub const semantic_tokens = @import("semantic_tokens.zig");
+pub const signature_help = @import("signature_help.zig");
