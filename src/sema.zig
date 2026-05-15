@@ -31,6 +31,12 @@ const SymbolInfo = struct {
     scheme: ?hm.TypeScheme = null,
 };
 
+const VaryingInfo = struct {
+    ty: types.Type,
+    location: ?u32,
+    position: ast.Position,
+};
+
 const Scope = struct {
     allocator: std.mem.Allocator,
     parent: ?*const Scope,
@@ -667,20 +673,27 @@ const Analyzer = struct {
     fn validateVaryings(self: *Analyzer) anyerror!void {
         if (self.typed.vertex_block == null or self.typed.fragment_block == null) return;
 
-        var vertex_varyings = std.StringHashMap(types.Type).init(self.allocator);
-        var fragment_varyings = std.StringHashMap(types.Type).init(self.allocator);
+        var vertex_varyings = std.StringHashMap(VaryingInfo).init(self.allocator);
+        var fragment_varyings = std.StringHashMap(VaryingInfo).init(self.allocator);
 
         try self.collectVaryings(self.typed.vertex_block.?, &vertex_varyings);
         try self.collectVaryings(self.typed.fragment_block.?, &fragment_varyings);
 
         var vertex_it = vertex_varyings.iterator();
         while (vertex_it.next()) |entry| {
-            const fragment_type = fragment_varyings.get(entry.key_ptr.*) orelse {
+            const fragment_info = fragment_varyings.get(entry.key_ptr.*) orelse {
                 try self.report(self.typed.fragment_block.?.position, "fragment shader is missing varying '{s}'", .{entry.key_ptr.*});
                 continue;
             };
-            if (!entry.value_ptr.*.eql(fragment_type)) {
+            if (!entry.value_ptr.ty.eql(fragment_info.ty)) {
                 try self.report(self.typed.fragment_block.?.position, "varying '{s}' has mismatched type between vertex and fragment stages", .{entry.key_ptr.*});
+            }
+            if (entry.value_ptr.location) |vertex_location| {
+                if (fragment_info.location) |fragment_location| {
+                    if (vertex_location != fragment_location) {
+                        try self.report(fragment_info.position, "varying '{s}' has mismatched location between vertex and fragment stages", .{entry.key_ptr.*});
+                    }
+                }
             }
         }
 
@@ -692,10 +705,14 @@ const Analyzer = struct {
         }
     }
 
-    fn collectVaryings(self: *Analyzer, block: *ast.ShaderBlock, map: *std.StringHashMap(types.Type)) anyerror!void {
+    fn collectVaryings(self: *Analyzer, block: *ast.ShaderBlock, map: *std.StringHashMap(VaryingInfo)) anyerror!void {
         for (block.items) |item| {
             if (item == .varying) {
-                try map.put(item.varying.name, try self.resolveTypeName(item.varying.type_name, item.varying.position));
+                try map.put(item.varying.name, .{
+                    .ty = try self.resolveTypeName(item.varying.type_name, item.varying.position),
+                    .location = item.varying.location,
+                    .position = item.varying.position,
+                });
             }
         }
     }

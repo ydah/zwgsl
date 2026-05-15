@@ -1764,12 +1764,16 @@ fn samplerTextureType(ty: types.Type) ?[]const u8 {
 }
 
 fn varyingLocation(module: *const mir.Module, name: []const u8) u32 {
+    var auto_location: ?u32 = null;
     for (module.entry_points) |entry_point| {
         for (entry_point.interface.varyings, 0..) |varying, index| {
-            if (std.mem.eql(u8, varying.name, name)) return @intCast(index);
+            if (std.mem.eql(u8, varying.name, name)) {
+                if (varying.location) |location| return location;
+                if (auto_location == null) auto_location = @intCast(index);
+            }
         }
     }
-    return 0;
+    return auto_location orelse 0;
 }
 
 fn declLocation(decl: mir.Global, index: usize) u32 {

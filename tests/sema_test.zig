@@ -136,6 +136,29 @@ test "sema validates varying compatibility" {
     try std.testing.expect(analyzed.diagnostics.items.items.len > 0);
 }
 
+test "sema reports mismatched varying locations" {
+    var analyzed = try analyzeSource(
+        \\vertex do
+        \\  varying :v_pos, Vec3, location: 0
+        \\  def main
+        \\    self.v_pos = vec3(1.0)
+        \\    gl_Position = vec4(1.0)
+        \\  end
+        \\end
+        \\
+        \\fragment do
+        \\  varying :v_pos, Vec3, location: 1
+        \\  output :frag_color, Vec4, location: 0
+        \\  def main
+        \\    frag_color = vec4(v_pos, 1.0)
+        \\  end
+        \\end
+    );
+    defer analyzed.arena.deinit();
+
+    try expectDiagnosticContaining(analyzed.diagnostics.items.items, "varying 'v_pos' has mismatched location");
+}
+
 test "sema accepts a valid shader" {
     var analyzed = try analyzeSource(
         \\version "300 es"

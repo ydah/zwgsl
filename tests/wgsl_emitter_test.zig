@@ -100,6 +100,38 @@ test "compiler wraps scalar and vec2 uniforms for WGSL" {
     try std.testing.expect(std.mem.indexOf(u8, output.vertex_source.?, "position * time.value") != null);
 }
 
+test "compiler honors explicit varying locations for WGSL" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const source =
+        \\vertex do
+        \\  input :position, Vec3, location: 0
+        \\  varying :v_color, Vec3, location: 3
+        \\  def main
+        \\    self.v_color = position
+        \\    gl_Position = vec4(position, 1.0)
+        \\  end
+        \\end
+        \\
+        \\fragment do
+        \\  varying :v_color, Vec3, location: 3
+        \\  output :frag_color, Vec4, location: 0
+        \\  def main
+        \\    frag_color = vec4(v_color, 1.0)
+        \\  end
+        \\end
+    ;
+
+    const output = try zwgsl.compiler.compile(arena.allocator(), source, .{
+        .target = .wgsl,
+    });
+
+    try std.testing.expectEqual(@as(usize, 0), output.errors.len);
+    try std.testing.expect(std.mem.indexOf(u8, output.vertex_source.?, "@location(3) v_color: vec3f") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output.fragment_source.?, "@location(3) v_color: vec3f") != null);
+}
+
 test "compiler emits WGSL compute output" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
