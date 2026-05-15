@@ -906,6 +906,29 @@ test "MIR promotes simple mutable locals into SSA values" {
     try std.testing.expectEqualStrings("total", block.instructions[1].data.binary.lhs.data.identifier);
 }
 
+test "MIR folds scalar constant expressions" {
+    var analyzed = try analyzeSource(
+        \\def folded -> Float
+        \\  (1.0 + 2.0) * 4.0
+        \\end
+    );
+    defer analyzed.arena.deinit();
+
+    try std.testing.expectEqual(@as(usize, 0), analyzed.diagnostics.items.items.len);
+
+    const allocator = analyzed.arena.allocator();
+    const hir_module = try zwgsl.hir_builder.build(allocator, analyzed.typed);
+    const mir_module = try zwgsl.mir_builder.build(allocator, hir_module);
+
+    const function = mir_module.global_functions[0];
+    try std.testing.expectEqual(@as(usize, 1), function.blocks.len);
+    const block = function.blocks[0];
+    try std.testing.expectEqual(@as(usize, 0), block.instructions.len);
+    const returned = block.terminator.return_stmt.?;
+    try std.testing.expectEqual(.float, std.meta.activeTag(returned.data));
+    try std.testing.expectEqual(@as(f64, 12.0), returned.data.float);
+}
+
 test "MIR inserts phi nodes for promoted locals across branches" {
     var analyzed = try analyzeSource(
         \\compute do

@@ -57,6 +57,26 @@ test "compiler emits WGSL debug comments with source lines and columns" {
     try std.testing.expect(std.mem.indexOf(u8, output.fragment_source.?, "// zwgsl:21:3: def main") != null);
 }
 
+test "compiler folds scalar constants in WGSL output" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const source =
+        \\fragment do
+        \\  output :frag_color, Vec4, location: 0
+        \\  def main
+        \\    frag_color = vec4(1.0 + 2.0, 4.0 / 2.0, 3.0 - 1.0, 1.0)
+        \\  end
+        \\end
+    ;
+    const output = try zwgsl.compiler.compile(arena.allocator(), source, .{
+        .target = .wgsl,
+    });
+    try std.testing.expectEqual(@as(usize, 0), output.errors.len);
+    try std.testing.expect(std.mem.indexOf(u8, output.fragment_source.?, "vec4f(3.0, 2.0, 2.0, 1.0)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output.fragment_source.?, "1.0 + 2.0") == null);
+}
+
 test "compiler emits WGSL for a basic vertex shader fixture" {
     try expectWgslFixture(
         "tests/fixtures/basic_vertex.zw",

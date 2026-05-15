@@ -677,6 +677,9 @@ const FunctionLowerer = struct {
             },
             .unary => |unary| {
                 const operand = try self.lowerValue(block_index, unary.operand, null, context);
+                if (try self.foldUnaryValue(unary.operator, operand, expr.ty, expr.source_line, expr.source_column)) |folded| {
+                    return try self.copyValueIfPreferred(block_index, folded, expr.ty, preferred_name, expr.source_line, expr.source_column);
+                }
                 return try self.emitInstructionValue(
                     block_index,
                     try self.freshResult(expr.ty, preferred_name),
@@ -693,6 +696,9 @@ const FunctionLowerer = struct {
             .binary => |binary| {
                 const lhs = try self.lowerValue(block_index, binary.lhs, null, context);
                 const rhs = try self.lowerValue(block_index, binary.rhs, null, context);
+                if (try self.foldBinaryValue(binary.operator, lhs, rhs, expr.ty, expr.source_line, expr.source_column)) |folded| {
+                    return try self.copyValueIfPreferred(block_index, folded, expr.ty, preferred_name, expr.source_line, expr.source_column);
+                }
                 return try self.emitInstructionValue(
                     block_index,
                     try self.freshResult(expr.ty, preferred_name),
@@ -742,6 +748,159 @@ const FunctionLowerer = struct {
                 );
             },
         }
+    }
+
+    fn copyValueIfPreferred(
+        self: *FunctionLowerer,
+        block_index: usize,
+        value: *mir.Value,
+        ty: types.Type,
+        preferred_name: ?[]const u8,
+        source_line: ?u32,
+        source_column: ?u32,
+    ) anyerror!*mir.Value {
+        const name = preferred_name orelse return value;
+        return try self.emitInstructionValue(
+            block_index,
+            .{ .name = name, .ty = ty },
+            source_line,
+            source_column,
+            .{ .copy = .{ .value = value } },
+        );
+    }
+
+    fn foldUnaryValue(
+        self: *FunctionLowerer,
+        operator: token.TokenTag,
+        operand: *const mir.Value,
+        ty: types.Type,
+        source_line: ?u32,
+        source_column: ?u32,
+    ) anyerror!?*mir.Value {
+        switch (operator) {
+            .minus => switch (operand.data) {
+                .integer => |value| {
+                    if (value == std.math.minInt(i64)) return null;
+                    return try self.makeImmediateValue(.{ .integer = -value }, ty, source_line, source_column);
+                },
+                .float => |value| return try self.makeImmediateValue(.{ .float = -value }, ty, source_line, source_column),
+                else => return null,
+            },
+            .bang => switch (operand.data) {
+                .bool => |value| return try self.makeImmediateValue(.{ .bool = !value }, ty, source_line, source_column),
+                else => return null,
+            },
+            else => return null,
+        }
+    }
+
+    fn foldBinaryValue(
+        self: *FunctionLowerer,
+        operator: token.TokenTag,
+        lhs: *const mir.Value,
+        rhs: *const mir.Value,
+        ty: types.Type,
+        source_line: ?u32,
+        source_column: ?u32,
+    ) anyerror!?*mir.Value {
+        return switch (lhs.data) {
+            .integer => |left| switch (rhs.data) {
+                .integer => |right| try self.foldIntegerBinary(operator, left, right, ty, source_line, source_column),
+                else => null,
+            },
+            .float => |left| switch (rhs.data) {
+                .float => |right| try self.foldFloatBinary(operator, left, right, ty, source_line, source_column),
+                else => null,
+            },
+            .bool => |left| switch (rhs.data) {
+                .bool => |right| try self.foldBoolBinary(operator, left, right, ty, source_line, source_column),
+                else => null,
+            },
+            .identifier => null,
+        };
+    }
+
+    fn foldIntegerBinary(
+        self: *FunctionLowerer,
+        operator: token.TokenTag,
+        left: i64,
+        right: i64,
+        ty: types.Type,
+        source_line: ?u32,
+        source_column: ?u32,
+    ) anyerror!?*mir.Value {
+        switch (operator) {
+            .plus => if (checkedI64(@as(i128, left) + @as(i128, right))) |value| {
+                return try self.makeImmediateValue(.{ .integer = value }, ty, source_line, source_column);
+            },
+            .minus => if (checkedI64(@as(i128, left) - @as(i128, right))) |value| {
+                return try self.makeImmediateValue(.{ .integer = value }, ty, source_line, source_column);
+            },
+            .star => if (checkedI64(@as(i128, left) * @as(i128, right))) |value| {
+                return try self.makeImmediateValue(.{ .integer = value }, ty, source_line, source_column);
+            },
+            .slash => {
+                if (right == 0 or (left == std.math.minInt(i64) and right == -1)) return null;
+                return try self.makeImmediateValue(.{ .integer = @divTrunc(left, right) }, ty, source_line, source_column);
+            },
+            .percent => {
+                if (right == 0 or (left == std.math.minInt(i64) and right == -1)) return null;
+                return try self.makeImmediateValue(.{ .integer = @rem(left, right) }, ty, source_line, source_column);
+            },
+            .eq => return try self.makeImmediateValue(.{ .bool = left == right }, ty, source_line, source_column),
+            .neq => return try self.makeImmediateValue(.{ .bool = left != right }, ty, source_line, source_column),
+            .lt => return try self.makeImmediateValue(.{ .bool = left < right }, ty, source_line, source_column),
+            .gt => return try self.makeImmediateValue(.{ .bool = left > right }, ty, source_line, source_column),
+            .le => return try self.makeImmediateValue(.{ .bool = left <= right }, ty, source_line, source_column),
+            .ge => return try self.makeImmediateValue(.{ .bool = left >= right }, ty, source_line, source_column),
+            else => {},
+        }
+        return null;
+    }
+
+    fn foldFloatBinary(
+        self: *FunctionLowerer,
+        operator: token.TokenTag,
+        left: f64,
+        right: f64,
+        ty: types.Type,
+        source_line: ?u32,
+        source_column: ?u32,
+    ) anyerror!?*mir.Value {
+        switch (operator) {
+            .plus => return try self.makeImmediateValue(.{ .float = left + right }, ty, source_line, source_column),
+            .minus => return try self.makeImmediateValue(.{ .float = left - right }, ty, source_line, source_column),
+            .star => return try self.makeImmediateValue(.{ .float = left * right }, ty, source_line, source_column),
+            .slash => {
+                if (right == 0.0) return null;
+                return try self.makeImmediateValue(.{ .float = left / right }, ty, source_line, source_column);
+            },
+            .eq => return try self.makeImmediateValue(.{ .bool = left == right }, ty, source_line, source_column),
+            .neq => return try self.makeImmediateValue(.{ .bool = left != right }, ty, source_line, source_column),
+            .lt => return try self.makeImmediateValue(.{ .bool = left < right }, ty, source_line, source_column),
+            .gt => return try self.makeImmediateValue(.{ .bool = left > right }, ty, source_line, source_column),
+            .le => return try self.makeImmediateValue(.{ .bool = left <= right }, ty, source_line, source_column),
+            .ge => return try self.makeImmediateValue(.{ .bool = left >= right }, ty, source_line, source_column),
+            else => return null,
+        }
+    }
+
+    fn foldBoolBinary(
+        self: *FunctionLowerer,
+        operator: token.TokenTag,
+        left: bool,
+        right: bool,
+        ty: types.Type,
+        source_line: ?u32,
+        source_column: ?u32,
+    ) anyerror!?*mir.Value {
+        return switch (operator) {
+            .and_and => try self.makeImmediateValue(.{ .bool = left and right }, ty, source_line, source_column),
+            .or_or => try self.makeImmediateValue(.{ .bool = left or right }, ty, source_line, source_column),
+            .eq => try self.makeImmediateValue(.{ .bool = left == right }, ty, source_line, source_column),
+            .neq => try self.makeImmediateValue(.{ .bool = left != right }, ty, source_line, source_column),
+            else => null,
+        };
     }
 
     fn lowerCall(
@@ -1062,6 +1221,12 @@ fn sameValue(lhs: *const mir.Value, rhs: *const mir.Value) bool {
         .bool => rhs.data == .bool and lhs.data.bool == rhs.data.bool,
         .identifier => rhs.data == .identifier and std.mem.eql(u8, lhs.data.identifier, rhs.data.identifier),
     };
+}
+
+fn checkedI64(value: i128) ?i64 {
+    if (value < @as(i128, std.math.minInt(i64))) return null;
+    if (value > @as(i128, std.math.maxInt(i64))) return null;
+    return @intCast(value);
 }
 
 const LowerContext = struct {
