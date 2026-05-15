@@ -327,7 +327,7 @@ zwgsl_free(&result);
 
 The server entry point is `zwgsl-lsp`, implemented under `src/lsp/`.
 See [Editor Setup](docs/editor-setup.md) for Neovim, Helix, VS Code, and Zed
-configuration notes.
+configuration notes, including the local VS Code extension in `editors/vscode`.
 
 Current editor-facing features:
 
@@ -429,6 +429,8 @@ src/
 tests/
   fixtures/
 examples/
+editors/
+  vscode/
 playground/
 include/
 ```

@@ -1,0 +1,91 @@
+{
+  "scopeName": "source.zwgsl",
+  "name": "zwgsl",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#symbols" },
+    { "include": "#numbers" },
+    { "include": "#declarations" },
+    { "include": "#keywords" },
+    { "include": "#types" },
+    { "include": "#operators" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.number-sign.zwgsl",
+          "match": "#.*$"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.zwgsl",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            {
+              "name": "constant.character.escape.zwgsl",
+              "match": "\\\\."
+            }
+          ]
+        }
+      ]
+    },
+    "symbols": {
+      "patterns": [
+        {
+          "name": "constant.other.symbol.zwgsl",
+          "match": ":[A-Za-z_][A-Za-z0-9_]*"
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.float.zwgsl",
+          "match": "\\b[0-9]+\\.[0-9]+([eE][+-]?[0-9]+)?\\b"
+        },
+        {
+          "name": "constant.numeric.integer.zwgsl",
+          "match": "\\b[0-9]+([eE][+-]?[0-9]+)?\\b"
+        }
+      ]
+    },
+    "declarations": {
+      "patterns": [
+        {
+          "name": "keyword.declaration.zwgsl",
+          "match": "\\b(uniform|input|output|varying|vertex|fragment|compute|precision|version)\\b"
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.zwgsl",
+          "match": "\\b(def|do|end|if|else|elsif|unless|let|where|type|match|when|struct|trait|impl|for|return|then|and|or|not|discard|self|Self|true|false)\\b"
+        }
+      ]
+    },
+    "types": {
+      "patterns": [
+        {
+          "name": "entity.name.type.zwgsl",
+          "match": "\\b(Float|Int|UInt|Bool|Vec2|Vec3|Vec4|UVec2|UVec3|UVec4|IVec2|IVec3|IVec4|Mat2|Mat3|Mat4|Sampler2D|SamplerCube|Sampler3D)\\b"
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.zwgsl",
+          "match": "[+\\-*/%=<>!&|.^~]+"
+        }
+      ]
+    }
+  }
+}

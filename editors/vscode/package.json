@@ -1,0 +1,57 @@
+{
+  "name": "zwgsl-vscode",
+  "displayName": "zwgsl",
+  "description": "VS Code language support for zwgsl shaders.",
+  "version": "0.1.0",
+  "publisher": "ydah",
+  "private": true,
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.86.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "activationEvents": [
+    "onLanguage:zwgsl"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "zwgsl",
+        "aliases": [
+          "zwgsl",
+          "Zwgsl"
+        ],
+        "extensions": [
+          ".zw"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "zwgsl",
+        "scopeName": "source.zwgsl",
+        "path": "./syntaxes/zwgsl.tmLanguage.json"
+      }
+    ],
+    "configuration": {
+      "title": "zwgsl",
+      "properties": {
+        "zwgsl.serverPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to zwgsl-lsp. Defaults to a workspace zig-out/bin/zwgsl-lsp, then zwgsl-lsp on PATH."
+        }
+      }
+    }
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.86.0"
+  }
+}

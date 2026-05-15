@@ -1,0 +1,30 @@
+{
+  "comments": {
+    "lineComment": "#"
+  },
+  "brackets": [
+    ["(", ")"],
+    ["[", "]"]
+  ],
+  "autoClosingPairs": [
+    { "open": "(", "close": ")" },
+    { "open": "[", "close": "]" },
+    { "open": "\"", "close": "\"" }
+  ],
+  "surroundingPairs": [
+    { "open": "(", "close": ")" },
+    { "open": "[", "close": "]" },
+    { "open": "\"", "close": "\"" }
+  ],
+  "folding": {
+    "markers": {
+      "start": "^\\s*(def|do|if|unless|match|struct|type|trait|impl|vertex|fragment|compute)\\b",
+      "end": "^\\s*end\\b"
+    }
+  },
+  "indentationRules": {
+    "increaseIndentPattern": "^\\s*(def|do|if|unless|match|when|else|elsif|where|struct|type|trait|impl|vertex|fragment|compute)\\b.*$",
+    "decreaseIndentPattern": "^\\s*end\\b.*$",
+    "unIndentedLinePattern": "^\\s*(#.*)?$"
+  }
+}

@@ -61,26 +61,32 @@ language-servers = ["zwgsl"]
 
 ## VS Code
 
-The repository does not include a first-party VS Code extension yet. For syntax
-highlighting only, add a local file association:
+The repository includes a minimal local extension under `editors/vscode`. It
+provides `.zw` file association, basic syntax highlighting, indentation rules,
+and LSP startup over stdio.
 
-```json
-{
-  "files.associations": {
-    "*.zw": "ruby"
-  }
-}
+Build the server, then install the extension dependencies:
+
+```sh
+zig build -Doptimize=ReleaseFast
+cd editors/vscode
+npm install
 ```
 
-For LSP support, a small `vscode-languageclient` extension should register the
-same language id and launch the server over stdio:
+Start an Extension Development Host with the repository root as the workspace:
+
+```sh
+code --extensionDevelopmentPath=editors/vscode .
+```
+
+The extension first looks for `zig-out/bin/zwgsl-lsp` in the open workspace. If
+that does not exist, it falls back to `zwgsl-lsp` on `PATH`.
+
+To point at a specific server binary, set:
 
 ```json
 {
-  "documentSelector": [{ "scheme": "file", "language": "zwgsl" }],
-  "serverOptions": {
-    "command": "/absolute/path/to/zwgsl/zig-out/bin/zwgsl-lsp"
-  }
+  "zwgsl.serverPath": "/absolute/path/to/zwgsl-lsp"
 }
 ```
 
