@@ -18,9 +18,10 @@ Core rules:
 - Functions and trait methods are compiled into target shader code.
 - WGSL is the primary backend; GLSL ES 3.0 is retained as a render-stage backend.
 
-See [Gotchas](gotchas.md) for target-specific constraints and
-[Builtins](builtins.md) for supported builtin types/functions, and
-[Design Notes](design-notes.md) for the language boundaries behind these rules.
+See [Grammar Summary](spec.md) for a compact syntax overview,
+[Gotchas](gotchas.md) for target-specific constraints, [Builtins](builtins.md)
+for supported builtin types/functions, and [Design Notes](design-notes.md) for
+the language boundaries behind these rules.
 If you are porting existing shader code, start with
 [Migration From WGSL And GLSL](migration.md).
 

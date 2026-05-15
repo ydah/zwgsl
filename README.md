@@ -39,6 +39,7 @@ syntax while still targeting modern GPU backends.
 ## Documentation
 
 - [Language Reference](docs/language.md)
+- [Grammar Summary](docs/spec.md)
 - [Feature Matrix](docs/feature-matrix.md)
 - [Builtins](docs/builtins.md)
 - [C API](docs/c-api.md)
