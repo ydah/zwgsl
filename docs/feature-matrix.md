@@ -52,7 +52,7 @@ Legend:
 | Varying interface validation | Yes | Yes | Diagnostics | Yes |
 | Global uniforms | Yes | Yes | Completion | Generated controls for supported numeric uniforms |
 | Scalar/vector uniform layout wrapping | Yes | N/A | N/A | Yes |
-| `Sampler2D` uniforms | Yes | Yes | Completion | Placeholder texture/sampler |
+| `Sampler2D` uniforms | Yes | Yes | Completion | Placeholder texture/sampler with 2D image upload |
 | Sampler parameters | Yes | Yes | Diagnostics | Yes |
 | Immutable sampler aliases | Yes | N/A | Diagnostics | Yes |
 | Compute builtins | Yes | No | Completion | Compile output only |
@@ -67,7 +67,7 @@ Legend:
 | CLI | `zwgsl compile` and `zwgsl check` are available as `zig-out/bin/zwgsl`. |
 | LSP server | `zwgsl-lsp` supports diagnostics, hover, completion, goto-definition, document symbols, and semantic tokens. |
 | Browser wasm | `zig build wasm` emits `zig-out/bin/zwgsl.wasm`. |
-| Playground | Monaco editor, compiler-backed diagnostics, WGSL output tabs with resource layout, URL-addressable sample selector, and WebGPU preview. |
+| Playground | Monaco editor, compiler-backed diagnostics, WGSL output tabs with resource layout, URL-addressable sample/share links, and WebGPU preview with generated controls and texture upload. |
 | CI | Zig formatting, Zig tests, native build, wasm build, and playground build run in GitHub Actions. |
 
 ## Target Compatibility Notes
