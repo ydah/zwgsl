@@ -67,7 +67,7 @@ Legend:
 | CLI | `zwgsl compile` and `zwgsl check` are available as `zig-out/bin/zwgsl`. |
 | LSP server | `zwgsl-lsp` supports diagnostics, hover, completion, goto-definition, document symbols, and semantic tokens. |
 | Browser wasm | `zig build wasm` emits `zig-out/bin/zwgsl.wasm`. |
-| Playground | Monaco editor, compiler-backed diagnostics, WGSL output, sample selector, and WebGPU preview. |
+| Playground | Monaco editor, compiler-backed diagnostics, WGSL output, URL-addressable sample selector, and WebGPU preview. |
 | CI | Zig formatting, Zig tests, native build, wasm build, and playground build run in GitHub Actions. |
 
 ## Target Compatibility Notes

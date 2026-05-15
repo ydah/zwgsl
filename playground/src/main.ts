@@ -32,6 +32,23 @@ let latestDiagnostics = "";
 
 type CompileTrigger = "initial" | "edit" | "manual" | "sample";
 
+const sampleQueryKey = "sample";
+
+const sampleIdFromLocation = () => new URLSearchParams(window.location.search).get(sampleQueryKey);
+
+const findSample = (sampleId: string | null) =>
+  sampleId ? exampleSources.find((entry) => entry.id === sampleId) : null;
+
+const updateSampleUrl = (sampleId: string | null) => {
+  const url = new URL(window.location.href);
+  if (sampleId) {
+    url.searchParams.set(sampleQueryKey, sampleId);
+  } else {
+    url.searchParams.delete(sampleQueryKey);
+  }
+  window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+};
+
 const customOption = new Option("Custom", "custom");
 sampleSelect.append(customOption);
 
@@ -39,7 +56,16 @@ for (const example of exampleSources) {
   sampleSelect.append(new Option(example.label, example.id));
 }
 
-sampleSelect.value = defaultExample.id;
+const initialSampleId = sampleIdFromLocation();
+const initialSample = findSample(initialSampleId);
+
+if (initialSample) {
+  editor.setValue(initialSample.source);
+  sampleSelect.value = initialSample.id;
+} else {
+  sampleSelect.value = defaultExample.id;
+  if (initialSampleId) updateSampleUrl(null);
+}
 
 const setCompileButtonState = (busy: boolean) => {
   button.disabled = busy;
@@ -178,7 +204,10 @@ const requestCompile = (trigger: CompileTrigger) => {
 
 editor.onDidChangeModelContent(() => {
   window.clearTimeout(compileTimer);
-  if (!isLoadingSample) sampleSelect.value = "custom";
+  if (!isLoadingSample) {
+    sampleSelect.value = "custom";
+    updateSampleUrl(null);
+  }
   compileTimer = window.setTimeout(() => requestCompile("edit"), 300);
 });
 
@@ -208,12 +237,18 @@ downloadWgslButton.addEventListener("click", () => {
 });
 
 sampleSelect.addEventListener("change", () => {
+  if (sampleSelect.value === "custom") {
+    updateSampleUrl(null);
+    return;
+  }
+
   const example = exampleSources.find((entry) => entry.id === sampleSelect.value);
   if (!example) return;
 
   isLoadingSample = true;
   editor.setValue(example.source);
   isLoadingSample = false;
+  updateSampleUrl(example.id);
 
   window.clearTimeout(compileTimer);
   requestCompile("sample");
