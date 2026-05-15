@@ -83,6 +83,11 @@ pub const CompletionItem = struct {
     detail: ?[]const u8 = null,
 };
 
+pub const HoverInfo = struct {
+    detail: []const u8,
+    documentation: []const u8,
+};
+
 pub const TokenRef = struct {
     index: usize,
     tok: token.Token,
@@ -245,6 +250,42 @@ pub const Document = struct {
             if (info.line == line and info.column == column) return info;
         }
         return null;
+    }
+
+    pub fn memberHoverInfo(self: *const Document, member_name: []const u8, line: u32, character: u32) !?HoverInfo {
+        const dot_info = self.dotContext(line, character) orelse return null;
+        const receiver = self.resolveDefinition(dot_info.receiver_name, line, character) orelse return null;
+        const receiver_type = receiver.ty orelse return null;
+        const resolution = builtins.resolveMethod(member_name, receiver_type, &.{}) orelse return null;
+
+        const receiver_source_type = try formatType(self.allocator(), receiver_type);
+        const return_source_type = try formatType(self.allocator(), resolution.return_type);
+        const detail = try std.fmt.allocPrint(
+            self.allocator(),
+            "{s}.{s}: {s} -> {s}\nWGSL: {s}({s}) -> {s}",
+            .{
+                dot_info.receiver_name,
+                member_name,
+                receiver_source_type,
+                return_source_type,
+                member_name,
+                dot_info.receiver_name,
+                resolution.return_type.wgslName(),
+            },
+        );
+        const documentation = if (builtinDoc(member_name)) |doc|
+            try std.fmt.allocPrint(
+                self.allocator(),
+                "{s}\n\nMethod syntax lowers to a WGSL builtin call with the receiver as the first argument.",
+                .{doc.documentation},
+            )
+        else
+            "Method syntax lowers to a WGSL builtin call with the receiver as the first argument.";
+
+        return .{
+            .detail = detail,
+            .documentation = documentation,
+        };
     }
 
     pub fn functionScopeAt(self: *const Document, line: u32) ?FunctionScope {

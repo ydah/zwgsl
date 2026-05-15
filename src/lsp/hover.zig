@@ -20,6 +20,9 @@ pub fn response(allocator: std.mem.Allocator, source: []const u8, line: u32, cha
     if (analysis.keywordDoc(word)) |keyword| {
         return try markdownResponse(allocator, keyword.detail, keyword.documentation);
     }
+    if (try document.memberHoverInfo(word, line, character)) |member_hover| {
+        return try markdownResponse(allocator, member_hover.detail, member_hover.documentation);
+    }
     if (document.resolveDefinition(word, line, character)) |definition| {
         const detail = if (document.exprInfoAt(token_info.tok.line, token_info.tok.column)) |expr_info|
             expr_info.detail

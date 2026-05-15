@@ -108,7 +108,7 @@ Current editor-facing capabilities are:
 
 - incremental document sync with full-change compatibility
 - diagnostics from compiler errors and warnings
-- hover for builtins, declarations, and inferred types
+- hover for builtins, declarations, inferred types, and method lowering previews
 - completion for locals, declarations, stage builtins, constructors, fields, and methods
 - signature help for functions, constructors, and supported builtins
 - code actions for common stage declaration, unused uniform, and type/constructor casing fixes

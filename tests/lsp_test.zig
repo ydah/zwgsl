@@ -248,7 +248,8 @@ test "lsp hover returns builtin and inferred type information" {
         \\
         \\  def shade(pos: Vec3) -> Vec3
         \\    let normal = normalize(pos)
-        \\    normal
+        \\    let normalized = normal.normalize
+        \\    normalized
         \\  end
         \\end
     ;
@@ -258,9 +259,15 @@ test "lsp hover returns builtin and inferred type information" {
     try std.testing.expect(std.mem.indexOf(u8, builtin_hover, "normalize") != null);
     try std.testing.expect(std.mem.indexOf(u8, builtin_hover, "Vec(N)") != null);
 
-    const local_hover = try hover.response(std.testing.allocator, source, 5, 6);
+    const local_hover = try hover.response(std.testing.allocator, source, 6, 6);
     defer std.testing.allocator.free(local_hover);
     try std.testing.expect(std.mem.indexOf(u8, local_hover, "Vec3") != null);
+
+    const method_hover = try hover.response(std.testing.allocator, source, 5, 29);
+    defer std.testing.allocator.free(method_hover);
+    try std.testing.expect(std.mem.indexOf(u8, method_hover, "normal.normalize: Vec3 -> Vec3") != null);
+    try std.testing.expect(std.mem.indexOf(u8, method_hover, "WGSL: normalize(normal) -> vec3f") != null);
+    try std.testing.expect(std.mem.indexOf(u8, method_hover, "receiver as the first argument") != null);
 }
 
 test "lsp completion offers member and root suggestions" {
