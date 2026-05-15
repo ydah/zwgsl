@@ -45,7 +45,7 @@ pub fn handle(allocator: std.mem.Allocator, state: *State, message: []const u8) 
     const params = root.get("params");
 
     if (std.mem.eql(u8, method_name, "initialize")) {
-        return try response(allocator, id_value, "{\"capabilities\":{\"textDocumentSync\":1,\"hoverProvider\":true,\"completionProvider\":{\"triggerCharacters\":[\".\"]},\"definitionProvider\":true,\"documentSymbolProvider\":true,\"semanticTokensProvider\":{\"legend\":{\"tokenTypes\":[\"keyword\",\"function\",\"variable\",\"parameter\",\"type\",\"number\",\"string\",\"comment\",\"operator\",\"property\"],\"tokenModifiers\":[]},\"full\":true}}}");
+        return try response(allocator, id_value, "{\"capabilities\":{\"textDocumentSync\":2,\"hoverProvider\":true,\"completionProvider\":{\"triggerCharacters\":[\".\"]},\"definitionProvider\":true,\"documentSymbolProvider\":true,\"semanticTokensProvider\":{\"legend\":{\"tokenTypes\":[\"keyword\",\"function\",\"variable\",\"parameter\",\"type\",\"number\",\"string\",\"comment\",\"operator\",\"property\"],\"tokenModifiers\":[]},\"full\":true}}}");
     }
     if (std.mem.eql(u8, method_name, "shutdown")) {
         state.shutdown_requested = true;
@@ -71,21 +71,18 @@ pub fn handle(allocator: std.mem.Allocator, state: *State, message: []const u8) 
             .object => |object| object.get("contentChanges") orelse return try invalidParamsOrNull(allocator, id_value, "Missing contentChanges"),
             else => return try invalidParamsOrNull(allocator, id_value, "Params must be an object"),
         };
-        const change_text = switch (changes) {
+        const change_items = switch (changes) {
             .array => |array| blk: {
                 if (array.items.len == 0) return try invalidParamsOrNull(allocator, id_value, "Missing contentChanges[0]");
-                const first_change = switch (array.items[0]) {
-                    .object => |object| object,
-                    else => return try invalidParamsOrNull(allocator, id_value, "contentChanges[0] must be an object"),
-                };
-                break :blk first_change.get("text") orelse return try invalidParamsOrNull(allocator, id_value, "Missing contentChanges[0].text");
+                break :blk array.items;
             },
             else => return try invalidParamsOrNull(allocator, id_value, "contentChanges must be an array"),
         };
-        const text = switch (change_text) {
-            .string => |value| value,
-            else => return try invalidParamsOrNull(allocator, id_value, "contentChanges[0].text must be a string"),
+        const text = applyContentChanges(allocator, state.store.get(uri) orelse "", change_items) catch |err| switch (err) {
+            error.OutOfMemory => return err,
+            else => return try invalidParamsOrNull(allocator, id_value, contentChangeErrorMessage(err)),
         };
+        defer allocator.free(text);
         try state.store.put(uri, text);
         return try diagnostics.publish(allocator, uri, text);
     }
@@ -212,6 +209,87 @@ fn writeJsonString(writer: anytype, value: []const u8) !void {
         else => try writer.writeByte(ch),
     };
     try writer.writeByte('"');
+}
+
+fn applyContentChanges(
+    allocator: std.mem.Allocator,
+    original: []const u8,
+    changes: []const std.json.Value,
+) ![]u8 {
+    var current = try allocator.dupe(u8, original);
+    errdefer allocator.free(current);
+
+    for (changes) |change| {
+        const object = switch (change) {
+            .object => |value| value,
+            else => return error.ChangeMustBeObject,
+        };
+        const text_value = object.get("text") orelse return error.MissingChangeText;
+        const replacement = switch (text_value) {
+            .string => |value| value,
+            else => return error.ChangeTextMustBeString,
+        };
+
+        if (object.get("range")) |range| {
+            const start_line = nestedU32(range, &.{ "start", "line" }) orelse return error.InvalidChangeRange;
+            const start_character = nestedU32(range, &.{ "start", "character" }) orelse return error.InvalidChangeRange;
+            const end_line = nestedU32(range, &.{ "end", "line" }) orelse return error.InvalidChangeRange;
+            const end_character = nestedU32(range, &.{ "end", "character" }) orelse return error.InvalidChangeRange;
+            const start_offset = offsetForPosition(current, start_line, start_character) orelse return error.ChangeRangeOutOfBounds;
+            const end_offset = offsetForPosition(current, end_line, end_character) orelse return error.ChangeRangeOutOfBounds;
+            if (end_offset < start_offset) return error.ChangeRangeOutOfBounds;
+
+            var buffer = try std.ArrayList(u8).initCapacity(
+                allocator,
+                current.len - (end_offset - start_offset) + replacement.len,
+            );
+            errdefer buffer.deinit(allocator);
+            try buffer.appendSlice(allocator, current[0..start_offset]);
+            try buffer.appendSlice(allocator, replacement);
+            try buffer.appendSlice(allocator, current[end_offset..]);
+
+            const next = try buffer.toOwnedSlice(allocator);
+            allocator.free(current);
+            current = next;
+            continue;
+        }
+
+        const next = try allocator.dupe(u8, replacement);
+        allocator.free(current);
+        current = next;
+    }
+
+    return current;
+}
+
+fn offsetForPosition(source: []const u8, target_line: u32, target_character: u32) ?usize {
+    var line: u32 = 0;
+    var character: u32 = 0;
+    var index: usize = 0;
+
+    while (index < source.len) : (index += 1) {
+        if (line == target_line and character == target_character) return index;
+        if (source[index] == '\n') {
+            line += 1;
+            character = 0;
+        } else {
+            character += 1;
+        }
+    }
+
+    if (line == target_line and character == target_character) return source.len;
+    return null;
+}
+
+fn contentChangeErrorMessage(err: anyerror) []const u8 {
+    return switch (err) {
+        error.ChangeMustBeObject => "contentChanges[0] must be an object",
+        error.MissingChangeText => "Missing contentChanges[0].text",
+        error.ChangeTextMustBeString => "contentChanges[0].text must be a string",
+        error.InvalidChangeRange => "contentChanges[0].range must include start and end positions",
+        error.ChangeRangeOutOfBounds => "contentChanges[0].range is outside the document",
+        else => "Invalid contentChanges",
+    };
 }
 
 fn nestedString(root: std.json.Value, path: []const []const u8) ?[]const u8 {

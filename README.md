@@ -346,7 +346,7 @@ configuration notes, including the local VS Code extension in `editors/vscode`.
 
 Current editor-facing features:
 
-- full-sync `didOpen` / `didChange` / `didClose`
+- incremental `didChange` with full-document change compatibility
 - diagnostics from compiler errors and warnings
 - hover with source-aware type / declaration info
 - completion for locals, declarations, builtins, fields, and methods

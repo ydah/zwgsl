@@ -33,6 +33,7 @@ test "lsp initialize advertises hover completion definition document symbols and
     defer std.testing.allocator.free(response);
 
     try std.testing.expect(std.mem.indexOf(u8, response, "\"hoverProvider\":true") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"textDocumentSync\":2") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"completionProvider\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"definitionProvider\":true") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"documentSymbolProvider\":true") != null);
@@ -190,6 +191,44 @@ test "lsp invalid params returns error instead of trapping" {
     try std.testing.expect(std.mem.indexOf(u8, response, "\"id\":9") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"code\":-32602") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"data\":\"Missing contentChanges[0]\"") != null);
+}
+
+test "lsp didChange applies incremental and full text changes" {
+    var state = handler.State.init(std.testing.allocator);
+    defer state.deinit();
+
+    const source = "uniform :mvp, Mat4\n";
+    const escaped_source = try jsonString(std.testing.allocator, source);
+    defer std.testing.allocator.free(escaped_source);
+    const open_message = try std.mem.concat(
+        std.testing.allocator,
+        u8,
+        &.{
+            "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file:///shader.zw\",\"text\":",
+            escaped_source,
+            "}}}",
+        },
+    );
+    defer std.testing.allocator.free(open_message);
+
+    const open_response = (try handler.handle(std.testing.allocator, &state, open_message)).?;
+    defer std.testing.allocator.free(open_response);
+
+    const incremental_response = (try handler.handle(
+        std.testing.allocator,
+        &state,
+        "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didChange\",\"params\":{\"textDocument\":{\"uri\":\"file:///shader.zw\"},\"contentChanges\":[{\"range\":{\"start\":{\"line\":0,\"character\":9},\"end\":{\"line\":0,\"character\":12}},\"text\":\"model\"}]}}",
+    )).?;
+    defer std.testing.allocator.free(incremental_response);
+    try std.testing.expectEqualStrings("uniform :model, Mat4\n", state.store.get("file:///shader.zw").?);
+
+    const full_response = (try handler.handle(
+        std.testing.allocator,
+        &state,
+        "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didChange\",\"params\":{\"textDocument\":{\"uri\":\"file:///shader.zw\"},\"contentChanges\":[{\"text\":\"uniform :view, Mat4\\n\"}]}}",
+    )).?;
+    defer std.testing.allocator.free(full_response);
+    try std.testing.expectEqualStrings("uniform :view, Mat4\n", state.store.get("file:///shader.zw").?);
 }
 
 test "lsp hover returns builtin and inferred type information" {
