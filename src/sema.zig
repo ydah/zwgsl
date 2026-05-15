@@ -901,9 +901,13 @@ const Analyzer = struct {
         }
 
         var last_expr_type: ?types.Type = null;
+        var last_expr_position = function.position;
         for (function.body, 0..) |statement, index| {
             const stmt_type = try self.analyzeStmt(&scope, statement, &context);
-            if (index + 1 == function.body.len) last_expr_type = stmt_type;
+            if (index + 1 == function.body.len) {
+                last_expr_type = stmt_type;
+                last_expr_position = statement.position;
+            }
         }
 
         if (sameName(function.name, "main") and !signature.return_type.isVoid()) {
@@ -916,26 +920,34 @@ const Analyzer = struct {
         }
 
         if (signature.return_type.isVoid()) {
-            for (context.return_types.items) |return_type| {
-                if (!return_type.isVoid()) {
-                    try self.report(function.position, "void function '{s}' must not return a value", .{function.name});
+            for (context.return_types.items) |return_info| {
+                if (!return_info.ty.isVoid()) {
+                    try self.report(return_info.position, "void function '{s}' must not return a value of type {s}", .{ function.name, return_info.ty.sourceName() });
                 }
             }
             return;
         }
 
         var saw_value_return = false;
-        for (context.return_types.items) |return_type| {
+        for (context.return_types.items) |return_info| {
             saw_value_return = true;
-            if (!self.typesCompatible(signature.return_type, return_type)) {
-                try self.report(function.position, "return type mismatch in '{s}'", .{function.name});
+            if (!self.typesCompatible(signature.return_type, return_info.ty)) {
+                try self.report(return_info.position, "return type mismatch in '{s}': expected {s}, got {s}", .{
+                    function.name,
+                    signature.return_type.sourceName(),
+                    return_info.ty.sourceName(),
+                });
             }
         }
 
         if (!saw_value_return) {
             if (last_expr_type) |expr_type| {
                 if (!self.typesCompatible(signature.return_type, expr_type)) {
-                    try self.report(function.position, "implicit return type mismatch in '{s}'", .{function.name});
+                    try self.report(last_expr_position, "implicit return type mismatch in '{s}': expected {s}, got {s}", .{
+                        function.name,
+                        signature.return_type.sourceName(),
+                        expr_type.sourceName(),
+                    });
                 }
             } else {
                 try self.report(function.position, "function '{s}' does not produce a value", .{function.name});
@@ -962,7 +974,11 @@ const Analyzer = struct {
                 const target_type = try self.resolveTypeName(typed_assignment.type_name, stmt.position);
                 const value_type = try self.analyzeExpr(scope, typed_assignment.value, context);
                 if (!self.typesCompatible(target_type, value_type)) {
-                    try self.report(stmt.position, "cannot assign value of type {s} to {s}", .{ value_type.glslName(), target_type.glslName() });
+                    try self.report(stmt.position, "type mismatch in typed assignment '{s}': expected {s}, got {s}", .{
+                        typed_assignment.name,
+                        target_type.sourceName(),
+                        value_type.sourceName(),
+                    });
                 }
                 if (!try scope.put(typed_assignment.name, .{
                     .ty = target_type,
@@ -982,7 +998,10 @@ const Analyzer = struct {
                     try self.analyzeExpr(scope, expr, context)
                 else
                     types.builtinType(.void);
-                try context.return_types.append(self.allocator, return_type);
+                try context.return_types.append(self.allocator, .{
+                    .ty = return_type,
+                    .position = if (value) |expr| expr.position else stmt.position,
+                });
                 return null;
             },
             .discard => {
@@ -1076,7 +1095,11 @@ const Analyzer = struct {
         const target_type = if (binding.type_name) |type_name| blk: {
             const annotated = try self.resolveTypeName(type_name, binding.position);
             if (!self.typesCompatible(annotated, value_type)) {
-                try self.report(binding.position, "cannot assign value of type {s} to {s}", .{ value_type.glslName(), annotated.glslName() });
+                try self.report(binding.position, "type mismatch in let binding '{s}': expected {s}, got {s}", .{
+                    binding.name,
+                    annotated.sourceName(),
+                    value_type.sourceName(),
+                });
             }
             break :blk annotated;
         } else value_type;
@@ -1234,7 +1257,11 @@ const Analyzer = struct {
                     try self.rememberExprType(assignment.target, symbol.ty);
                     if (assignment.operator == .assign) {
                         if (!self.typesCompatible(symbol.ty, value_type)) {
-                            try self.report(assignment.target.position, "cannot assign value of type {s} to {s}", .{ value_type.glslName(), symbol.ty.glslName() });
+                            try self.report(assignment.target.position, "type mismatch in assignment to '{s}': expected {s}, got {s}", .{
+                                name,
+                                symbol.ty.sourceName(),
+                                value_type.sourceName(),
+                            });
                         }
                     } else {
                         const result_type = types.resolveOp(compoundOperator(assignment.operator), symbol.ty, value_type) orelse types.builtinType(.error_type);
@@ -1264,7 +1291,10 @@ const Analyzer = struct {
                 const target_type = try self.analyzeExpr(scope, assignment.target, context);
                 if (assignment.operator == .assign) {
                     if (!self.typesCompatible(target_type, value_type)) {
-                        try self.report(assignment.target.position, "cannot assign value of type {s} to {s}", .{ value_type.glslName(), target_type.glslName() });
+                        try self.report(assignment.target.position, "type mismatch in assignment: expected {s}, got {s}", .{
+                            target_type.sourceName(),
+                            value_type.sourceName(),
+                        });
                     }
                 } else {
                     if (types.resolveOp(compoundOperator(assignment.operator), target_type, value_type) == null) {
@@ -2456,7 +2486,12 @@ const FunctionContext = struct {
     stage_functions: []const *ast.FunctionDef,
     hm_engine: *hm.Engine,
     self_type: ?types.Type = null,
-    return_types: std.ArrayListUnmanaged(types.Type) = .{},
+    return_types: std.ArrayListUnmanaged(ReturnInfo) = .{},
+};
+
+const ReturnInfo = struct {
+    ty: types.Type,
+    position: ast.Position,
 };
 
 fn compoundOperator(tag: @import("token.zig").TokenTag) @import("token.zig").TokenTag {

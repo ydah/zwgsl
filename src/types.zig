@@ -180,6 +180,43 @@ pub const Type = union(enum) {
         };
     }
 
+    pub fn sourceName(self: Type) []const u8 {
+        return switch (self) {
+            .builtin => |builtin| switch (builtin) {
+                .float => "Float",
+                .int => "Int",
+                .uint => "UInt",
+                .bool => "Bool",
+                .symbol => "Symbol",
+                .vec2 => "Vec2",
+                .vec3 => "Vec3",
+                .vec4 => "Vec4",
+                .ivec2 => "IVec2",
+                .ivec3 => "IVec3",
+                .ivec4 => "IVec4",
+                .uvec2 => "UVec2",
+                .uvec3 => "UVec3",
+                .uvec4 => "UVec4",
+                .bvec2 => "BVec2",
+                .bvec3 => "BVec3",
+                .bvec4 => "BVec4",
+                .mat2 => "Mat2",
+                .mat3 => "Mat3",
+                .mat4 => "Mat4",
+                .sampler2d => "Sampler2D",
+                .sampler_cube => "SamplerCube",
+                .sampler3d => "Sampler3D",
+                .void => "Void",
+                .error_type => "__error__",
+            },
+            .struct_type => |name| name,
+            .function => "__fn__",
+            .type_var => "__tvar__",
+            .type_app => |app_ty| builtinAppName(app_ty, .source) orelse app_ty.name,
+            .nat => "__nat__",
+        };
+    }
+
     pub fn componentType(self: Type) ?Type {
         return switch (self) {
             .builtin => |builtin| switch (builtin) {
@@ -554,10 +591,16 @@ pub fn vectorTypeForComponent(component: Type, len: u8) ?Type {
     };
 }
 
-fn builtinAppName(app_ty: TypeApp, target: enum { glsl, wgsl }) ?[]const u8 {
+fn builtinAppName(app_ty: TypeApp, target: enum { source, glsl, wgsl }) ?[]const u8 {
     if (std.mem.eql(u8, app_ty.name, "Vec") and app_ty.args.len == 1) {
         const len = natLen(app_ty.args[0]) orelse return null;
         return switch (target) {
+            .source => switch (len) {
+                2 => "Vec2",
+                3 => "Vec3",
+                4 => "Vec4",
+                else => null,
+            },
             .glsl => switch (len) {
                 2 => "vec2",
                 3 => "vec3",
@@ -578,6 +621,12 @@ fn builtinAppName(app_ty: TypeApp, target: enum { glsl, wgsl }) ?[]const u8 {
         const cols = natLen(app_ty.args[1]) orelse return null;
         if (rows != cols) return null;
         return switch (target) {
+            .source => switch (rows) {
+                2 => "Mat2",
+                3 => "Mat3",
+                4 => "Mat4",
+                else => null,
+            },
             .glsl => switch (rows) {
                 2 => "mat2",
                 3 => "mat3",

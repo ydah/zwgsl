@@ -186,7 +186,7 @@ test "sema reports type mismatches" {
         \\end
     );
     defer analyzed.arena.deinit();
-    try std.testing.expect(analyzed.diagnostics.items.items.len > 0);
+    try expectDiagnosticContaining(analyzed.diagnostics.items.items, "type mismatch in assignment to 'frag_color': expected Vec4, got Float");
 }
 
 test "sema validates varying compatibility" {
@@ -265,7 +265,7 @@ test "sema checks implicit return types" {
         \\end
     );
     defer analyzed.arena.deinit();
-    try std.testing.expect(analyzed.diagnostics.items.items.len > 0);
+    try expectDiagnosticContaining(analyzed.diagnostics.items.items, "implicit return type mismatch in 'normalize_value': expected Vec3, got Float");
 }
 
 test "sema rejects invalid builtin calls" {
