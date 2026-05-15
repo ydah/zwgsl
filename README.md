@@ -40,6 +40,7 @@ syntax while still targeting modern GPU backends.
 
 - [Language Reference](docs/language.md)
 - [Feature Matrix](docs/feature-matrix.md)
+- [Builtins](docs/builtins.md)
 - [Gotchas](docs/gotchas.md)
 - [Design Notes](docs/design-notes.md)
 - [Roadmap](ROADMAP.md)

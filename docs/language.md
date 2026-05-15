@@ -19,6 +19,7 @@ Core rules:
 - WGSL is the primary backend; GLSL ES 3.0 is retained as a render-stage backend.
 
 See [Gotchas](gotchas.md) for target-specific constraints and
+[Builtins](builtins.md) for supported builtin types/functions, and
 [Design Notes](design-notes.md) for the language boundaries behind these rules.
 
 ## Top-Level Items

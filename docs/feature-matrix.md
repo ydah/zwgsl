@@ -75,6 +75,7 @@ Legend:
 - WGSL is the primary target and has coverage for render and compute shaders.
 - GLSL ES 3.0 is a render-stage target; compute shaders are rejected for this
   target.
+- Implemented builtin types and functions are listed in [Builtins](builtins.md).
 - Some advanced type-system features are target-independent during semantic
   analysis but only have golden output coverage for WGSL fixtures today.
 - Playground preview is render-pipeline oriented. Compute-only shaders compile,
