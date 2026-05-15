@@ -76,6 +76,19 @@ type CompiledPreviewState = {
 
 type PersistedUniformValues = Record<string, number[]>;
 
+type PreviewDeviceState =
+  | {
+      available: true;
+      device: GPUDevice;
+      context: GPUCanvasContext;
+      format: GPUTextureFormat;
+    }
+  | {
+      available: false;
+      reason: string;
+      details: string[];
+    };
+
 const uniformStorageKey = "zwgsl.playground.uniforms.v1";
 const uploadedTextureSize = 512;
 
@@ -128,23 +141,86 @@ const previewColors = [
   [1, 0.82, 0.24, 1],
 ] as const;
 
+const describeErrorMessage = (error: unknown) => {
+  if (error instanceof Error && error.message) return error.message;
+  if (typeof error === "string" && error.trim().length > 0) return error;
+  return "The browser did not provide a detailed error.";
+};
+
+const createPreviewDeviceState = async (canvas: HTMLCanvasElement): Promise<PreviewDeviceState> => {
+  const gpu = navigator.gpu;
+  if (!gpu) {
+    return {
+      available: false,
+      reason: "WebGPU is not exposed in this browser context.",
+      details: [
+        "Open the playground in a WebGPU-capable browser.",
+        "Use a secure context such as HTTPS or localhost.",
+        "The editor, compiler, diagnostics, and generated WGSL output still work without live preview.",
+      ],
+    };
+  }
+
+  let adapter: GPUAdapter | null;
+  try {
+    adapter = await gpu.requestAdapter();
+  } catch (error) {
+    return {
+      available: false,
+      reason: "The browser failed while requesting a WebGPU adapter.",
+      details: [describeErrorMessage(error), "The canvas is using a static 2D fallback."],
+    };
+  }
+
+  if (!adapter) {
+    return {
+      available: false,
+      reason: "No WebGPU adapter was available.",
+      details: [
+        "The GPU may be disabled, blocked by the browser, or unavailable in this environment.",
+        "The canvas is using a static 2D fallback.",
+      ],
+    };
+  }
+
+  let device: GPUDevice;
+  try {
+    device = await adapter.requestDevice();
+  } catch (error) {
+    return {
+      available: false,
+      reason: "The browser could not create a WebGPU device.",
+      details: [describeErrorMessage(error), "The canvas is using a static 2D fallback."],
+    };
+  }
+
+  const context = canvas.getContext("webgpu");
+  if (!context) {
+    return {
+      available: false,
+      reason: "The canvas could not create a WebGPU rendering context.",
+      details: ["The canvas is using a static 2D fallback."],
+    };
+  }
+
+  return {
+    available: true,
+    device,
+    context,
+    format: gpu.getPreferredCanvasFormat(),
+  };
+};
+
 export const createPreview = async (
   canvas: HTMLCanvasElement,
   controlsRoot: HTMLElement,
   status: HTMLElement,
 ): Promise<PreviewApi> => {
-  const gpu = navigator.gpu;
-  const adapter = await gpu?.requestAdapter();
-  const device = await adapter?.requestDevice();
-  const context = canvas.getContext("webgpu");
+  const deviceState = await createPreviewDeviceState(canvas);
 
-  if (!gpu || !adapter || !device || !context) {
+  if (!deviceState.available) {
     status.textContent = "2d fallback";
-    controlsRoot.replaceChildren(
-      makeEmptyState(
-        "WebGPU unavailable. The editor and compiler still work; the canvas shows a static 2D fallback. Use a browser with navigator.gpu enabled for live preview.",
-      ),
-    );
+    controlsRoot.replaceChildren(makePreviewUnavailableState(deviceState));
     return {
       async render(_: CompileResult) {
         const ctx = canvas.getContext("2d");
@@ -156,7 +232,7 @@ export const createPreview = async (
     };
   }
 
-  const format = gpu.getPreferredCanvasFormat();
+  const { device, context, format } = deviceState;
   context.configure({ device, format, alphaMode: "opaque" });
 
   let pendingResult: CompileResult | null = null;
@@ -895,6 +971,29 @@ const makePreviewErrorState = (error: unknown) => {
     }
     section.append(list);
   }
+
+  return section;
+};
+
+const makePreviewUnavailableState = (state: Extract<PreviewDeviceState, { available: false }>) => {
+  const section = document.createElement("section");
+  section.className = "preview-unavailable";
+
+  const title = document.createElement("strong");
+  title.textContent = "Live preview unavailable";
+  section.append(title);
+
+  const summary = document.createElement("p");
+  summary.textContent = state.reason;
+  section.append(summary);
+
+  const list = document.createElement("ul");
+  for (const detail of state.details) {
+    const item = document.createElement("li");
+    item.textContent = detail;
+    list.append(item);
+  }
+  section.append(list);
 
   return section;
 };

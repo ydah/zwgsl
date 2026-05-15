@@ -225,13 +225,29 @@ body {
   line-height: 1.45;
 }
 
+.preview-unavailable {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(185, 129, 40, 0.28);
+  border-radius: 8px;
+  background: rgba(185, 129, 40, 0.08);
+  color: var(--ink);
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
 .preview-error strong,
 .preview-error p,
-.preview-error ul {
+.preview-error ul,
+.preview-unavailable strong,
+.preview-unavailable p,
+.preview-unavailable ul {
   margin: 0;
 }
 
-.preview-error ul {
+.preview-error ul,
+.preview-unavailable ul {
   display: grid;
   gap: 6px;
   padding-left: 18px;
