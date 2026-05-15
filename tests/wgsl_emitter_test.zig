@@ -274,6 +274,15 @@ test "compiler emits WGSL for the phong fixture" {
     );
 }
 
+test "compiler emits WGSL for the pbr fixture" {
+    try expectWgslFixture(
+        "examples/pbr.zw",
+        "tests/fixtures/pbr.vertex.wgsl",
+        "tests/fixtures/pbr.fragment.wgsl",
+        null,
+    );
+}
+
 test "compiler omits fragment-only global helpers from vertex WGSL" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
