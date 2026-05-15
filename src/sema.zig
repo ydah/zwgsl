@@ -37,6 +37,11 @@ const VaryingInfo = struct {
     position: ast.Position,
 };
 
+const LocationClaim = struct {
+    name: []const u8,
+    kind: SymbolKind,
+};
+
 const Scope = struct {
     allocator: std.mem.Allocator,
     parent: ?*const Scope,
@@ -246,6 +251,7 @@ const Analyzer = struct {
         try self.collectTopLevel();
         try self.registerFunctions();
         try self.validateVaryings();
+        try self.validateStageLocations();
         try self.analyzeGlobalFunctions();
         try self.analyzeImplFunctions();
         if (self.typed.vertex_block) |vertex| try self.analyzeStage(vertex, self.vertex_functions.items);
@@ -756,6 +762,81 @@ const Analyzer = struct {
                 });
             }
         }
+    }
+
+    fn validateStageLocations(self: *Analyzer) anyerror!void {
+        if (self.typed.vertex_block) |block| try self.validateStageBlockLocations(block);
+        if (self.typed.fragment_block) |block| try self.validateStageBlockLocations(block);
+        if (self.typed.compute_block) |block| try self.validateStageBlockLocations(block);
+    }
+
+    fn validateStageBlockLocations(self: *Analyzer, block: *ast.ShaderBlock) anyerror!void {
+        var input_locations = std.AutoHashMap(u32, LocationClaim).init(self.allocator);
+        defer input_locations.deinit();
+        var output_locations = std.AutoHashMap(u32, LocationClaim).init(self.allocator);
+        defer output_locations.deinit();
+        var varying_locations = std.AutoHashMap(u32, LocationClaim).init(self.allocator);
+        defer varying_locations.deinit();
+        var vertex_result_locations = std.AutoHashMap(u32, LocationClaim).init(self.allocator);
+        defer vertex_result_locations.deinit();
+
+        var input_index: u32 = 0;
+        var output_index: u32 = 0;
+        var varying_index: u32 = 0;
+
+        for (block.items) |item| {
+            switch (item) {
+                .input => |decl| {
+                    const location = effectiveLocation(decl, input_index);
+                    input_index += 1;
+                    _ = try self.claimStageLocation(&input_locations, block.stage, decl, .input, location);
+                },
+                .output => |decl| {
+                    const location = effectiveLocation(decl, output_index);
+                    output_index += 1;
+                    const unique_output = try self.claimStageLocation(&output_locations, block.stage, decl, .output, location);
+                    if (block.stage == .vertex and unique_output) {
+                        _ = try self.claimStageLocation(&vertex_result_locations, block.stage, decl, .output, location);
+                    }
+                },
+                .varying => |decl| {
+                    const location = effectiveLocation(decl, varying_index);
+                    varying_index += 1;
+                    const unique_varying = try self.claimStageLocation(&varying_locations, block.stage, decl, .varying, location);
+                    if (block.stage == .vertex and unique_varying) {
+                        _ = try self.claimStageLocation(&vertex_result_locations, block.stage, decl, .varying, location);
+                    }
+                },
+                else => {},
+            }
+        }
+    }
+
+    fn claimStageLocation(
+        self: *Analyzer,
+        locations: *std.AutoHashMap(u32, LocationClaim),
+        stage: ast.Stage,
+        decl: ast.IoDecl,
+        kind: SymbolKind,
+        location: u32,
+    ) anyerror!bool {
+        if (locations.get(location)) |previous| {
+            try self.report(decl.position, "{s} shader has duplicate location {d}: {s} '{s}' conflicts with {s} '{s}'", .{
+                stageName(stage),
+                location,
+                symbolKindDescription(kind),
+                decl.name,
+                symbolKindDescription(previous.kind),
+                previous.name,
+            });
+            return false;
+        }
+
+        try locations.put(location, .{
+            .name = decl.name,
+            .kind = kind,
+        });
+        return true;
     }
 
     fn analyzeGlobalFunctions(self: *Analyzer) anyerror!void {
@@ -2563,6 +2644,10 @@ fn stageName(stage: ast.Stage) []const u8 {
         .fragment => "fragment",
         .compute => "compute",
     };
+}
+
+fn effectiveLocation(decl: ast.IoDecl, index: u32) u32 {
+    return decl.location orelse index;
 }
 
 fn sameName(lhs: []const u8, rhs: []const u8) bool {

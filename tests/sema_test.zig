@@ -117,6 +117,54 @@ test "sema reports duplicate stage declarations" {
     try expectDiagnosticContaining(analyzed.diagnostics.items.items, "redefinition of 'position'");
 }
 
+test "sema reports duplicate stage input locations" {
+    var analyzed = try analyzeSource(
+        \\vertex do
+        \\  input :position, Vec3, location: 0
+        \\  input :normal, Vec3, location: 0
+        \\  def main
+        \\    gl_Position = vec4(position, 1.0)
+        \\  end
+        \\end
+    );
+    defer analyzed.arena.deinit();
+
+    try expectDiagnosticContaining(analyzed.diagnostics.items.items, "vertex shader has duplicate location 0");
+}
+
+test "sema reports explicit and implicit location collisions" {
+    var analyzed = try analyzeSource(
+        \\vertex do
+        \\  input :position, Vec3, location: 1
+        \\  input :normal, Vec3
+        \\  def main
+        \\    gl_Position = vec4(position + normal, 1.0)
+        \\  end
+        \\end
+    );
+    defer analyzed.arena.deinit();
+
+    try expectDiagnosticContaining(analyzed.diagnostics.items.items, "stage input declaration 'normal' conflicts with stage input declaration 'position'");
+}
+
+test "sema reports vertex result location collisions" {
+    var analyzed = try analyzeSource(
+        \\vertex do
+        \\  input :position, Vec3, location: 0
+        \\  varying :v_color, Vec3
+        \\  output :clip_color, Vec4, location: 0
+        \\  def main
+        \\    self.v_color = position
+        \\    self.clip_color = vec4(position, 1.0)
+        \\    gl_Position = vec4(position, 1.0)
+        \\  end
+        \\end
+    );
+    defer analyzed.arena.deinit();
+
+    try expectDiagnosticContaining(analyzed.diagnostics.items.items, "stage output declaration 'clip_color' conflicts with varying declaration 'v_color'");
+}
+
 test "sema rejects compute stage IO declarations" {
     var analyzed = try analyzeSource(
         \\compute do
