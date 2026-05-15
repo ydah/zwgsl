@@ -2,34 +2,8 @@ import "./styles.css";
 
 import { createEditor } from "./editor";
 import { createCompiler, type CompileResult } from "./compiler";
+import { defaultExample, exampleSources } from "./examples";
 import { createPreview } from "./preview";
-
-const source = `uniform :tint, Vec4
-uniform :iTime, Float
-uniform :iResolution, Vec2
-
-vertex do
-  input :position, Vec3, location: 0
-  varying :v_uv, Vec2
-
-  def main
-    self.v_uv = position.xy * 0.5 + vec2(0.5, 0.5)
-    gl_Position = vec4(position, 1.0)
-  end
-end
-
-fragment do
-  varying :v_uv, Vec2
-  output :frag_color, Vec4, location: 0
-
-  def main
-    aspect = iResolution.x / max(iResolution.y, 1.0)
-    pulse = 0.55 + 0.45 * sin(iTime)
-    glow = vec3(v_uv.x, v_uv.y * aspect, 1.0 - v_uv.x)
-    frag_color = vec4((tint.rgb * pulse) * glow, tint.a)
-  end
-end
-`;
 
 const status = document.querySelector<HTMLSpanElement>("#status")!;
 const output = document.querySelector<HTMLElement>("#wgsl-output")!;
@@ -37,15 +11,29 @@ const button = document.querySelector<HTMLButtonElement>("#compile-button")!;
 const canvas = document.querySelector<HTMLCanvasElement>("#preview-canvas")!;
 const previewStatus = document.querySelector<HTMLSpanElement>("#preview-status")!;
 const uniformControls = document.querySelector<HTMLElement>("#uniform-controls")!;
+const sampleSelect = document.querySelector<HTMLSelectElement>("#sample-select")!;
 
-const editor = await createEditor(document.querySelector<HTMLElement>("#editor")!, source);
+const editor = await createEditor(
+  document.querySelector<HTMLElement>("#editor")!,
+  defaultExample.source,
+);
 const compiler = await createCompiler();
 const preview = await createPreview(canvas, uniformControls, previewStatus);
 let compileTimer = 0;
 let pendingTrigger: CompileTrigger | null = null;
 let compileLoop: Promise<void> | null = null;
+let isLoadingSample = false;
 
-type CompileTrigger = "initial" | "edit" | "manual";
+type CompileTrigger = "initial" | "edit" | "manual" | "sample";
+
+const customOption = new Option("Custom", "custom");
+sampleSelect.append(customOption);
+
+for (const example of exampleSources) {
+  sampleSelect.append(new Option(example.label, example.id));
+}
+
+sampleSelect.value = defaultExample.id;
 
 const setCompileButtonState = (busy: boolean) => {
   button.disabled = busy;
@@ -74,7 +62,12 @@ const renderCompileOutput = (result: CompileResult) => {
 
 const runCompile = async (trigger: CompileTrigger) => {
   setCompileButtonState(true);
-  status.textContent = trigger === "manual" ? "compiling (manual)" : "compiling";
+  status.textContent =
+    trigger === "manual"
+      ? "compiling (manual)"
+      : trigger === "sample"
+        ? "compiling sample"
+        : "compiling";
 
   try {
     const result = await compiler.compile(editor.getValue());
@@ -112,12 +105,25 @@ const requestCompile = (trigger: CompileTrigger) => {
 
 editor.onDidChangeModelContent(() => {
   window.clearTimeout(compileTimer);
+  if (!isLoadingSample) sampleSelect.value = "custom";
   compileTimer = window.setTimeout(() => requestCompile("edit"), 300);
 });
 
 button.addEventListener("click", () => {
   window.clearTimeout(compileTimer);
   requestCompile("manual");
+});
+
+sampleSelect.addEventListener("change", () => {
+  const example = exampleSources.find((entry) => entry.id === sampleSelect.value);
+  if (!example) return;
+
+  isLoadingSample = true;
+  editor.setValue(example.source);
+  isLoadingSample = false;
+
+  window.clearTimeout(compileTimer);
+  requestCompile("sample");
 });
 
 requestCompile("initial");
