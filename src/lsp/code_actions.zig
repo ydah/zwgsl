@@ -55,9 +55,43 @@ pub fn response(allocator: std.mem.Allocator, uri: []const u8, source: []const u
         });
     }
 
+    try appendUnusedUniformActions(allocator, &actions, source);
     try appendCasingActions(allocator, &actions, source);
 
     return try writeActions(allocator, uri, actions.items);
+}
+
+fn appendUnusedUniformActions(
+    allocator: std.mem.Allocator,
+    actions: *std.ArrayList(Action),
+    source: []const u8,
+) !void {
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    const arena_allocator = arena.allocator();
+
+    var diagnostic_list = core_diagnostics.DiagnosticList.init(arena_allocator);
+    const tokens = lexer.Lexer.tokenizeResolved(arena_allocator, source) catch return;
+    var syntax_parser = parser.Parser.init(arena_allocator, source, tokens, &diagnostic_list);
+    const program = syntax_parser.parseProgram() catch return;
+
+    for (program.items) |item| {
+        const uniform = switch (item) {
+            .uniform => |value| value,
+            else => continue,
+        };
+        if (sourceHasIdentifier(tokens, source, uniform.name)) continue;
+
+        const range = deleteLineRange(source, uniform.position.line);
+        try actions.append(allocator, .{
+            .title = "Remove unused uniform",
+            .start_line = range.start_line,
+            .start_character = 0,
+            .end_line = range.end_line,
+            .end_character = range.end_character,
+            .new_text = "",
+        });
+    }
 }
 
 fn appendCasingActions(
@@ -201,6 +235,48 @@ fn constructorNameForTypeName(name: []const u8) ?[]const u8 {
         if (std.mem.eql(u8, name, fix.type_name)) return fix.constructor_name;
     }
     return null;
+}
+
+fn sourceHasIdentifier(tokens: []const token.Token, source: []const u8, name: []const u8) bool {
+    for (tokens) |tok| {
+        if (tok.tag != .identifier) continue;
+        if (std.mem.eql(u8, tok.lexeme(source), name)) return true;
+    }
+    return false;
+}
+
+fn deleteLineRange(source: []const u8, one_based_line: u32) struct {
+    start_line: u32,
+    end_line: u32,
+    end_character: u32,
+} {
+    const line = if (one_based_line > 0) one_based_line - 1 else 0;
+    var current_line: u32 = 0;
+    var line_start: usize = 0;
+
+    while (line_start < source.len and current_line < line) : (current_line += 1) {
+        line_start = lineEndOffset(source, line_start) orelse source.len;
+        if (line_start < source.len and source[line_start] == '\n') line_start += 1;
+    }
+
+    const line_end = lineEndOffset(source, line_start) orelse source.len;
+    if (line_end < source.len and source[line_end] == '\n') {
+        return .{
+            .start_line = line,
+            .end_line = line + 1,
+            .end_character = 0,
+        };
+    }
+
+    return .{
+        .start_line = line,
+        .end_line = line,
+        .end_character = @intCast(line_end - line_start),
+    };
+}
+
+fn lineEndOffset(source: []const u8, start: usize) ?usize {
+    return std.mem.indexOfScalarPos(u8, source, start, '\n');
 }
 
 fn missingPositionInputLine(allocator: std.mem.Allocator, source: []const u8) !?u32 {

@@ -111,7 +111,7 @@ Current editor-facing capabilities are:
 - hover for builtins, declarations, and inferred types
 - completion for locals, declarations, stage builtins, constructors, fields, and methods
 - signature help for functions, constructors, and supported builtins
-- code actions for common stage declaration and type/constructor casing fixes
+- code actions for common stage declaration, unused uniform, and type/constructor casing fixes
 - goto-definition for values, functions, and type declarations
 - document symbols for editor outlines
 - rename for resolved document-local symbols

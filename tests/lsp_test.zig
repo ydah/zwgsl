@@ -427,6 +427,31 @@ test "lsp code actions fix type and constructor casing" {
     try std.testing.expect(std.mem.indexOf(u8, response, "\"newText\":\"vec4\"") != null);
 }
 
+test "lsp code actions remove unused uniforms" {
+    const source =
+        \\uniform :unused, Mat4
+        \\uniform :mvp, Mat4
+        \\
+        \\vertex do
+        \\  input :position, Vec3, location: 0
+        \\  def main
+        \\    gl_Position = mvp * vec4(position, 1.0)
+        \\  end
+        \\end
+    ;
+
+    const response = try code_actions.response(std.testing.allocator, "file:///shader.zw", source);
+    defer std.testing.allocator.free(response);
+
+    try std.testing.expectEqual(
+        @as(usize, 1),
+        std.mem.count(u8, response, "\"title\":\"Remove unused uniform\""),
+    );
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"start\":{\"line\":0,\"character\":0}") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"end\":{\"line\":1,\"character\":0}") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"newText\":\"\"") != null);
+}
+
 test "lsp handler serves code actions from open documents" {
     var state = handler.State.init(std.testing.allocator);
     defer state.deinit();
