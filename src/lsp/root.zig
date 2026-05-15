@@ -1,6 +1,7 @@
 pub const analysis = @import("analysis.zig");
 pub const completion = @import("completion.zig");
 pub const diagnostics = @import("diagnostics.zig");
+pub const document_symbols = @import("document_symbols.zig");
 pub const document_store = @import("document_store.zig");
 pub const goto_def = @import("goto_def.zig");
 pub const handler = @import("handler.zig");

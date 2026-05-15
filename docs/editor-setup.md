@@ -111,4 +111,5 @@ Current editor-facing capabilities are:
 - hover for builtins, declarations, and inferred types
 - completion for locals, declarations, builtins, fields, and methods
 - goto-definition for values, functions, and type declarations
+- document symbols for editor outlines
 - semantic tokens for syntax coloring

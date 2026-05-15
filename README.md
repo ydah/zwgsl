@@ -30,7 +30,7 @@ syntax while still targeting modern GPU backends.
 - `trait` / `impl` support with compile-time specialization and inline trait methods in WGSL output
 - Multi-stage WGSL pipeline with entry-point-aware HIR and SSA-style CFG MIR: `AST -> HIR -> MIR -> WGSL`
 - WGSL sampler lowering for uniforms, function parameters, and immutable local aliases
-- Source-aware LSP support: diagnostics, hover, completion, goto-definition, semantic tokens
+- Source-aware LSP support: diagnostics, hover, completion, goto-definition, document symbols, semantic tokens
 - Browser playground with Monaco, wasm compilation, and compiler-backed worker tooling
 - C API surface for embedding the compiler in other tools
 
@@ -336,6 +336,7 @@ Current editor-facing features:
 - hover with source-aware type / declaration info
 - completion for locals, declarations, builtins, fields, and methods
 - goto-definition for values, functions, and type declarations
+- document symbols for stages, declarations, functions, types, traits, and impls
 - semantic tokens for keywords, functions, variables, types, numbers, strings, comments, operators, and properties
 
 ## Playground
