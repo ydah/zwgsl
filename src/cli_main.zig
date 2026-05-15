@@ -68,7 +68,7 @@ fn run(allocator: std.mem.Allocator) !u8 {
     });
 
     if (output.errors.len > 0) {
-        try writeDiagnostics(stderr, options.input_path, output.errors);
+        try writeDiagnostics(stderr, options.input_path, source, output.errors);
         return 1;
     }
 
@@ -270,7 +270,7 @@ fn writeStage(writer: anytype, source: ?[]const u8) !bool {
     return true;
 }
 
-fn writeDiagnostics(writer: anytype, path: []const u8, errors: []const zwgsl.compiler.Error) !void {
+fn writeDiagnostics(writer: anytype, path: []const u8, source: []const u8, errors: []const zwgsl.compiler.Error) !void {
     for (errors) |diagnostic| {
         try writer.print("{s}:{d}:{d}: {s}: {s}\n", .{
             path,
@@ -279,6 +279,7 @@ fn writeDiagnostics(writer: anytype, path: []const u8, errors: []const zwgsl.com
             errorKindName(diagnostic.kind),
             std.mem.span(diagnostic.message),
         });
+        try zwgsl.diagnostics.writeSourceContext(writer, source, diagnostic.line, diagnostic.column);
     }
 }
 
@@ -376,4 +377,32 @@ test "CLI rejects unknown stage" {
     const parsed = try parseArgs(args[0..], &stderr, &stdout);
 
     try std.testing.expectEqual(@as(u8, 2), parsed.exit_code);
+}
+
+test "CLI diagnostics include source context" {
+    const source =
+        \\def main
+        \\  color = 42
+        \\end
+    ;
+    const errors = [_]zwgsl.compiler.Error{.{
+        .kind = .semantic,
+        .message = "undeclared identifier 'color'",
+        .line = 2,
+        .column = 3,
+    }};
+
+    var output: std.ArrayList(u8) = .empty;
+    defer output.deinit(std.testing.allocator);
+
+    try writeDiagnostics(
+        output.writer(std.testing.allocator),
+        "shader.zw",
+        source,
+        errors[0..],
+    );
+
+    try std.testing.expect(std.mem.indexOf(u8, output.items, "shader.zw:2:3: semantic: undeclared identifier 'color'") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output.items, "2 |   color = 42") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output.items, "   |   ^") != null);
 }

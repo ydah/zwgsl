@@ -25,20 +25,7 @@ pub const Diagnostic = struct {
 
     pub fn write(self: Diagnostic, writer: anytype, source: []const u8) !void {
         try writer.print("{s}: {s}\n", .{ @tagName(self.kind), self.message });
-
-        if (self.line == 0 or self.column == 0) return;
-        const line_text = sourceLine(source, self.line) orelse return;
-
-        try writer.print("  --> {d}:{d}\n", .{ self.line, self.column });
-        try writer.writeAll("   |\n");
-        try writer.print("{d} | {s}\n", .{ self.line, line_text });
-        try writer.writeAll("   | ");
-
-        const caret_offset = @min(columnOffset(line_text, self.column), line_text.len);
-        for (0..caret_offset) |index| {
-            try writer.writeByte(if (line_text[index] == '\t') '\t' else ' ');
-        }
-        try writer.writeAll("^\n");
+        try writeSourceContext(writer, source, self.line, self.column);
     }
 };
 
@@ -101,6 +88,22 @@ pub const DiagnosticList = struct {
         return try buffer.toOwnedSlice(self.allocator);
     }
 };
+
+pub fn writeSourceContext(writer: anytype, source: []const u8, line: u32, column: u32) !void {
+    if (line == 0 or column == 0) return;
+    const line_text = sourceLine(source, line) orelse return;
+
+    try writer.print("  --> {d}:{d}\n", .{ line, column });
+    try writer.writeAll("   |\n");
+    try writer.print("{d} | {s}\n", .{ line, line_text });
+    try writer.writeAll("   | ");
+
+    const caret_offset = @min(columnOffset(line_text, column), line_text.len);
+    for (0..caret_offset) |index| {
+        try writer.writeByte(if (line_text[index] == '\t') '\t' else ' ');
+    }
+    try writer.writeAll("^\n");
+}
 
 fn sourceLine(source: []const u8, line_number: u32) ?[]const u8 {
     if (line_number == 0) return null;

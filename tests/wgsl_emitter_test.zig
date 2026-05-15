@@ -311,6 +311,15 @@ test "compiler splats scalar clamp bounds for WGSL vectors" {
     try std.testing.expect(std.mem.indexOf(u8, output.compute_source.?, "clamp(vec3f(0.25, 1.5, -0.25), vec3f(0.0), vec3f(1.0))") != null);
 }
 
+test "compiler emits WGSL for the method chain fixture" {
+    try expectWgslFixture(
+        "tests/fixtures/method_chain.zw",
+        "tests/fixtures/method_chain.vertex.wgsl",
+        "tests/fixtures/method_chain.fragment.wgsl",
+        null,
+    );
+}
+
 test "compiler emits WGSL for the phong fixture" {
     try expectWgslFixture(
         "tests/fixtures/phong.zw",
