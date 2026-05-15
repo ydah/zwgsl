@@ -1,0 +1,45 @@
+name: Feature request
+description: Suggest a language, compiler, tooling, or documentation improvement.
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Language
+        - Compiler
+        - CLI
+        - LSP
+        - Playground
+        - Documentation
+        - Distribution
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What is hard, missing, confusing, or error-prone today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe the behavior, API, syntax, or workflow you want.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Optional, but useful for design tradeoffs.
+  - type: textarea
+    id: examples
+    attributes:
+      label: Examples
+      description: Add sample zwgsl source, expected WGSL/GLSL output, editor flow, or screenshots.

@@ -1,0 +1,67 @@
+name: Playground bug
+description: Report a browser playground problem, preview issue, or WebGPU behavior.
+title: "[Playground]: "
+labels:
+  - bug
+  - playground
+body:
+  - type: input
+    id: url
+    attributes:
+      label: Playground URL or commit
+      description: Paste the URL, branch, or commit where you reproduced this.
+      placeholder: https://ydah.github.io/zwgsl/
+    validations:
+      required: true
+  - type: dropdown
+    id: browser
+    attributes:
+      label: Browser
+      options:
+        - Chrome
+        - Edge
+        - Safari
+        - Firefox
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: browser_version
+    attributes:
+      label: Browser version and OS
+      placeholder: Chrome 125 on macOS 14
+    validations:
+      required: true
+  - type: dropdown
+    id: webgpu
+    attributes:
+      label: WebGPU status
+      options:
+        - WebGPU enabled and preview starts
+        - WebGPU enabled but preview fails
+        - WebGPU unavailable
+        - Not preview-related
+    validations:
+      required: true
+  - type: textarea
+    id: source
+    attributes:
+      label: Source or selected sample
+      description: Paste the `.zw` source or name the selected sample.
+      render: ruby
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include diagnostics, preview errors, and console output when available.
+      render: text
+    validations:
+      required: true

@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Language reference
+    url: https://github.com/ydah/zwgsl/blob/main/docs/language.md
+    about: Check syntax, type, stage, resource, trait, and match behavior.
+  - name: Playground
+    url: https://ydah.github.io/zwgsl/
+    about: Try examples in the browser before filing a compiler or playground issue.
