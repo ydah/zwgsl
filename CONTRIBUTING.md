@@ -71,7 +71,6 @@ Update documentation when behavior or user-facing commands change:
 - `docs/gotchas.md` for target-specific constraints.
 - `docs/c-api.md` and `include/zwgsl.h` together for C API changes.
 - `examples/README.md` when adding or changing examples.
-- `CHANGELOG.md` for release-facing user-visible changes.
 
 Avoid documenting planned behavior as implemented behavior. Use
 `ROADMAP.md` for future work.
