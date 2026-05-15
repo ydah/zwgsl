@@ -415,6 +415,9 @@ Forward-looking work is tracked separately in the [Roadmap](ROADMAP.md).
 
 | Area | Status |
 | --- | --- |
+| Package version | 0.1.0 |
+| Verified Zig | 0.15.2 in CI; requires Zig 0.15.x |
+| Verified Node.js | 24 in CI for the playground |
 | Lexer + layout resolver | Implemented |
 | Parser + source positions | Implemented |
 | `let` / `where` | Implemented |
