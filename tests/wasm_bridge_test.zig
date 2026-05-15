@@ -67,6 +67,7 @@ test "wasm bridge exposes hover completion signature help and definition JSON" {
     const completion_result: *const zwgsl.WasmJsonResult = @ptrFromInt(completion_ptr);
     const completion_json = @as([*]const u8, @ptrFromInt(completion_result.json_ptr))[0..completion_result.json_len];
     try std.testing.expect(std.mem.indexOf(u8, completion_json, "\"helper\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, completion_json, "\"vec4\"") != null);
 
     const signature_ptr = zwgsl.zwgsl_wasm_signature_help(input_ptr, source.len, 6, 23);
     try std.testing.expect(signature_ptr != 0);

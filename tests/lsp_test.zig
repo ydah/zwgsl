@@ -278,6 +278,8 @@ test "lsp completion offers member and root suggestions" {
     defer std.testing.allocator.free(root);
     try std.testing.expect(std.mem.indexOf(u8, root, "\"position\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, root, "\"normalize\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, root, "\"vec4\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, root, "fn vec4(x: Float, y: Float, z: Float, w: Float) -> Vec4") != null);
 }
 
 test "lsp signature help returns user function and builtin constructor signatures" {

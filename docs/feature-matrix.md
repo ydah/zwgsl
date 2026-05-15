@@ -16,7 +16,7 @@ Legend:
 | --- | --- | --- | --- | --- |
 | Ruby-like `def` / `do` / `end` blocks | Yes | Yes | Diagnostics, tokens | Yes |
 | Layout-aware statement separation | Yes | Yes | Diagnostics | Yes |
-| Function parameters and return annotations | Yes | Yes | Hover, completion, signature help | Yes |
+| Function parameters and return annotations | Yes | Yes | Hover, completion, constructor completion, signature help | Yes |
 | Implicit final-expression returns | Yes | Yes | Diagnostics | Yes |
 | Method chains | Yes | Yes | Hover, completion, signature help for supported builtins | Yes |
 | Postfix `if` / `unless` | Yes | Yes | Diagnostics | Yes |

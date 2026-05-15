@@ -324,6 +324,10 @@ pub const Document = struct {
             });
         }
 
+        for (builtinConstructorItems()) |constructor_item| {
+            try appendCompletionUnique(self.allocator(), &items, &seen, constructor_item);
+        }
+
         for (builtinTypes()) |builtin_type| {
             try appendCompletionUnique(self.allocator(), &items, &seen, .{
                 .label = builtin_type,
@@ -956,6 +960,26 @@ fn builtinItems() []const StaticDoc {
         .{ .name = "mix", .detail = "fn mix(a: T, b: T, t: T | Sca) -> T", .documentation = "Linearly interpolates between values." },
         .{ .name = "texture", .detail = "fn texture(s: Sampler2D | SamplerCube | Sampler3D, coord: Vec2 | Vec3) -> Vec4", .documentation = "Samples 2D, cube, or 3D samplers and lowers to WGSL textureSample." },
         .{ .name = "transpose", .detail = "fn transpose(m: Mat(M, N)) -> Mat(M, N)", .documentation = "Returns the transposed matrix." },
+    };
+}
+
+fn builtinConstructorItems() []const CompletionItem {
+    return &.{
+        .{ .label = "vec2", .kind = 4, .detail = "fn vec2(x: Float, y: Float) -> Vec2" },
+        .{ .label = "vec3", .kind = 4, .detail = "fn vec3(x: Float, y: Float, z: Float) -> Vec3" },
+        .{ .label = "vec4", .kind = 4, .detail = "fn vec4(x: Float, y: Float, z: Float, w: Float) -> Vec4" },
+        .{ .label = "ivec2", .kind = 4, .detail = "fn ivec2(x: Int, y: Int) -> IVec2" },
+        .{ .label = "ivec3", .kind = 4, .detail = "fn ivec3(x: Int, y: Int, z: Int) -> IVec3" },
+        .{ .label = "ivec4", .kind = 4, .detail = "fn ivec4(x: Int, y: Int, z: Int, w: Int) -> IVec4" },
+        .{ .label = "uvec2", .kind = 4, .detail = "fn uvec2(x: UInt, y: UInt) -> UVec2" },
+        .{ .label = "uvec3", .kind = 4, .detail = "fn uvec3(x: UInt, y: UInt, z: UInt) -> UVec3" },
+        .{ .label = "uvec4", .kind = 4, .detail = "fn uvec4(x: UInt, y: UInt, z: UInt, w: UInt) -> UVec4" },
+        .{ .label = "bvec2", .kind = 4, .detail = "fn bvec2(x: Bool, y: Bool) -> BVec2" },
+        .{ .label = "bvec3", .kind = 4, .detail = "fn bvec3(x: Bool, y: Bool, z: Bool) -> BVec3" },
+        .{ .label = "bvec4", .kind = 4, .detail = "fn bvec4(x: Bool, y: Bool, z: Bool, w: Bool) -> BVec4" },
+        .{ .label = "mat2", .kind = 4, .detail = "fn mat2(value: Float) -> Mat2" },
+        .{ .label = "mat3", .kind = 4, .detail = "fn mat3(value: Float | Mat4) -> Mat3" },
+        .{ .label = "mat4", .kind = 4, .detail = "fn mat4(value: Float) -> Mat4" },
     };
 }
 
