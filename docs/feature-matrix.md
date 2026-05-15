@@ -29,7 +29,7 @@ Legend:
 | Algebraic data types | Yes | Yes | Diagnostics | Yes |
 | Pattern matching | Yes | Yes | Diagnostics | Yes |
 | Guarded match arms | Yes | Yes | Diagnostics | Yes |
-| Non-exhaustive match diagnostics | Yes | Yes | Diagnostics | Yes |
+| Match exhaustiveness and reachability diagnostics | Yes | Yes | Diagnostics | Yes |
 | Traits and impls | Yes | Yes | Diagnostics | Yes |
 | Trait-constrained functions | Yes | Yes | Diagnostics | Yes |
 | Static trait method specialization | Yes | Yes | Hover, completion | Yes |

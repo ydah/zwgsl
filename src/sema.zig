@@ -116,6 +116,12 @@ pub const ConstructorInfo = struct {
     scheme: hm.TypeScheme,
 };
 
+const PatternSummary = struct {
+    matches_all: bool,
+    constructor_name: ?[]const u8,
+    covers_constructor: bool = false,
+};
+
 pub const TypedProgram = struct {
     allocator: std.mem.Allocator,
     program: *ast.Program,
@@ -1502,15 +1508,42 @@ const Analyzer = struct {
         const value_type = try self.analyzeExpr(scope, match_expr.value, context);
         var result_type: ?types.Type = null;
         var exhaustive = false;
+        var catch_all_seen = false;
         var seen_constructors = std.StringHashMapUnmanaged(void){};
         defer seen_constructors.deinit(self.allocator);
 
         for (match_expr.arms) |arm| {
             var arm_scope = Scope.init(self.allocator, scope);
             const summary = try self.bindPattern(&arm_scope, arm.pattern, value_type);
-            if (summary.matches_all) exhaustive = true;
-            if (summary.constructor_name) |constructor_name| {
-                try seen_constructors.put(self.allocator, constructor_name, {});
+            const has_guard = arm.guard != null;
+
+            if (catch_all_seen) {
+                try self.diagnostics.appendFmt(
+                    .warning,
+                    arm.position.line,
+                    arm.position.column,
+                    "match arm is unreachable because a previous arm matches all values",
+                    .{},
+                );
+            } else if (summary.constructor_name) |constructor_name| {
+                if (!has_guard and summary.covers_constructor) {
+                    if (seen_constructors.contains(constructor_name)) {
+                        try self.diagnostics.appendFmt(
+                            .warning,
+                            arm.position.line,
+                            arm.position.column,
+                            "duplicate match arm for constructor '{s}'",
+                            .{constructor_name},
+                        );
+                    } else {
+                        try seen_constructors.put(self.allocator, constructor_name, {});
+                    }
+                }
+            }
+
+            if (!has_guard and summary.matches_all) {
+                exhaustive = true;
+                catch_all_seen = true;
             }
 
             if (arm.guard) |guard| {
@@ -1568,7 +1601,7 @@ const Analyzer = struct {
         scope: *Scope,
         pattern: ast.Pattern,
         expected_type: types.Type,
-    ) anyerror!struct { matches_all: bool, constructor_name: ?[]const u8 } {
+    ) anyerror!PatternSummary {
         return switch (pattern.data) {
             .wildcard => .{ .matches_all = true, .constructor_name = null },
             .binding => |name| blk: {
@@ -1624,12 +1657,14 @@ const Analyzer = struct {
                     break :blk .{ .matches_all = false, .constructor_name = null };
                 };
 
+                var covers_constructor = true;
                 for (constructor.args, info.field_types) |arg_pattern, field_type| {
                     const resolved_field_type = try substitution.apply(field_type);
-                    _ = try self.bindPattern(scope, arg_pattern, resolved_field_type);
+                    const arg_summary = try self.bindPattern(scope, arg_pattern, resolved_field_type);
+                    if (!arg_summary.matches_all) covers_constructor = false;
                 }
 
-                break :blk .{ .matches_all = false, .constructor_name = constructor.name };
+                break :blk .{ .matches_all = false, .constructor_name = constructor.name, .covers_constructor = covers_constructor };
             },
         };
     }

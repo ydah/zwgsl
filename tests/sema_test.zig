@@ -31,6 +31,13 @@ fn expectDiagnosticContaining(items: []const zwgsl.diagnostics.Diagnostic, needl
     return error.ExpectedDiagnosticNotFound;
 }
 
+fn expectWarningContaining(items: []const zwgsl.diagnostics.Diagnostic, needle: []const u8) !void {
+    for (items) |diagnostic| {
+        if (diagnostic.kind == .warning and std.mem.indexOf(u8, diagnostic.message, needle) != null) return;
+    }
+    return error.ExpectedDiagnosticNotFound;
+}
+
 test "sema reports undeclared variables" {
     var analyzed = try analyzeSource(
         \\vertex do
@@ -436,6 +443,66 @@ test "sema warns about non-exhaustive matches" {
         }
     }
     try std.testing.expect(found_warning);
+}
+
+test "sema warns about duplicate match constructor arms" {
+    var analyzed = try analyzeSource(
+        \\type Shape
+        \\  Circle(radius: Float)
+        \\  Point
+        \\end
+        \\
+        \\def area(shape: Shape) -> Float
+        \\  match shape
+        \\  when Circle(radius)
+        \\    radius
+        \\  when Circle(other)
+        \\    other
+        \\  when Point
+        \\    0.0
+        \\  end
+        \\end
+    );
+    defer analyzed.arena.deinit();
+
+    try expectWarningContaining(analyzed.diagnostics.items.items, "duplicate match arm for constructor 'Circle'");
+}
+
+test "sema warns about unreachable match arms after wildcard" {
+    var analyzed = try analyzeSource(
+        \\def score(value: Int) -> Int
+        \\  match value
+        \\  when _
+        \\    0
+        \\  when 1
+        \\    1
+        \\  end
+        \\end
+    );
+    defer analyzed.arena.deinit();
+
+    try expectWarningContaining(analyzed.diagnostics.items.items, "match arm is unreachable");
+}
+
+test "sema treats guarded constructor matches as non-exhaustive" {
+    var analyzed = try analyzeSource(
+        \\type Shape
+        \\  Circle(radius: Float)
+        \\  Point
+        \\end
+        \\
+        \\def area(shape: Shape) -> Float
+        \\  match shape
+        \\  when Circle(radius) if radius > 0.0
+        \\    radius
+        \\  when Point
+        \\    0.0
+        \\  end
+        \\end
+    );
+    defer analyzed.arena.deinit();
+
+    try expectWarningContaining(analyzed.diagnostics.items.items, "not exhaustive");
 }
 
 test "sema type-checks symbol literals and symbol match patterns" {

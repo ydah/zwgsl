@@ -234,7 +234,8 @@ when _
 end
 ```
 
-The semantic checker reports non-exhaustive ADT matches.
+The semantic checker reports non-exhaustive ADT matches, duplicate constructor
+arms, and arms made unreachable by an earlier catch-all pattern.
 
 ## Types
 
