@@ -44,7 +44,7 @@ test "compiler lowers helper functions and method chains" {
     try std.testing.expectEqualStrings(@embedFile("fixtures/method_chain.fragment.glsl"), output.fragment_source.?);
 }
 
-test "compiler emits debug comments with source lines" {
+test "compiler emits debug comments with source lines and columns" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
 
@@ -52,9 +52,9 @@ test "compiler emits debug comments with source lines" {
         .emit_debug_comments = 1,
     });
     try std.testing.expectEqual(@as(usize, 0), output.errors.len);
-    try std.testing.expect(std.mem.indexOf(u8, output.vertex_source.?, "// zwgsl:11: def main") != null);
-    try std.testing.expect(std.mem.indexOf(u8, output.vertex_source.?, "// zwgsl:12: self.v_pos = position") != null);
-    try std.testing.expect(std.mem.indexOf(u8, output.fragment_source.?, "// zwgsl:21: def main") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output.vertex_source.?, "// zwgsl:11:3: def main") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output.vertex_source.?, "// zwgsl:12:5: self.v_pos = position") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output.fragment_source.?, "// zwgsl:21:3: def main") != null);
 }
 
 test "compiler optimizes output formatting when requested" {

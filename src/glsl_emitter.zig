@@ -93,7 +93,7 @@ fn emitStage(allocator: std.mem.Allocator, module: *const ir.Module, stage: ir.S
 }
 
 fn emitFunction(writer: anytype, function: ir.Function, options: EmitOptions) anyerror!void {
-    try emitDebugComment(writer, options, function.source_line, 0);
+    try emitDebugComment(writer, options, function.source_line, function.source_column, 0);
     try writer.print("{s} {s}(", .{ function.return_type.glslName(), function.name });
     for (function.params, 0..) |param, index| {
         if (index > 0) try writer.writeAll(", ");
@@ -110,7 +110,7 @@ fn emitFunction(writer: anytype, function: ir.Function, options: EmitOptions) an
 
 fn emitStatements(writer: anytype, statements: []const ir.Statement, indent: usize, options: EmitOptions) anyerror!void {
     for (statements) |statement| {
-        try emitDebugComment(writer, options, statement.source_line, indent);
+        try emitDebugComment(writer, options, statement.source_line, statement.source_column, indent);
         try writeIndent(writer, indent);
         switch (statement.data) {
             .var_decl => |decl| {
@@ -282,12 +282,20 @@ fn writeIndent(writer: anytype, indent: usize) anyerror!void {
     }
 }
 
-fn emitDebugComment(writer: anytype, options: EmitOptions, source_line: ?u32, indent: usize) anyerror!void {
+fn emitDebugComment(writer: anytype, options: EmitOptions, source_line: ?u32, source_column: ?u32, indent: usize) anyerror!void {
     if (!options.emit_debug_comments) return;
     const line = source_line orelse return;
     const source = options.source orelse return;
     const text = sourceLineText(source, line);
     try writeIndent(writer, indent);
+    if (source_column) |column| {
+        if (text.len == 0) {
+            try writer.print("// zwgsl:{d}:{d}\n", .{ line, column });
+        } else {
+            try writer.print("// zwgsl:{d}:{d}: {s}\n", .{ line, column, text });
+        }
+        return;
+    }
     if (text.len == 0) {
         try writer.print("// zwgsl:{d}\n", .{line});
     } else {

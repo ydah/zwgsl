@@ -616,7 +616,7 @@ pub const Parser = struct {
         if (self.currentIsAssignmentOperator()) {
             const operator = self.advance().tag;
             const value = try self.parseExpression(0);
-            return try self.makeStmt(expr.position, .{
+            return try self.makeStmt(expressionStartPosition(expr), .{
                 .assignment = .{
                     .target = expr,
                     .operator = operator,
@@ -629,15 +629,15 @@ pub const Parser = struct {
             if (expr.data == .member) {
                 const member = expr.data.member;
                 if (std.mem.eql(u8, member.name, "times")) {
-                    return try self.parseLoopStatement(expr.position, true, member.target);
+                    return try self.parseLoopStatement(expressionStartPosition(expr), true, member.target);
                 }
                 if (std.mem.eql(u8, member.name, "each")) {
-                    return try self.parseLoopStatement(expr.position, false, member.target);
+                    return try self.parseLoopStatement(expressionStartPosition(expr), false, member.target);
                 }
             }
         }
 
-        return try self.makeStmt(expr.position, .{ .expression = expr });
+        return try self.makeStmt(expressionStartPosition(expr), .{ .expression = expr });
     }
 
     fn parseWhereBinding(self: *Parser) anyerror!ast.LetBinding {
@@ -969,6 +969,16 @@ pub const Parser = struct {
                 .index = index_expr,
             },
         });
+    }
+
+    fn expressionStartPosition(expr: *const ast.Expr) ast.Position {
+        return switch (expr.data) {
+            .binary => |binary| expressionStartPosition(binary.lhs),
+            .member => |member| expressionStartPosition(member.target),
+            .call => |call| expressionStartPosition(call.callee),
+            .index => |index| expressionStartPosition(index.target),
+            else => expr.position,
+        };
     }
 
     fn binaryPrecedence(_: *Parser, tag: token.TokenTag) ?u8 {

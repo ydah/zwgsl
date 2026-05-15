@@ -43,6 +43,20 @@ test "compiler emits WGSL for a basic vertex and fragment shader" {
     );
 }
 
+test "compiler emits WGSL debug comments with source lines and columns" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const output = try zwgsl.compiler.compile(arena.allocator(), @embedFile("fixtures/basic_shader.zw"), .{
+        .target = .wgsl,
+        .emit_debug_comments = 1,
+    });
+    try std.testing.expectEqual(@as(usize, 0), output.errors.len);
+    try std.testing.expect(std.mem.indexOf(u8, output.vertex_source.?, "// zwgsl:11:3: def main") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output.vertex_source.?, "// zwgsl:12:5: self.v_pos = position") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output.fragment_source.?, "// zwgsl:21:3: def main") != null);
+}
+
 test "compiler emits WGSL for a basic vertex shader fixture" {
     try expectWgslFixture(
         "tests/fixtures/basic_vertex.zw",

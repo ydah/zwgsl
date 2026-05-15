@@ -485,7 +485,7 @@ fn emitFunction(
     uniforms: []const mir.Global,
     current_functions: []const mir.Function,
 ) anyerror!void {
-    try emitDebugComment(writer, options, function.source_line, 0);
+    try emitDebugComment(writer, options, function.source_line, function.source_column, 0);
 
     var function_context = try EmitFunctionContext.build(allocator, function);
     defer function_context.deinit();
@@ -631,7 +631,7 @@ fn emitPhiAssignments(
         };
         for (phi.incomings) |incoming| {
             if (!std.mem.eql(u8, incoming.label, predecessor_label)) continue;
-            try emitDebugComment(writer, options, instruction.source_line, indent);
+            try emitDebugComment(writer, options, instruction.source_line, instruction.source_column, indent);
             try writeIndent(writer, indent);
             try writer.print("{s} = ", .{result.name});
             emitValue(writer, module, function_context, incoming.value, 0, uniforms, current_functions, current_params, sampler_aliases) catch |err|
@@ -689,7 +689,7 @@ fn emitBlockRegion(
                 current = target;
             },
             .return_stmt => |value| {
-                try emitDebugComment(writer, options, block.source_line, indent);
+                try emitDebugComment(writer, options, block.source_line, block.source_column, indent);
                 try writeIndent(writer, indent);
                 if (value) |returned_value| {
                     try writer.writeAll("return ");
@@ -702,14 +702,14 @@ fn emitBlockRegion(
                 return;
             },
             .discard => {
-                try emitDebugComment(writer, options, block.source_line, indent);
+                try emitDebugComment(writer, options, block.source_line, block.source_column, indent);
                 try writeIndent(writer, indent);
                 try writer.writeAll("discard;\n");
                 return;
             },
             .if_term => |if_term| {
                 try emitPhiDeclarations(writer, function, if_term.merge_block, indent);
-                try emitDebugComment(writer, options, block.source_line, indent);
+                try emitDebugComment(writer, options, block.source_line, block.source_column, indent);
                 try writeIndent(writer, indent);
                 try writer.writeAll("if (");
                 emitValue(writer, module, function_context, if_term.condition, 0, uniforms, current_functions, current_params, sampler_aliases.items) catch |err|
@@ -728,7 +728,7 @@ fn emitBlockRegion(
             },
             .switch_term => |switch_term| {
                 try emitPhiDeclarations(writer, function, switch_term.merge_block, indent);
-                try emitDebugComment(writer, options, block.source_line, indent);
+                try emitDebugComment(writer, options, block.source_line, block.source_column, indent);
                 try writeIndent(writer, indent);
                 try writer.writeAll("switch (");
                 emitValue(writer, module, function_context, switch_term.selector, 0, uniforms, current_functions, current_params, sampler_aliases.items) catch |err|
@@ -803,7 +803,7 @@ fn emitInstructionInner(
         .phi => {},
         .local_alloc => |alloc| {
             if (alloc.ty.isSampler()) return error.UnsupportedSamplerValue;
-            try emitDebugComment(writer, options, instruction.source_line, indent);
+            try emitDebugComment(writer, options, instruction.source_line, instruction.source_column, indent);
             try writeIndent(writer, indent);
             try writer.print("{s} {s}: {s}", .{
                 if (alloc.mutable) "var" else "let",
@@ -829,7 +829,7 @@ fn emitInstructionInner(
             if (shouldInlineInstruction(module, function_context, instruction, current_functions)) return;
             if (isUnusedTemporary(function_context, result.name)) return;
 
-            try emitDebugComment(writer, options, instruction.source_line, indent);
+            try emitDebugComment(writer, options, instruction.source_line, instruction.source_column, indent);
             try writeIndent(writer, indent);
             try writer.print("let {s}: {s} = ", .{ result.name, result.ty.wgslName() });
             try emitValue(writer, module, function_context, copy.value, 0, uniforms, current_functions, current_params, sampler_aliases.items);
@@ -839,14 +839,14 @@ fn emitInstructionInner(
             const result = instruction.result orelse return error.InvalidMirInstruction;
             if (shouldInlineInstruction(module, function_context, instruction, current_functions)) return;
             if (isUnusedTemporary(function_context, result.name)) return;
-            try emitDebugComment(writer, options, instruction.source_line, indent);
+            try emitDebugComment(writer, options, instruction.source_line, instruction.source_column, indent);
             try writeIndent(writer, indent);
             try writer.print("let {s}: {s} = ", .{ result.name, result.ty.wgslName() });
             try emitPlace(writer, module, function_context, place, 0, uniforms, current_functions, current_params, sampler_aliases.items);
             try writer.writeAll(";\n");
         },
         .store => |store| {
-            try emitDebugComment(writer, options, instruction.source_line, indent);
+            try emitDebugComment(writer, options, instruction.source_line, instruction.source_column, indent);
             try writeIndent(writer, indent);
             if (matchCompoundStore(function_context, store)) |compound| {
                 try emitPlace(writer, module, function_context, store.target, 0, uniforms, current_functions, current_params, sampler_aliases.items);
@@ -864,7 +864,7 @@ fn emitInstructionInner(
             const result = instruction.result orelse return error.InvalidMirInstruction;
             if (shouldInlineInstruction(module, function_context, instruction, current_functions)) return;
             if (isUnusedTemporary(function_context, result.name)) return;
-            try emitDebugComment(writer, options, instruction.source_line, indent);
+            try emitDebugComment(writer, options, instruction.source_line, instruction.source_column, indent);
             try writeIndent(writer, indent);
             try writer.print("let {s}: {s} = {s}", .{ result.name, result.ty.wgslName(), unaryOp(unary.operator) });
             try emitValue(writer, module, function_context, unary.operand, unaryPrecedence(), uniforms, current_functions, current_params, sampler_aliases.items);
@@ -875,7 +875,7 @@ fn emitInstructionInner(
             if (shouldInlineInstruction(module, function_context, instruction, current_functions)) return;
             if (isUnusedTemporary(function_context, result.name)) return;
             const precedence = binaryPrecedence(binary.operator);
-            try emitDebugComment(writer, options, instruction.source_line, indent);
+            try emitDebugComment(writer, options, instruction.source_line, instruction.source_column, indent);
             try writeIndent(writer, indent);
             try writer.print("let {s}: {s} = ", .{ result.name, result.ty.wgslName() });
             try emitValue(writer, module, function_context, binary.lhs, precedence, uniforms, current_functions, current_params, sampler_aliases.items);
@@ -887,7 +887,7 @@ fn emitInstructionInner(
             if (instruction.result) |result| {
                 if (shouldInlineInstruction(module, function_context, instruction, current_functions)) return;
                 if (isUnusedTemporary(function_context, result.name)) {
-                    try emitDebugComment(writer, options, instruction.source_line, indent);
+                    try emitDebugComment(writer, options, instruction.source_line, instruction.source_column, indent);
                     try writeIndent(writer, indent);
                     try emitCallExpr(writer, module, function_context, call, result.ty, uniforms, current_functions, current_params, sampler_aliases.items);
                     try writer.writeAll(";\n");
@@ -895,7 +895,7 @@ fn emitInstructionInner(
                 }
             }
 
-            try emitDebugComment(writer, options, instruction.source_line, indent);
+            try emitDebugComment(writer, options, instruction.source_line, instruction.source_column, indent);
             try writeIndent(writer, indent);
             if (instruction.result) |result| {
                 try writer.print("let {s}: {s} = ", .{ result.name, result.ty.wgslName() });
@@ -917,7 +917,7 @@ fn emitInstructionInner(
             const result = instruction.result orelse return error.InvalidMirInstruction;
             if (shouldInlineInstruction(module, function_context, instruction, current_functions)) return;
             if (isUnusedTemporary(function_context, result.name)) return;
-            try emitDebugComment(writer, options, instruction.source_line, indent);
+            try emitDebugComment(writer, options, instruction.source_line, instruction.source_column, indent);
             try writeIndent(writer, indent);
             try writer.print("let {s}: {s} = ", .{ result.name, result.ty.wgslName() });
             try emitValue(writer, module, function_context, field.target, fieldPrecedence(), uniforms, current_functions, current_params, sampler_aliases.items);
@@ -927,7 +927,7 @@ fn emitInstructionInner(
             const result = instruction.result orelse return error.InvalidMirInstruction;
             if (shouldInlineInstruction(module, function_context, instruction, current_functions)) return;
             if (isUnusedTemporary(function_context, result.name)) return;
-            try emitDebugComment(writer, options, instruction.source_line, indent);
+            try emitDebugComment(writer, options, instruction.source_line, instruction.source_column, indent);
             try writeIndent(writer, indent);
             try writer.print("let {s}: {s} = ", .{ result.name, result.ty.wgslName() });
             try emitValue(writer, module, function_context, index_expr.target, fieldPrecedence(), uniforms, current_functions, current_params, sampler_aliases.items);
@@ -1903,12 +1903,20 @@ fn writeIndent(writer: anytype, indent: usize) !void {
     }
 }
 
-fn emitDebugComment(writer: anytype, options: EmitOptions, source_line: ?u32, indent: usize) !void {
+fn emitDebugComment(writer: anytype, options: EmitOptions, source_line: ?u32, source_column: ?u32, indent: usize) !void {
     if (!options.emit_debug_comments) return;
     const line = source_line orelse return;
     const source = options.source orelse return;
     const text = sourceLineText(source, line);
     try writeIndent(writer, indent);
+    if (source_column) |column| {
+        if (text.len == 0) {
+            try writer.print("// zwgsl:{d}:{d}\n", .{ line, column });
+        } else {
+            try writer.print("// zwgsl:{d}:{d}: {s}\n", .{ line, column, text });
+        }
+        return;
+    }
     if (text.len == 0) {
         try writer.print("// zwgsl:{d}\n", .{line});
     } else {

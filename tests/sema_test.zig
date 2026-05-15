@@ -812,7 +812,7 @@ test "lowering preserves line and column metadata" {
     try std.testing.expectEqual(@as(?u32, 1), ir_function.source_column);
     try std.testing.expectEqual(@as(?u32, 10), ir_function.params[0].source_column);
     try std.testing.expectEqual(@as(?u32, 2), ir_function.body[0].source_line);
-    try std.testing.expectEqual(@as(?u32, 5), ir_function.body[0].source_column);
+    try std.testing.expectEqual(@as(?u32, 3), ir_function.body[0].source_column);
     try std.testing.expectEqual(@as(?u32, 2), ir_function.body[0].data.return_stmt.?.source_line);
     try std.testing.expectEqual(@as(?u32, 5), ir_function.body[0].data.return_stmt.?.source_column);
 
@@ -820,7 +820,7 @@ test "lowering preserves line and column metadata" {
     try std.testing.expectEqual(@as(?u32, 1), hir_function.source_line);
     try std.testing.expectEqual(@as(?u32, 1), hir_function.source_column);
     try std.testing.expectEqual(@as(?u32, 2), hir_function.body[0].source_line);
-    try std.testing.expectEqual(@as(?u32, 5), hir_function.body[0].source_column);
+    try std.testing.expectEqual(@as(?u32, 3), hir_function.body[0].source_column);
     try std.testing.expectEqual(@as(?u32, 2), hir_function.body[0].data.return_stmt.?.source_line);
     try std.testing.expectEqual(@as(?u32, 5), hir_function.body[0].data.return_stmt.?.source_column);
 
@@ -830,7 +830,7 @@ test "lowering preserves line and column metadata" {
     try std.testing.expectEqual(@as(usize, 1), mir_function.blocks.len);
     try std.testing.expect(std.mem.eql(u8, mir_function.entry_block, mir_function.blocks[0].label));
     try std.testing.expectEqual(@as(?u32, 2), mir_function.blocks[0].source_line);
-    try std.testing.expectEqual(@as(?u32, 5), mir_function.blocks[0].source_column);
+    try std.testing.expectEqual(@as(?u32, 3), mir_function.blocks[0].source_column);
     try std.testing.expectEqual(@as(?u32, 2), mir_function.blocks[0].terminator.return_stmt.?.source_line);
     try std.testing.expectEqual(@as(?u32, 5), mir_function.blocks[0].terminator.return_stmt.?.source_column);
 }
