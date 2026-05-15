@@ -116,4 +116,7 @@ Compute stages expose these WGSL-only values:
 - `num_workgroups`
 - `local_invocation_index`
 
-These compute values are rejected outside compute stages.
+These compute values are rejected outside compute stages with stage-specific
+diagnostics. Vertex input values such as `position` must still be declared with
+`input`, and the compiler points common missing-input mistakes at that
+declaration form.

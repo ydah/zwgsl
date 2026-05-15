@@ -47,7 +47,7 @@ test "sema reports undeclared variables" {
         \\end
     );
     defer analyzed.arena.deinit();
-    try std.testing.expect(analyzed.diagnostics.items.items.len > 0);
+    try expectDiagnosticContaining(analyzed.diagnostics.items.items, "add a stage input such as `input :position, Vec3, location: 0`");
 }
 
 test "sema reports duplicate uniform declarations" {
@@ -113,6 +113,36 @@ test "sema rejects compute stage IO declarations" {
     defer analyzed.arena.deinit();
 
     try expectDiagnosticContaining(analyzed.diagnostics.items.items, "compute shaders do not support stage I/O declarations");
+}
+
+test "sema reports compute builtin use outside compute shaders" {
+    var analyzed = try analyzeSource(
+        \\vertex do
+        \\  input :position, Vec3, location: 0
+        \\  def main
+        \\    id: UVec3 = global_invocation_id
+        \\    gl_Position = vec4(position, 1.0)
+        \\  end
+        \\end
+    );
+    defer analyzed.arena.deinit();
+
+    try expectDiagnosticContaining(analyzed.diagnostics.items.items, "compute builtin 'global_invocation_id' is only available inside compute shaders");
+}
+
+test "sema reports vertex output use outside vertex shaders" {
+    var analyzed = try analyzeSource(
+        \\fragment do
+        \\  output :frag_color, Vec4, location: 0
+        \\  def main
+        \\    gl_Position = vec4(1.0)
+        \\    frag_color = vec4(1.0)
+        \\  end
+        \\end
+    );
+    defer analyzed.arena.deinit();
+
+    try expectDiagnosticContaining(analyzed.diagnostics.items.items, "vertex output 'gl_Position' is only available inside vertex shaders");
 }
 
 test "sema rejects discard outside fragment shaders" {

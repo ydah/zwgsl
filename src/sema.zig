@@ -1250,6 +1250,8 @@ const Analyzer = struct {
                     return;
                 }
 
+                if (try self.reportStageOnlyBuiltin(assignment.target.position, name)) return;
+
                 try self.warnIfReservedIdentifier(assignment.target.position, name);
                 _ = try scope.put(name, .{
                     .ty = value_type,
@@ -1289,7 +1291,7 @@ const Analyzer = struct {
             .symbol => types.builtinType(.symbol),
             .identifier => |name| blk: {
                 const symbol = scope.get(name) orelse {
-                    try self.report(expr.position, "use of undeclared symbol '{s}'", .{name});
+                    try self.reportUndeclaredSymbol(expr.position, name, context);
                     break :blk types.builtinType(.error_type);
                 };
                 if (symbol.scheme) |scheme| {
@@ -2002,6 +2004,49 @@ const Analyzer = struct {
         try self.diagnostics.appendFmt(.@"error", position.line, position.column, fmt, args);
     }
 
+    fn reportUndeclaredSymbol(
+        self: *Analyzer,
+        position: ast.Position,
+        name: []const u8,
+        context: *const FunctionContext,
+    ) anyerror!void {
+        if (try self.reportStageOnlyBuiltin(position, name)) return;
+
+        if (context.stage) |stage| {
+            if (stage == .vertex and sameName(name, "position")) {
+                try self.report(
+                    position,
+                    "use of undeclared symbol 'position'; add a stage input such as `input :position, Vec3, location: 0`",
+                    .{},
+                );
+                return;
+            }
+
+            try self.report(
+                position,
+                "use of undeclared symbol '{s}' in {s} shader; declare a stage value, uniform, parameter, or local binding before use",
+                .{ name, stageName(stage) },
+            );
+            return;
+        }
+
+        try self.report(position, "use of undeclared symbol '{s}'", .{name});
+    }
+
+    fn reportStageOnlyBuiltin(self: *Analyzer, position: ast.Position, name: []const u8) anyerror!bool {
+        if (isComputeBuiltinName(name)) {
+            try self.report(position, "compute builtin '{s}' is only available inside compute shaders", .{name});
+            return true;
+        }
+
+        if (sameName(name, "gl_Position")) {
+            try self.report(position, "vertex output 'gl_Position' is only available inside vertex shaders", .{});
+            return true;
+        }
+
+        return false;
+    }
+
     fn warnIfReservedIdentifier(self: *Analyzer, position: ast.Position, name: []const u8) anyerror!void {
         if (!std.mem.startsWith(u8, name, "_zwgsl")) return;
         try self.diagnostics.appendFmt(
@@ -2013,6 +2058,14 @@ const Analyzer = struct {
         );
     }
 };
+
+fn isComputeBuiltinName(name: []const u8) bool {
+    return sameName(name, "global_invocation_id") or
+        sameName(name, "local_invocation_id") or
+        sameName(name, "workgroup_id") or
+        sameName(name, "num_workgroups") or
+        sameName(name, "local_invocation_index");
+}
 
 const TypeSpecParser = struct {
     analyzer: *Analyzer,
@@ -2157,6 +2210,14 @@ fn compoundOperator(tag: @import("token.zig").TokenTag) @import("token.zig").Tok
         .star_assign => .star,
         .slash_assign => .slash,
         else => .assign,
+    };
+}
+
+fn stageName(stage: ast.Stage) []const u8 {
+    return switch (stage) {
+        .vertex => "vertex",
+        .fragment => "fragment",
+        .compute => "compute",
     };
 }
 
