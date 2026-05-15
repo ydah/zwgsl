@@ -24,6 +24,13 @@ fn analyzeSource(source: []const u8) !struct {
     };
 }
 
+fn expectDiagnosticContaining(items: []const zwgsl.diagnostics.Diagnostic, needle: []const u8) !void {
+    for (items) |diagnostic| {
+        if (std.mem.indexOf(u8, diagnostic.message, needle) != null) return;
+    }
+    return error.ExpectedDiagnosticNotFound;
+}
+
 test "sema reports undeclared variables" {
     var analyzed = try analyzeSource(
         \\vertex do
@@ -34,6 +41,67 @@ test "sema reports undeclared variables" {
     );
     defer analyzed.arena.deinit();
     try std.testing.expect(analyzed.diagnostics.items.items.len > 0);
+}
+
+test "sema reports duplicate uniform declarations" {
+    var analyzed = try analyzeSource(
+        \\uniform :mvp, Mat4
+        \\uniform :mvp, Mat4
+        \\
+        \\vertex do
+        \\  input :position, Vec3, location: 0
+        \\  def main
+        \\    gl_Position = mvp * vec4(position, 1.0)
+        \\  end
+        \\end
+    );
+    defer analyzed.arena.deinit();
+
+    try expectDiagnosticContaining(analyzed.diagnostics.items.items, "redefinition of uniform 'mvp'");
+}
+
+test "sema reports duplicate stage declarations" {
+    var analyzed = try analyzeSource(
+        \\vertex do
+        \\  input :position, Vec3, location: 0
+        \\  input :position, Vec3, location: 1
+        \\  def main
+        \\    gl_Position = vec4(position, 1.0)
+        \\  end
+        \\end
+    );
+    defer analyzed.arena.deinit();
+
+    try expectDiagnosticContaining(analyzed.diagnostics.items.items, "redefinition of 'position'");
+}
+
+test "sema rejects compute stage IO declarations" {
+    var analyzed = try analyzeSource(
+        \\compute do
+        \\  input :position, Vec3, location: 0
+        \\  def main
+        \\    id: UVec3 = global_invocation_id
+        \\  end
+        \\end
+    );
+    defer analyzed.arena.deinit();
+
+    try expectDiagnosticContaining(analyzed.diagnostics.items.items, "compute shaders do not support stage I/O declarations");
+}
+
+test "sema rejects discard outside fragment shaders" {
+    var analyzed = try analyzeSource(
+        \\vertex do
+        \\  input :position, Vec3, location: 0
+        \\  def main
+        \\    discard
+        \\    gl_Position = vec4(position, 1.0)
+        \\  end
+        \\end
+    );
+    defer analyzed.arena.deinit();
+
+    try expectDiagnosticContaining(analyzed.diagnostics.items.items, "discard is only valid in fragment shaders");
 }
 
 test "sema reports type mismatches" {
