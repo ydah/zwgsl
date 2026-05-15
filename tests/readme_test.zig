@@ -11,6 +11,22 @@ fn expectCompilesSnippet(source: []const u8) !void {
     try std.testing.expectEqual(@as(usize, 0), output.errors.len);
 }
 
+fn expectReadmeFencedSnippetsCompile(readme: []const u8, comptime language: []const u8) !usize {
+    const opener = "```" ++ language ++ "\n";
+    var index: usize = 0;
+    var count: usize = 0;
+
+    while (std.mem.indexOfPos(u8, readme, index, opener)) |open_index| {
+        const source_start = open_index + opener.len;
+        const source_end = std.mem.indexOfPos(u8, readme, source_start, "\n```") orelse return error.MissingReadmeFence;
+        try expectCompilesSnippet(readme[source_start..source_end]);
+        count += 1;
+        index = source_end + "\n```".len;
+    }
+
+    return count;
+}
+
 fn expectWgslFixture(source_path: []const u8, vertex_path: ?[]const u8, fragment_path: ?[]const u8, compute_path: ?[]const u8) !void {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -57,6 +73,17 @@ test "README quick example snippets match fixtures" {
     try std.testing.expect(std.mem.indexOf(u8, readme, source) != null);
     try std.testing.expect(std.mem.indexOf(u8, readme, vertex) != null);
     try std.testing.expect(std.mem.indexOf(u8, readme, fragment) != null);
+}
+
+test "README zwgsl fenced snippets compile" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const readme = try std.fs.cwd().readFileAlloc(arena.allocator(), "README.md", 1 << 20);
+    const ruby_count = try expectReadmeFencedSnippetsCompile(readme, "ruby");
+    const zwgsl_count = try expectReadmeFencedSnippetsCompile(readme, "zwgsl");
+
+    try std.testing.expect(ruby_count + zwgsl_count > 0);
 }
 
 test "README pattern matching example compiles" {
