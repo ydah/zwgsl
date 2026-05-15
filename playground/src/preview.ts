@@ -77,6 +77,7 @@ type CompiledPreviewState = {
 type PersistedUniformValues = Record<string, number[]>;
 
 const uniformStorageKey = "zwgsl.playground.uniforms.v1";
+const uploadedTextureSize = 512;
 
 const fallbackVertexShader = `
 @vertex
@@ -249,7 +250,7 @@ export const createPreview = async (
         destroyVertexPreview(activeState.vertex);
       }
 
-      renderControls(controlsRoot, uniformStates, textureStates);
+      renderControls(device, controlsRoot, uniformStates, textureStates);
       status.textContent = vertexState.profile === "triangle" ? "live • triangle" : "live • fullscreen";
       return {
         key: nextKey,
@@ -591,7 +592,7 @@ const makePreviewTexture = (device: GPUDevice, spec: TextureSpec) => {
       ? { width: 48, height: 48, depthOrArrayLayers: 6 }
       : spec.dimension === "3d"
         ? { width: 16, height: 16, depthOrArrayLayers: 16 }
-        : { width: 96, height: 96, depthOrArrayLayers: 1 };
+        : { width: uploadedTextureSize, height: uploadedTextureSize, depthOrArrayLayers: 1 };
 
   const texture = device.createTexture({
     size: extent,
@@ -857,7 +858,12 @@ const collectShaderModuleErrors = async (module: GPUShaderModule, stage: "vertex
     );
 };
 
-const renderControls = (root: HTMLElement, uniforms: UniformState[], textures: TextureState[]) => {
+const renderControls = (
+  device: GPUDevice,
+  root: HTMLElement,
+  uniforms: UniformState[],
+  textures: TextureState[],
+) => {
   root.replaceChildren();
 
   if (uniforms.length === 0 && textures.length === 0) {
@@ -866,7 +872,7 @@ const renderControls = (root: HTMLElement, uniforms: UniformState[], textures: T
   }
 
   for (const state of textures) {
-    root.append(makeTextureCard(state));
+    root.append(makeTextureCard(device, state));
   }
 
   for (const state of uniforms) {
@@ -995,7 +1001,7 @@ const makeColorInput = (state: UniformState) => {
   return { row, input, output };
 };
 
-const makeTextureCard = (state: TextureState) => {
+const makeTextureCard = (device: GPUDevice, state: TextureState) => {
   const card = document.createElement("section");
   card.className = "uniform-card";
 
@@ -1019,7 +1025,85 @@ const makeTextureCard = (state: TextureState) => {
       : `Generated ${state.spec.dimension} texture placeholder for sampler preview.`;
   card.append(text);
 
+  if (state.spec.dimension === "2d") {
+    const row = document.createElement("label");
+    row.className = "texture-upload";
+
+    const label = document.createElement("span");
+    label.textContent = "Image";
+
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "image/*";
+
+    const output = document.createElement("output");
+    output.value = "checkerboard";
+    output.textContent = output.value;
+
+    input.addEventListener("change", async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+
+      output.value = "loading";
+      output.textContent = output.value;
+      try {
+        await uploadTextureFile(device, state, file);
+        output.value = file.name;
+        output.textContent = output.value;
+      } catch (error) {
+        output.value = "upload failed";
+        output.textContent = output.value;
+        console.error("zwgsl playground texture upload failed", error);
+      }
+    });
+
+    row.append(label, input, output);
+    card.append(row);
+  }
+
   return card;
+};
+
+const uploadTextureFile = async (device: GPUDevice, state: TextureState, file: File) => {
+  if (!file.type.startsWith("image/")) {
+    throw new Error("texture upload expects an image file");
+  }
+
+  const bitmap = await createImageBitmap(file);
+  try {
+    const image = drawTextureUploadImage(bitmap);
+    device.queue.writeTexture(
+      { texture: state.texture },
+      image.data,
+      {
+        bytesPerRow: image.width * 4,
+        rowsPerImage: image.height,
+      },
+      { width: image.width, height: image.height, depthOrArrayLayers: 1 },
+    );
+  } finally {
+    bitmap.close();
+  }
+};
+
+const drawTextureUploadImage = (bitmap: ImageBitmap) => {
+  const canvas = document.createElement("canvas");
+  canvas.width = uploadedTextureSize;
+  canvas.height = uploadedTextureSize;
+
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("2D canvas is unavailable for texture upload");
+
+  context.fillStyle = "#111827";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+
+  const scale = Math.min(canvas.width / bitmap.width, canvas.height / bitmap.height);
+  const width = Math.max(1, Math.floor(bitmap.width * scale));
+  const height = Math.max(1, Math.floor(bitmap.height * scale));
+  const x = Math.floor((canvas.width - width) / 2);
+  const y = Math.floor((canvas.height - height) / 2);
+  context.drawImage(bitmap, x, y, width, height);
+  return context.getImageData(0, 0, canvas.width, canvas.height);
 };
 
 const formatUniformValue = (value: number, kind: UniformValueKind) =>

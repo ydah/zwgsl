@@ -266,6 +266,28 @@ body {
   color: var(--muted);
 }
 
+.texture-upload {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  gap: 8px 10px;
+  align-items: center;
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.texture-upload input {
+  min-width: 0;
+  color: var(--muted);
+}
+
+.texture-upload output {
+  grid-column: 2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+}
+
 button {
   border: none;
   border-radius: 999px;
