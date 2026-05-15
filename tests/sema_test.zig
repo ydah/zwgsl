@@ -67,6 +67,25 @@ test "sema reports duplicate uniform declarations" {
     try expectDiagnosticContaining(analyzed.diagnostics.items.items, "redefinition of uniform 'mvp'");
 }
 
+test "sema warns about reserved generated identifier prefix" {
+    var analyzed = try analyzeSource(
+        \\uniform :_zwgsl_camera, Mat4
+        \\
+        \\def _zwgsl_helper(_zwgsl_value: Float) -> Float
+        \\  let _zwgsl_local = _zwgsl_value
+        \\  _zwgsl_assigned = _zwgsl_local
+        \\  _zwgsl_assigned
+        \\end
+    );
+    defer analyzed.arena.deinit();
+
+    try expectWarningContaining(analyzed.diagnostics.items.items, "identifier '_zwgsl_camera' uses reserved");
+    try expectWarningContaining(analyzed.diagnostics.items.items, "identifier '_zwgsl_helper' uses reserved");
+    try expectWarningContaining(analyzed.diagnostics.items.items, "identifier '_zwgsl_value' uses reserved");
+    try expectWarningContaining(analyzed.diagnostics.items.items, "identifier '_zwgsl_local' uses reserved");
+    try expectWarningContaining(analyzed.diagnostics.items.items, "identifier '_zwgsl_assigned' uses reserved");
+}
+
 test "sema reports duplicate stage declarations" {
     var analyzed = try analyzeSource(
         \\vertex do

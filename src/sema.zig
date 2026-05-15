@@ -256,6 +256,7 @@ const Analyzer = struct {
         for (self.program.items) |item| {
             switch (item) {
                 .uniform => |uniform| {
+                    try self.warnIfReservedIdentifier(uniform.position, uniform.name);
                     const ty = try self.resolveTypeName(uniform.type_name, uniform.position);
                     if (!try self.global_scope.put(uniform.name, .{
                         .ty = ty,
@@ -266,9 +267,16 @@ const Analyzer = struct {
                     }
                 },
                 .struct_def => |struct_def| {
+                    try self.warnIfReservedIdentifier(struct_def.position, struct_def.name);
+                    for (struct_def.params) |param| {
+                        try self.warnIfReservedIdentifier(struct_def.position, param);
+                    }
                     if (self.struct_fields.contains(struct_def.name)) {
                         try self.report(struct_def.position, "redefinition of struct '{s}'", .{struct_def.name});
                     } else {
+                        for (struct_def.fields) |field| {
+                            try self.warnIfReservedIdentifier(field.position, field.name);
+                        }
                         try self.struct_fields.put(struct_def.name, struct_def.fields);
                         const info: StructInfo = .{
                             .name = struct_def.name,
@@ -316,6 +324,10 @@ const Analyzer = struct {
     }
 
     fn registerTypeDef(self: *Analyzer, type_def: ast.TypeDef) anyerror!void {
+        try self.warnIfReservedIdentifier(type_def.position, type_def.name);
+        for (type_def.params) |param| {
+            try self.warnIfReservedIdentifier(type_def.position, param);
+        }
         if (self.type_defs.contains(type_def.name)) {
             try self.report(type_def.position, "redefinition of type '{s}'", .{type_def.name});
             return;
@@ -330,9 +342,11 @@ const Analyzer = struct {
         }
 
         for (type_def.variants, 0..) |variant, tag_index| {
+            try self.warnIfReservedIdentifier(variant.position, variant.name);
             const field_names = try self.allocator.alloc([]const u8, variant.fields.len);
             const field_types = try self.allocator.alloc(types.Type, variant.fields.len);
             for (variant.fields, 0..) |field, field_index| {
+                try self.warnIfReservedIdentifier(field.position, field.name);
                 field_names[field_index] = field.name;
                 field_types[field_index] = try self.resolveTypeNameWithParams(field.type_name, field.position, type_def.params);
             }
@@ -398,6 +412,7 @@ const Analyzer = struct {
     }
 
     fn registerTraitDef(self: *Analyzer, trait_def: ast.TraitDef) anyerror!void {
+        try self.warnIfReservedIdentifier(trait_def.position, trait_def.name);
         if (self.traits.traits.contains(trait_def.name)) {
             try self.report(trait_def.position, "redefinition of trait '{s}'", .{trait_def.name});
             return;
@@ -408,9 +423,11 @@ const Analyzer = struct {
         const self_param = [_][]const u8{"Self"};
 
         for (trait_def.methods) |method| {
+            try self.warnIfReservedIdentifier(method.position, method.name);
             var params = std.ArrayListUnmanaged(types.Type){};
             defer params.deinit(self.allocator);
             for (method.params) |param| {
+                try self.warnIfReservedIdentifier(param.position, param.name);
                 try params.append(self.allocator, try self.resolveTypeNameWithParams(param.type_name, param.position, &self_param));
             }
             const return_type = if (method.return_type) |type_name|
@@ -449,6 +466,7 @@ const Analyzer = struct {
         const self_param = [_][]const u8{"Self"};
 
         for (impl_def.methods) |method| {
+            try self.warnIfReservedIdentifier(method.position, method.name);
             if (implemented.contains(method.name)) {
                 try self.report(method.position, "duplicate impl method '{s}'", .{method.name});
                 continue;
@@ -474,6 +492,7 @@ const Analyzer = struct {
             };
 
             for (method.params, expected_signature.params, 0..) |param, expected_param_type, index| {
+                try self.warnIfReservedIdentifier(param.position, param.name);
                 const annotated_type = try self.resolveTypeNameWithParams(param.type_name, param.position, &self_param);
                 const actual_type = try self.substituteSelfType(annotated_type, receiver_type);
                 if (!self.typesCompatible(expected_param_type, actual_type)) {
@@ -635,7 +654,9 @@ const Analyzer = struct {
         var constraints = std.ArrayListUnmanaged(ConstraintInfo){};
         defer constraints.deinit(self.allocator);
 
+        try self.warnIfReservedIdentifier(function.position, function.name);
         for (function.params) |param| {
+            try self.warnIfReservedIdentifier(param.position, param.name);
             try params.append(self.allocator, .{
                 .name = param.name,
                 .ty = try self.resolveTypeNameCollectingParams(param.type_name, param.position, &generic_params),
@@ -651,6 +672,7 @@ const Analyzer = struct {
             types.builtinType(.error_type);
 
         for (function.constraints) |constraint| {
+            try self.warnIfReservedIdentifier(constraint.position, constraint.param_name);
             const type_var = constraintTypeVar(generic_params.items, constraint.param_name) orelse blk: {
                 try self.report(constraint.position, "unknown type parameter '{s}' in constraint", .{constraint.param_name});
                 break :blk null;
@@ -829,6 +851,7 @@ const Analyzer = struct {
     ) anyerror!void {
         const ty = try self.resolveTypeName(decl.type_name, decl.position);
         const name = try self.intern(decl.name);
+        try self.warnIfReservedIdentifier(decl.position, decl.name);
         if (!try scope.put(name, .{
             .ty = ty,
             .kind = kind,
@@ -935,6 +958,7 @@ const Analyzer = struct {
                 return null;
             },
             .typed_assignment => |typed_assignment| {
+                try self.warnIfReservedIdentifier(stmt.position, typed_assignment.name);
                 const target_type = try self.resolveTypeName(typed_assignment.type_name, stmt.position);
                 const value_type = try self.analyzeExpr(scope, typed_assignment.value, context);
                 if (!self.typesCompatible(target_type, value_type)) {
@@ -1003,6 +1027,7 @@ const Analyzer = struct {
                 }
                 var loop_scope = Scope.init(self.allocator, scope);
                 if (times_loop.binding) |binding| {
+                    try self.warnIfReservedIdentifier(stmt.position, binding);
                     _ = try loop_scope.put(binding, .{
                         .ty = types.builtinType(.int),
                         .kind = .local,
@@ -1023,6 +1048,7 @@ const Analyzer = struct {
 
                 var loop_scope = Scope.init(self.allocator, scope);
                 if (each_loop.binding) |binding| {
+                    try self.warnIfReservedIdentifier(stmt.position, binding);
                     _ = try loop_scope.put(binding, .{
                         .ty = collection_type.componentType().?,
                         .kind = .local,
@@ -1044,6 +1070,7 @@ const Analyzer = struct {
         immutable: bool,
         context: *FunctionContext,
     ) anyerror!void {
+        try self.warnIfReservedIdentifier(binding.position, binding.name);
         const scheme = try self.inferLetScheme(scope, binding, context);
         const value_type = scheme.ty;
         const target_type = if (binding.type_name) |type_name| blk: {
@@ -1223,6 +1250,7 @@ const Analyzer = struct {
                     return;
                 }
 
+                try self.warnIfReservedIdentifier(assignment.target.position, name);
                 _ = try scope.put(name, .{
                     .ty = value_type,
                     .kind = .local,
@@ -1410,6 +1438,9 @@ const Analyzer = struct {
                 break :blk types.builtinType(.error_type);
             },
             .lambda => blk: {
+                for (expr.data.lambda.params) |param| {
+                    try self.warnIfReservedIdentifier(expr.position, param);
+                }
                 var env = try self.buildHmEnv(scope);
                 defer env.deinit();
                 break :blk context.hm_engine.inferExpr(&env, expr) catch {
@@ -1605,6 +1636,7 @@ const Analyzer = struct {
         return switch (pattern.data) {
             .wildcard => .{ .matches_all = true, .constructor_name = null },
             .binding => |name| blk: {
+                try self.warnIfReservedIdentifier(pattern.position, name);
                 if (!try scope.put(name, .{
                     .ty = expected_type,
                     .kind = .local,
@@ -1968,6 +2000,17 @@ const Analyzer = struct {
 
     fn report(self: *Analyzer, position: ast.Position, comptime fmt: []const u8, args: anytype) anyerror!void {
         try self.diagnostics.appendFmt(.@"error", position.line, position.column, fmt, args);
+    }
+
+    fn warnIfReservedIdentifier(self: *Analyzer, position: ast.Position, name: []const u8) anyerror!void {
+        if (!std.mem.startsWith(u8, name, "_zwgsl")) return;
+        try self.diagnostics.appendFmt(
+            .warning,
+            position.line,
+            position.column,
+            "identifier '{s}' uses reserved '_zwgsl' prefix",
+            .{name},
+        );
     }
 };
 

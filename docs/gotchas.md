@@ -24,6 +24,17 @@ backend.
   only have WGSL golden fixture coverage today.
 - GLSL `version` and `precision` declarations do not affect WGSL output.
 
+## Generated Identifier Prefix
+
+Names beginning with `_zwgsl` are reserved for compiler-generated WGSL helpers,
+entry-point wrappers, and uniform wrapper structs. Source code that declares a
+uniform, function, local binding, type, trait, field, variant, stage I/O, or
+pattern binding with that prefix receives a semantic warning.
+
+Prefer project-specific prefixes for host-facing names. Generated WGSL may still
+contain `_zwgsl` names, but user source should avoid that namespace so future
+compiler helpers can be added without colliding with shader code.
+
 ## Stage Interfaces Must Match
 
 Vertex `varying` declarations become fragment inputs. Names, types, and explicit

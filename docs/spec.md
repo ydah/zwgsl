@@ -45,6 +45,10 @@ uniform_decl   ::= "uniform" symbol "," type_spec
 `version` and `precision` primarily affect GLSL ES output. Uniform declarations
 are global and visible to helper functions and shader stages.
 
+Identifiers beginning with `_zwgsl` are reserved for compiler-generated WGSL
+helpers and wrappers. The semantic pass warns when source declarations use that
+prefix.
+
 ## Types
 
 ```ebnf
