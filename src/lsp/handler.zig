@@ -1,4 +1,5 @@
 const std = @import("std");
+const code_actions = @import("code_actions.zig");
 const completion = @import("completion.zig");
 const diagnostics = @import("diagnostics.zig");
 const document_symbols = @import("document_symbols.zig");
@@ -45,7 +46,7 @@ pub fn handle(allocator: std.mem.Allocator, state: *State, message: []const u8) 
     const params = root.get("params");
 
     if (std.mem.eql(u8, method_name, "initialize")) {
-        return try response(allocator, id_value, "{\"capabilities\":{\"textDocumentSync\":2,\"hoverProvider\":true,\"completionProvider\":{\"triggerCharacters\":[\".\"]},\"definitionProvider\":true,\"documentSymbolProvider\":true,\"semanticTokensProvider\":{\"legend\":{\"tokenTypes\":[\"keyword\",\"function\",\"variable\",\"parameter\",\"type\",\"number\",\"string\",\"comment\",\"operator\",\"property\"],\"tokenModifiers\":[]},\"full\":true}}}");
+        return try response(allocator, id_value, "{\"capabilities\":{\"textDocumentSync\":2,\"hoverProvider\":true,\"completionProvider\":{\"triggerCharacters\":[\".\"]},\"codeActionProvider\":true,\"definitionProvider\":true,\"documentSymbolProvider\":true,\"semanticTokensProvider\":{\"legend\":{\"tokenTypes\":[\"keyword\",\"function\",\"variable\",\"parameter\",\"type\",\"number\",\"string\",\"comment\",\"operator\",\"property\"],\"tokenModifiers\":[]},\"full\":true}}}");
     }
     if (std.mem.eql(u8, method_name, "shutdown")) {
         state.shutdown_requested = true;
@@ -109,6 +110,13 @@ pub fn handle(allocator: std.mem.Allocator, state: *State, message: []const u8) 
         const line = nestedU32(request_params, &.{ "position", "line" }) orelse 0;
         const character = nestedU32(request_params, &.{ "position", "character" }) orelse 0;
         const result = try completion.response(allocator, source, line, character);
+        return try responseOwned(allocator, id_value, result);
+    }
+    if (std.mem.eql(u8, method_name, "textDocument/codeAction")) {
+        const request_params = params orelse return try invalidParamsOrNull(allocator, id_value, "Missing params");
+        const uri = nestedString(request_params, &.{ "textDocument", "uri" }) orelse return try invalidParamsOrNull(allocator, id_value, "Missing textDocument.uri");
+        const source = state.store.get(uri) orelse "";
+        const result = try code_actions.response(allocator, uri, source);
         return try responseOwned(allocator, id_value, result);
     }
     if (std.mem.eql(u8, method_name, "textDocument/definition")) {

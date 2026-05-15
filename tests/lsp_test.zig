@@ -1,6 +1,7 @@
 const std = @import("std");
 const lsp = @import("zwgsl").lsp;
 
+const code_actions = lsp.code_actions;
 const completion = lsp.completion;
 const document_symbols = lsp.document_symbols;
 const goto_def = lsp.goto_def;
@@ -35,6 +36,7 @@ test "lsp initialize advertises hover completion definition document symbols and
     try std.testing.expect(std.mem.indexOf(u8, response, "\"hoverProvider\":true") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"textDocumentSync\":2") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"completionProvider\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"codeActionProvider\":true") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"definitionProvider\":true") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"documentSymbolProvider\":true") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"semanticTokensProvider\"") != null);
@@ -274,6 +276,61 @@ test "lsp completion offers member and root suggestions" {
     defer std.testing.allocator.free(root);
     try std.testing.expect(std.mem.indexOf(u8, root, "\"position\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, root, "\"normalize\"") != null);
+}
+
+test "lsp code actions add missing vertex position input" {
+    const source =
+        \\vertex do
+        \\  def main
+        \\    gl_Position = vec4(position, 1.0)
+        \\  end
+        \\end
+    ;
+
+    const response = try code_actions.response(std.testing.allocator, "file:///shader.zw", source);
+    defer std.testing.allocator.free(response);
+
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"title\":\"Add vertex position input\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"line\":1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"newText\":\"  input :position, Vec3, location: 0\\n\"") != null);
+}
+
+test "lsp handler serves code actions from open documents" {
+    var state = handler.State.init(std.testing.allocator);
+    defer state.deinit();
+
+    const source =
+        \\vertex do
+        \\  def main
+        \\    gl_Position = vec4(position, 1.0)
+        \\  end
+        \\end
+    ;
+    const escaped_source = try jsonString(std.testing.allocator, source);
+    defer std.testing.allocator.free(escaped_source);
+
+    const open_message = try std.mem.concat(
+        std.testing.allocator,
+        u8,
+        &.{
+            "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file:///shader.zw\",\"text\":",
+            escaped_source,
+            "}}}",
+        },
+    );
+    defer std.testing.allocator.free(open_message);
+    const open_response = (try handler.handle(std.testing.allocator, &state, open_message)).?;
+    defer std.testing.allocator.free(open_response);
+
+    const response = (try handler.handle(
+        std.testing.allocator,
+        &state,
+        "{\"jsonrpc\":\"2.0\",\"id\":10,\"method\":\"textDocument/codeAction\",\"params\":{\"textDocument\":{\"uri\":\"file:///shader.zw\"},\"range\":{\"start\":{\"line\":2,\"character\":25},\"end\":{\"line\":2,\"character\":33}},\"context\":{\"diagnostics\":[]}}}",
+    )).?;
+    defer std.testing.allocator.free(response);
+
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"id\":10") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"title\":\"Add vertex position input\"") != null);
 }
 
 test "lsp definition jumps to local function definitions" {

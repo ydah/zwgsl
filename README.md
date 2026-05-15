@@ -350,6 +350,7 @@ Current editor-facing features:
 - diagnostics from compiler errors and warnings
 - hover with source-aware type / declaration info
 - completion for locals, declarations, builtins, fields, and methods
+- code actions for common stage declaration fixes
 - goto-definition for values, functions, and type declarations
 - document symbols for stages, declarations, functions, types, traits, and impls
 - semantic tokens for keywords, functions, variables, types, numbers, strings, comments, operators, and properties

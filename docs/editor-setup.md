@@ -106,10 +106,11 @@ transport: stdio
 
 Current editor-facing capabilities are:
 
-- full document sync for open, change, and close events
+- incremental document sync with full-change compatibility
 - diagnostics from compiler errors and warnings
 - hover for builtins, declarations, and inferred types
 - completion for locals, declarations, builtins, fields, and methods
+- code actions for common stage declaration fixes
 - goto-definition for values, functions, and type declarations
 - document symbols for editor outlines
 - semantic tokens for syntax coloring

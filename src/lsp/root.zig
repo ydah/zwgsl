@@ -1,4 +1,5 @@
 pub const analysis = @import("analysis.zig");
+pub const code_actions = @import("code_actions.zig");
 pub const completion = @import("completion.zig");
 pub const diagnostics = @import("diagnostics.zig");
 pub const document_symbols = @import("document_symbols.zig");
