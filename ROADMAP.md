@@ -25,8 +25,10 @@ feature matrix remains the source of truth for implemented behavior.
 
 - Add generated WGSL validation once a stable validator dependency is chosen for
   CI and local development.
-- Add release assets for CLI, LSP, C library/header, and wasm artifacts.
-- Evaluate npm and Homebrew distribution after release artifacts are stable.
+- Expand release assets beyond the initial Linux x86_64 package once platform
+  coverage is stable.
+- Evaluate npm and Homebrew distribution after tagged release artifacts are
+  stable.
 
 ## Examples And Docs
 
