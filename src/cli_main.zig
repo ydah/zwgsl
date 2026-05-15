@@ -97,7 +97,7 @@ fn run(allocator: std.mem.Allocator) !u8 {
 }
 
 fn parseArgs(
-    args: []const [:0]u8,
+    args: []const [:0]const u8,
     stderr: anytype,
     stdout: anytype,
 ) !ParseResult {
@@ -315,4 +315,65 @@ fn writeUsageError(writer: anytype, comptime fmt: []const u8, args: anytype) !vo
     try writer.print(fmt, args);
     try writer.writeAll("\n\n");
     try writeUsage(writer);
+}
+
+const TestWriter = struct {
+    fn writeAll(_: *TestWriter, _: []const u8) !void {}
+    fn print(_: *TestWriter, comptime _: []const u8, _: anytype) !void {}
+};
+
+test "CLI parses compile options" {
+    const args = [_][:0]const u8{
+        "zwgsl",
+        "compile",
+        "--target=glsl-es-300",
+        "--stage",
+        "fragment",
+        "-o",
+        "out.glsl",
+        "shader.zw",
+    };
+    var stderr = TestWriter{};
+    var stdout = TestWriter{};
+
+    const parsed = try parseArgs(args[0..], &stderr, &stdout);
+    const options = parsed.options;
+
+    try std.testing.expectEqual(Command.compile, options.command);
+    try std.testing.expectEqual(zwgsl.compiler.Target.glsl_es_300, options.target);
+    try std.testing.expectEqual(Stage.fragment, options.stage);
+    try std.testing.expectEqualStrings("out.glsl", options.output_path.?);
+    try std.testing.expectEqualStrings("shader.zw", options.input_path);
+}
+
+test "CLI rejects check output path" {
+    const args = [_][:0]const u8{
+        "zwgsl",
+        "check",
+        "--output",
+        "out.wgsl",
+        "shader.zw",
+    };
+    var stderr = TestWriter{};
+    var stdout = TestWriter{};
+
+    const parsed = try parseArgs(args[0..], &stderr, &stdout);
+
+    try std.testing.expectEqual(@as(u8, 2), parsed.exit_code);
+}
+
+test "CLI rejects unknown stage" {
+    const args = [_][:0]const u8{
+        "zwgsl",
+        "compile",
+        "--stage",
+        "geometry",
+        "shader.zw",
+    };
+    var stderr = TestWriter{};
+    var stdout = TestWriter{};
+
+    const parsed = try parseArgs(args[0..], &stderr, &stdout);
+
+    try std.testing.expectEqual(@as(u8, 2), parsed.exit_code);
 }
