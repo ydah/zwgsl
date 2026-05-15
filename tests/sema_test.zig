@@ -220,7 +220,7 @@ test "sema validates varying compatibility" {
         \\end
     );
     defer analyzed.arena.deinit();
-    try std.testing.expect(analyzed.diagnostics.items.items.len > 0);
+    try expectDiagnosticContaining(analyzed.diagnostics.items.items, "fragment shader is missing varying 'v_normal'");
 }
 
 test "sema reports mismatched varying locations" {
@@ -244,6 +244,50 @@ test "sema reports mismatched varying locations" {
     defer analyzed.arena.deinit();
 
     try expectDiagnosticContaining(analyzed.diagnostics.items.items, "varying 'v_pos' has mismatched location");
+}
+
+test "sema requires matching explicit varying locations" {
+    var vertex_location = try analyzeSource(
+        \\vertex do
+        \\  varying :v_pos, Vec3, location: 0
+        \\  def main
+        \\    self.v_pos = vec3(1.0)
+        \\    gl_Position = vec4(1.0)
+        \\  end
+        \\end
+        \\
+        \\fragment do
+        \\  varying :v_pos, Vec3
+        \\  output :frag_color, Vec4, location: 0
+        \\  def main
+        \\    frag_color = vec4(v_pos, 1.0)
+        \\  end
+        \\end
+    );
+    defer vertex_location.arena.deinit();
+
+    try expectDiagnosticContaining(vertex_location.diagnostics.items.items, "varying 'v_pos' declares location in the vertex stage but omits it in the fragment stage");
+
+    var fragment_location = try analyzeSource(
+        \\vertex do
+        \\  varying :v_pos, Vec3
+        \\  def main
+        \\    self.v_pos = vec3(1.0)
+        \\    gl_Position = vec4(1.0)
+        \\  end
+        \\end
+        \\
+        \\fragment do
+        \\  varying :v_pos, Vec3, location: 0
+        \\  output :frag_color, Vec4, location: 0
+        \\  def main
+        \\    frag_color = vec4(v_pos, 1.0)
+        \\  end
+        \\end
+    );
+    defer fragment_location.arena.deinit();
+
+    try expectDiagnosticContaining(fragment_location.diagnostics.items.items, "varying 'v_pos' declares location in the fragment stage but omits it in the vertex stage");
 }
 
 test "sema accepts a valid shader" {

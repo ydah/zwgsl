@@ -156,7 +156,9 @@ end
 ```
 
 Fragment stages can declare matching `varying` inputs and explicit `output`
-locations. The compiler validates stage interface compatibility.
+locations. The compiler validates stage interface compatibility: varying
+names, types, and explicit locations must match between vertex and fragment
+stages. If a varying location is omitted, it must be omitted on both sides.
 
 ### Compute
 

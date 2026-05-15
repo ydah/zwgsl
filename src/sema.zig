@@ -730,7 +730,11 @@ const Analyzer = struct {
                     if (vertex_location != fragment_location) {
                         try self.report(fragment_info.position, "varying '{s}' has mismatched location between vertex and fragment stages", .{entry.key_ptr.*});
                     }
+                } else {
+                    try self.report(fragment_info.position, "varying '{s}' declares location in the vertex stage but omits it in the fragment stage", .{entry.key_ptr.*});
                 }
+            } else if (fragment_info.location != null) {
+                try self.report(fragment_info.position, "varying '{s}' declares location in the fragment stage but omits it in the vertex stage", .{entry.key_ptr.*});
             }
         }
 

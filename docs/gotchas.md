@@ -54,10 +54,12 @@ fragment do
 end
 ```
 
-The compiler validates mismatched varying types and mismatched explicit
-locations. When locations are omitted, zwgsl assigns them in declaration order.
-Keep related vertex and fragment declarations close together in examples and
-fixtures so location drift is easy to see.
+The compiler validates missing varyings, mismatched varying types, and
+location compatibility. If a varying uses an explicit location, both stage
+declarations must specify the same value. When both locations are omitted,
+zwgsl assigns them in declaration order. Keep related vertex and fragment
+declarations close together in examples and fixtures so location drift is easy
+to see.
 
 ## Uniform Binding Order Matters
 
