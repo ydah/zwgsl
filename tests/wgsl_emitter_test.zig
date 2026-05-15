@@ -320,6 +320,15 @@ test "compiler emits WGSL for the pbr fixture" {
     );
 }
 
+test "compiler emits WGSL for the utah teapot example" {
+    try expectWgslFixture(
+        "examples/utah_teapot.zw",
+        "tests/fixtures/utah_teapot.vertex.wgsl",
+        "tests/fixtures/utah_teapot.fragment.wgsl",
+        null,
+    );
+}
+
 test "compiler omits fragment-only global helpers from vertex WGSL" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
