@@ -286,13 +286,31 @@ test "lsp completion offers member and root suggestions" {
     defer std.testing.allocator.free(member);
     try std.testing.expect(std.mem.indexOf(u8, member, "\"xyz\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, member, "\"normalize\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, member, "\"refract\"") != null);
 
     const root = try completion.response(std.testing.allocator, source, 4, 8);
     defer std.testing.allocator.free(root);
     try std.testing.expect(std.mem.indexOf(u8, root, "\"position\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, root, "\"normalize\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, root, "\"smoothstep\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, root, "\"vec4\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, root, "fn vec4(x: Float, y: Float, z: Float, w: Float) -> Vec4") != null);
+}
+
+test "lsp hover describes extended builtin functions" {
+    const source =
+        \\compute do
+        \\  def main
+        \\    value: Float = smoothstep(0.0, 1.0, 0.5)
+        \\  end
+        \\end
+    ;
+
+    const response = try hover.response(std.testing.allocator, source, 2, 20);
+    defer std.testing.allocator.free(response);
+
+    try std.testing.expect(std.mem.indexOf(u8, response, "fn smoothstep(edge0: T | Sca, edge1: T | Sca, x: T) -> T") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "Hermite") != null);
 }
 
 test "lsp completion and hover expose stage builtins in stage scope" {
