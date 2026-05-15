@@ -107,3 +107,7 @@ point shape predictable.
 The playground compiles compute shaders and shows generated WGSL, but the live
 preview surface is built around render pipelines. Compute-only samples are useful
 for checking language features and diagnostics, not for visual preview.
+
+If WebGPU is unavailable, the playground still loads the editor, compiler, WGSL
+output, and diagnostics. The canvas falls back to a static 2D surface until the
+page runs in a browser with `navigator.gpu` enabled.

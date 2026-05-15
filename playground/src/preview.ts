@@ -135,7 +135,11 @@ export const createPreview = async (
 
   if (!gpu || !adapter || !device || !context) {
     status.textContent = "2d fallback";
-    controlsRoot.replaceChildren(makeEmptyState("WebGPU unavailable"));
+    controlsRoot.replaceChildren(
+      makeEmptyState(
+        "WebGPU unavailable. The editor and compiler still work; the canvas shows a static 2D fallback. Use a browser with navigator.gpu enabled for live preview.",
+      ),
+    );
     return {
       async render(_: CompileResult) {
         const ctx = canvas.getContext("2d");
