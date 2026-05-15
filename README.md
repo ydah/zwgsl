@@ -42,6 +42,7 @@ syntax while still targeting modern GPU backends.
 - [Feature Matrix](docs/feature-matrix.md)
 - [Gotchas](docs/gotchas.md)
 - [Design Notes](docs/design-notes.md)
+- [Roadmap](ROADMAP.md)
 - [Editor Setup](docs/editor-setup.md)
 - [Examples](examples/README.md)
 
@@ -397,6 +398,9 @@ flowchart TD
 ```
 
 ## Project Status
+
+Implemented behavior is tracked here and in the [Feature Matrix](docs/feature-matrix.md).
+Forward-looking work is tracked separately in the [Roadmap](ROADMAP.md).
 
 | Area | Status |
 | --- | --- |
