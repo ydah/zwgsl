@@ -8,6 +8,22 @@ fn compileFixture(source: []const u8) !zwgsl.compiler.CompileOutput {
     return output;
 }
 
+fn expectGlslFixture(source_path: []const u8, vertex_path: []const u8, fragment_path: []const u8) !void {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const source = try std.fs.cwd().readFileAlloc(arena.allocator(), source_path, 1 << 20);
+    const output = try zwgsl.compiler.compile(arena.allocator(), source, .{});
+
+    try std.testing.expectEqual(@as(usize, 0), output.errors.len);
+
+    const expected_vertex = try std.fs.cwd().readFileAlloc(arena.allocator(), vertex_path, 1 << 20);
+    try std.testing.expectEqualStrings(expected_vertex, output.vertex_source.?);
+
+    const expected_fragment = try std.fs.cwd().readFileAlloc(arena.allocator(), fragment_path, 1 << 20);
+    try std.testing.expectEqualStrings(expected_fragment, output.fragment_source.?);
+}
+
 test "compiler emits expected GLSL for the basic fixture" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -162,4 +178,20 @@ test "compiler lowers ADT matches to switch statements in GLSL" {
     try std.testing.expect(std.mem.indexOf(u8, output.fragment_source.?, "switch (__match_value.tag)") != null);
     try std.testing.expect(std.mem.indexOf(u8, output.fragment_source.?, "case 0:") != null);
     try std.testing.expect(std.mem.indexOf(u8, output.fragment_source.?, "case 1:") != null);
+}
+
+test "compiler emits GLSL for the postprocess fixture" {
+    try expectGlslFixture(
+        "examples/postprocess.zw",
+        "tests/fixtures/postprocess.vertex.glsl",
+        "tests/fixtures/postprocess.fragment.glsl",
+    );
+}
+
+test "compiler emits GLSL for the pbr fixture" {
+    try expectGlslFixture(
+        "examples/pbr.zw",
+        "tests/fixtures/pbr.vertex.glsl",
+        "tests/fixtures/pbr.fragment.glsl",
+    );
 }
