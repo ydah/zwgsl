@@ -520,8 +520,9 @@ test "compiler specializes constrained trait calls for WGSL" {
     try std.testing.expect(output.compute_source != null);
     try std.testing.expect(std.mem.indexOf(u8, output.compute_source.?, "fn _trait_Numeric_Float_add") == null);
     try std.testing.expect(std.mem.indexOf(u8, output.compute_source.?, "fn _trait_Numeric_Float_mul") == null);
-    try std.testing.expect(std.mem.indexOf(u8, output.compute_source.?, "fn _spec_lerp_Float_Float_Float") != null);
-    try std.testing.expect(std.mem.indexOf(u8, output.compute_source.?, "_spec_lerp_Float_Float_Float(1.0, 2.0, 0.5)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output.compute_source.?, "fn _spec_lerp_Float_Float_Float_h") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output.compute_source.?, "_spec_lerp_Float_Float_Float_h") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output.compute_source.?, "(1.0, 2.0, 0.5)") != null);
     try std.testing.expect(std.mem.indexOf(u8, output.compute_source.?, "_trait_Numeric_Float_") == null);
 }
 

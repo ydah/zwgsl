@@ -1207,6 +1207,7 @@ const Builder = struct {
             try writer.writeByte('_');
             try appendTypeMangle(writer, try substitution.apply(param.ty));
         }
+        try writer.print("_h{d}", .{try specializationHash(self.allocator, function.name, signature, substitution)});
         return try buffer.toOwnedSlice(self.allocator);
     }
 
@@ -1464,6 +1465,50 @@ fn appendTypeMangle(writer: anytype, ty: types.Type) !void {
             }
             try writer.writeAll("_to_");
             try appendTypeMangle(writer, function.return_type.*);
+        },
+    }
+}
+
+fn specializationHash(
+    allocator: std.mem.Allocator,
+    function_name: []const u8,
+    signature: sema.FunctionSignature,
+    substitution: *unify.Substitution,
+) !u32 {
+    var buffer = try std.ArrayList(u8).initCapacity(allocator, 0);
+    defer buffer.deinit(allocator);
+
+    const writer = buffer.writer(allocator);
+    try writer.print("fn:{d}:{s}|params:{d}", .{ function_name.len, function_name, signature.params.len });
+    for (signature.params) |param| {
+        try writer.writeByte('|');
+        try appendTypeHashKey(writer, try substitution.apply(param.ty));
+    }
+    try writer.writeAll("|ret:");
+    try appendTypeHashKey(writer, try substitution.apply(signature.return_type));
+    return std.hash.Fnv1a_32.hash(buffer.items);
+}
+
+fn appendTypeHashKey(writer: anytype, ty: types.Type) !void {
+    switch (ty) {
+        .builtin => |builtin| try writer.print("B:{s};", .{@tagName(builtin)}),
+        .struct_type => |name| try writer.print("S:{d}:{s};", .{ name.len, name }),
+        .type_var => |id| try writer.print("T:{d};", .{id}),
+        .nat => |value| try writer.print("N:{d};", .{value}),
+        .type_app => |app_ty| {
+            try writer.print("A:{d}:{s}[", .{ app_ty.name.len, app_ty.name });
+            for (app_ty.args) |arg| {
+                try appendTypeHashKey(writer, arg);
+            }
+            try writer.writeAll("];");
+        },
+        .function => |function| {
+            try writer.print("F:{d}(", .{function.params.len});
+            for (function.params) |param| {
+                try appendTypeHashKey(writer, param);
+            }
+            try writer.writeAll(")->");
+            try appendTypeHashKey(writer, function.return_type.*);
         },
     }
 }

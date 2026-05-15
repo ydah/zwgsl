@@ -44,6 +44,40 @@ test "compiler lowers helper functions and method chains" {
     try std.testing.expectEqualStrings(@embedFile("fixtures/method_chain.fragment.glsl"), output.fragment_source.?);
 }
 
+test "compiler emits stable hashed specialization names for GLSL" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const source =
+        \\trait Numeric
+        \\  def add(other: Self) -> Self end
+        \\end
+        \\
+        \\impl Numeric for Float
+        \\  def add(other: Self) -> Self
+        \\    self + other
+        \\  end
+        \\end
+        \\
+        \\def plus_one(value: T) -> T where T: Numeric
+        \\  value.add(1.0)
+        \\end
+        \\
+        \\fragment do
+        \\  output :frag_color, Vec4, location: 0
+        \\  def main
+        \\    value: Float = plus_one(2.0)
+        \\    frag_color = vec4(value)
+        \\  end
+        \\end
+    ;
+    const output = try zwgsl.compiler.compile(arena.allocator(), source, .{});
+    try std.testing.expectEqual(@as(usize, 0), output.errors.len);
+    try std.testing.expect(std.mem.indexOf(u8, output.fragment_source.?, "float __spec_plus_one_Float_h") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output.fragment_source.?, "__spec_plus_one_Float_h") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output.fragment_source.?, "(2.0)") != null);
+}
+
 test "compiler emits debug comments with source lines and columns" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
