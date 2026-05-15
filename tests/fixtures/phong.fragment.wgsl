@@ -10,7 +10,10 @@ struct FragmentOutput {
 @group(0) @binding(0) var<uniform> model_matrix: mat4x4f;
 @group(0) @binding(1) var<uniform> view_matrix: mat4x4f;
 @group(0) @binding(2) var<uniform> projection_matrix: mat4x4f;
-@group(0) @binding(3) var<uniform> light_pos: vec3f;
+struct _zwgsl_uniform_light_pos {
+    @align(16) value: vec3f,
+}
+@group(0) @binding(3) var<uniform> light_pos: _zwgsl_uniform_light_pos;
 @group(0) @binding(4) var<uniform> base_color: vec4f;
 
 var<private> v_normal: vec3f;
@@ -22,7 +25,7 @@ fn phong_strength(normal: vec3f, light_dir: vec3f) -> f32 {
 }
 
 fn _zwgsl_fragment_main() {
-    let light_dir: vec3f = light_pos - v_world_pos;
+    let light_dir: vec3f = light_pos.value - v_world_pos;
     let light: f32 = phong_strength(v_normal, light_dir);
     frag_color = vec4f(base_color.rgb * (0.2 + 0.8 * light), base_color.a);
 }

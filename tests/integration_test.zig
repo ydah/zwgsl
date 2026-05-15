@@ -79,12 +79,13 @@ test "phong example compiles to WGSL" {
 
 test "pbr example compiles to WGSL" {
     try expectCompilesPathToWgsl("examples/pbr.zw", &.{
+        "struct _zwgsl_uniform_albedo",
         "struct _zwgsl_uniform_metallic",
         "struct _zwgsl_uniform_roughness",
         "gl_Position = mvp * vec4f(position, 1.0);",
     }, &.{
         "let energy: f32 = mix(0.04, 1.0, metallic.value);",
-        "let color: vec3f = albedo * (energy * (1.0 - roughness.value) * n_dot_up);",
+        "let color: vec3f = albedo.value * (energy * (1.0 - roughness.value) * n_dot_up);",
     });
 }
 

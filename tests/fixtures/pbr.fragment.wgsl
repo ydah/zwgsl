@@ -7,7 +7,10 @@ struct FragmentOutput {
 }
 
 @group(0) @binding(0) var<uniform> mvp: mat4x4f;
-@group(0) @binding(1) var<uniform> albedo: vec3f;
+struct _zwgsl_uniform_albedo {
+    @align(16) value: vec3f,
+}
+@group(0) @binding(1) var<uniform> albedo: _zwgsl_uniform_albedo;
 struct _zwgsl_uniform_metallic {
     @align(16) value: f32,
 }
@@ -27,7 +30,7 @@ fn saturate(x: f32) -> f32 {
 fn _zwgsl_fragment_main() {
     let n_dot_up: f32 = saturate(dot(normalize(v_normal), vec3f(0.0, 1.0, 0.0)));
     let energy: f32 = mix(0.04, 1.0, metallic.value);
-    let color: vec3f = albedo * (energy * (1.0 - roughness.value) * n_dot_up);
+    let color: vec3f = albedo.value * (energy * (1.0 - roughness.value) * n_dot_up);
     frag_color = vec4f(color, 1.0);
 }
 

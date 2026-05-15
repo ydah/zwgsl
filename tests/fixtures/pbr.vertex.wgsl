@@ -9,7 +9,10 @@ struct VertexOutput {
 }
 
 @group(0) @binding(0) var<uniform> mvp: mat4x4f;
-@group(0) @binding(1) var<uniform> albedo: vec3f;
+struct _zwgsl_uniform_albedo {
+    @align(16) value: vec3f,
+}
+@group(0) @binding(1) var<uniform> albedo: _zwgsl_uniform_albedo;
 struct _zwgsl_uniform_metallic {
     @align(16) value: f32,
 }

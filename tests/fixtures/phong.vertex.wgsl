@@ -12,7 +12,10 @@ struct VertexOutput {
 @group(0) @binding(0) var<uniform> model_matrix: mat4x4f;
 @group(0) @binding(1) var<uniform> view_matrix: mat4x4f;
 @group(0) @binding(2) var<uniform> projection_matrix: mat4x4f;
-@group(0) @binding(3) var<uniform> light_pos: vec3f;
+struct _zwgsl_uniform_light_pos {
+    @align(16) value: vec3f,
+}
+@group(0) @binding(3) var<uniform> light_pos: _zwgsl_uniform_light_pos;
 @group(0) @binding(4) var<uniform> base_color: vec4f;
 
 var<private> gl_Position: vec4f;

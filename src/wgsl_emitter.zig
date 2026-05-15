@@ -1744,7 +1744,8 @@ fn findUniform(uniforms: []const mir.Global, name: []const u8) ?mir.Global {
 
 fn uniformRequiresWrapper(ty: types.Type) bool {
     if (ty.isScalar()) return true;
-    return ty.vectorLen() == 2;
+    const vector_len = ty.vectorLen() orelse return false;
+    return vector_len == 2 or vector_len == 3;
 }
 
 fn findFunction(functions: []const mir.Function, name: []const u8) ?mir.Function {
