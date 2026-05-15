@@ -39,6 +39,15 @@ APIs, or a full application language.
 The goal is a compact language that shader authors can read quickly, embed in
 tools, and inspect through generated WGSL or GLSL.
 
+## Comparison Snapshot
+
+| Choice | Strength | Tradeoff |
+| --- | --- | --- |
+| WGSL | Direct WebGPU target with browser validation and clear resource semantics. | More ceremony for reusable helpers, stage wiring, and authoring ergonomics. |
+| GLSL ES 3.0 | Familiar render-shader syntax with wide historical usage. | Not a compute target here, and WebGPU still needs WGSL-oriented resource semantics. |
+| Rust-style GPU DSLs | Strong host-language integration and general GPU programming models. | More concepts than zwgsl needs for compact shader authoring and generated-source inspection. |
+| zwgsl | Ruby-like syntax, local inference, traits, ADTs, LSP, playground, and WGSL-first output. | A focused shader language, not a replacement for every backend feature or host GPU API. |
+
 ## Inference Is Local On Purpose
 
 The type checker supports HM-style local inference and let-generalization, but
