@@ -74,6 +74,10 @@ type CompiledPreviewState = {
   vertex: VertexPreviewState;
 };
 
+type PersistedUniformValues = Record<string, number[]>;
+
+const uniformStorageKey = "zwgsl.playground.uniforms.v1";
+
 const fallbackVertexShader = `
 @vertex
 fn main(@builtin(vertex_index) index: u32) -> @builtin(position) vec4f {
@@ -474,12 +478,47 @@ const createUniformState = (device: GPUDevice, spec: UniformSpec, canvas: HTMLCa
     size: uniformBufferSize(spec),
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
   }),
-  values: initialValues(spec, canvas),
+  values: persistedUniformValues(spec) ?? initialValues(spec, canvas),
   inputs: [],
   valueLabels: [],
 });
 
 const uniformBufferSize = (spec: UniformSpec) => (spec.columns > 1 ? spec.columns * 16 : 16);
+
+const uniformPersistenceKey = (spec: UniformSpec) =>
+  [spec.binding, spec.name, spec.typeName, spec.length, spec.columns].join(":");
+
+const readPersistedUniforms = (): PersistedUniformValues => {
+  try {
+    const raw = window.localStorage.getItem(uniformStorageKey);
+    const parsed = raw ? JSON.parse(raw) : null;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as PersistedUniformValues
+      : {};
+  } catch {
+    return {};
+  }
+};
+
+const persistedUniformValues = (spec: UniformSpec) => {
+  if (spec.slider === null || spec.auto !== null) return null;
+  const values = readPersistedUniforms()[uniformPersistenceKey(spec)];
+  if (!Array.isArray(values) || values.length !== spec.length) return null;
+  if (!values.every((value) => Number.isFinite(value))) return null;
+  return values.slice(0, spec.length);
+};
+
+const persistUniformValues = (spec: UniformSpec, values: number[]) => {
+  if (spec.slider === null || spec.auto !== null) return;
+
+  try {
+    const persisted = readPersistedUniforms();
+    persisted[uniformPersistenceKey(spec)] = values.slice(0, spec.length);
+    window.localStorage.setItem(uniformStorageKey, JSON.stringify(persisted));
+  } catch {
+    // Preview controls still work if localStorage is unavailable.
+  }
+};
 
 const initialValues = (spec: UniformSpec, canvas: HTMLCanvasElement) => {
   if (spec.auto === "resolution") {
@@ -899,6 +938,7 @@ const makeUniformCard = (state: UniformState) => {
     input.addEventListener("input", () => {
       const nextValue = Number(input.value);
       state.values[index] = nextValue;
+      persistUniformValues(state.spec, state.values);
       output.value = formatUniformValue(nextValue, state.spec.kind);
       output.textContent = output.value;
     });
