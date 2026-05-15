@@ -123,6 +123,9 @@ test "lsp unknown request returns method-not-found error" {
     try std.testing.expect(std.mem.indexOf(u8, response, "\"error\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"code\":-32601") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"data\":\"workspace/unknown\"") != null);
+
+    var parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, response, .{});
+    defer parsed.deinit();
 }
 
 test "lsp unknown notification is ignored" {
@@ -136,6 +139,57 @@ test "lsp unknown notification is ignored" {
     );
 
     try std.testing.expect(response == null);
+}
+
+test "lsp malformed json returns parse error" {
+    var state = handler.State.init(std.testing.allocator);
+    defer state.deinit();
+
+    const response = (try handler.handle(
+        std.testing.allocator,
+        &state,
+        "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\"",
+    )).?;
+    defer std.testing.allocator.free(response);
+
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"id\":null") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"code\":-32700") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"message\":\"Parse error\"") != null);
+
+    var parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, response, .{});
+    defer parsed.deinit();
+}
+
+test "lsp invalid request returns invalid request error" {
+    var state = handler.State.init(std.testing.allocator);
+    defer state.deinit();
+
+    const response = (try handler.handle(
+        std.testing.allocator,
+        &state,
+        "[{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\"}]",
+    )).?;
+    defer std.testing.allocator.free(response);
+
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"id\":null") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"code\":-32600") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"data\":\"Request must be a JSON object\"") != null);
+}
+
+test "lsp invalid params returns error instead of trapping" {
+    var state = handler.State.init(std.testing.allocator);
+    defer state.deinit();
+
+    const response = (try handler.handle(
+        std.testing.allocator,
+        &state,
+        "{\"jsonrpc\":\"2.0\",\"id\":9,\"method\":\"textDocument/didChange\",\"params\":{\"textDocument\":{\"uri\":\"file:///shader.zw\"},\"contentChanges\":[]}}",
+    )).?;
+    defer std.testing.allocator.free(response);
+
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"id\":9") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"code\":-32602") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"data\":\"Missing contentChanges[0]\"") != null);
 }
 
 test "lsp hover returns builtin and inferred type information" {

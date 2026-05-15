@@ -26,13 +26,22 @@ pub const State = struct {
 };
 
 pub fn handle(allocator: std.mem.Allocator, state: *State, message: []const u8) !?[]u8 {
-    var parsed = try std.json.parseFromSlice(std.json.Value, allocator, message, .{});
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, message, .{}) catch |err| switch (err) {
+        error.OutOfMemory => return err,
+        else => return try errorResponse(allocator, null, -32700, "Parse error", null),
+    };
     defer parsed.deinit();
 
-    const root = parsed.value.object;
-    const method = root.get("method") orelse return null;
-    const method_name = method.string;
+    const root = switch (parsed.value) {
+        .object => |object| object,
+        else => return try errorResponse(allocator, null, -32600, "Invalid Request", "Request must be a JSON object"),
+    };
     const id_value = root.get("id");
+    const method = root.get("method") orelse return try errorResponse(allocator, id_value, -32600, "Invalid Request", "Missing method");
+    const method_name = switch (method) {
+        .string => |value| value,
+        else => return try errorResponse(allocator, id_value, -32600, "Invalid Request", "Method must be a string"),
+    };
     const params = root.get("params");
 
     if (std.mem.eql(u8, method_name, "initialize")) {
@@ -49,56 +58,81 @@ pub fn handle(allocator: std.mem.Allocator, state: *State, message: []const u8) 
     if (std.mem.eql(u8, method_name, "initialized")) return null;
 
     if (std.mem.eql(u8, method_name, "textDocument/didOpen")) {
-        const uri = nestedString(params.?, &.{ "textDocument", "uri" }) orelse return null;
-        const text = nestedString(params.?, &.{ "textDocument", "text" }) orelse return null;
+        const request_params = params orelse return try invalidParamsOrNull(allocator, id_value, "Missing params");
+        const uri = nestedString(request_params, &.{ "textDocument", "uri" }) orelse return try invalidParamsOrNull(allocator, id_value, "Missing textDocument.uri");
+        const text = nestedString(request_params, &.{ "textDocument", "text" }) orelse return try invalidParamsOrNull(allocator, id_value, "Missing textDocument.text");
         try state.store.put(uri, text);
         return try diagnostics.publish(allocator, uri, text);
     }
     if (std.mem.eql(u8, method_name, "textDocument/didChange")) {
-        const uri = nestedString(params.?, &.{ "textDocument", "uri" }) orelse return null;
-        const changes = params.?.object.get("contentChanges") orelse return null;
-        const change_text = changes.array.items[0].object.get("text") orelse return null;
-        try state.store.put(uri, change_text.string);
-        return try diagnostics.publish(allocator, uri, change_text.string);
+        const request_params = params orelse return try invalidParamsOrNull(allocator, id_value, "Missing params");
+        const uri = nestedString(request_params, &.{ "textDocument", "uri" }) orelse return try invalidParamsOrNull(allocator, id_value, "Missing textDocument.uri");
+        const changes = switch (request_params) {
+            .object => |object| object.get("contentChanges") orelse return try invalidParamsOrNull(allocator, id_value, "Missing contentChanges"),
+            else => return try invalidParamsOrNull(allocator, id_value, "Params must be an object"),
+        };
+        const change_text = switch (changes) {
+            .array => |array| blk: {
+                if (array.items.len == 0) return try invalidParamsOrNull(allocator, id_value, "Missing contentChanges[0]");
+                const first_change = switch (array.items[0]) {
+                    .object => |object| object,
+                    else => return try invalidParamsOrNull(allocator, id_value, "contentChanges[0] must be an object"),
+                };
+                break :blk first_change.get("text") orelse return try invalidParamsOrNull(allocator, id_value, "Missing contentChanges[0].text");
+            },
+            else => return try invalidParamsOrNull(allocator, id_value, "contentChanges must be an array"),
+        };
+        const text = switch (change_text) {
+            .string => |value| value,
+            else => return try invalidParamsOrNull(allocator, id_value, "contentChanges[0].text must be a string"),
+        };
+        try state.store.put(uri, text);
+        return try diagnostics.publish(allocator, uri, text);
     }
     if (std.mem.eql(u8, method_name, "textDocument/didClose")) {
-        const uri = nestedString(params.?, &.{ "textDocument", "uri" }) orelse return null;
+        const request_params = params orelse return try invalidParamsOrNull(allocator, id_value, "Missing params");
+        const uri = nestedString(request_params, &.{ "textDocument", "uri" }) orelse return try invalidParamsOrNull(allocator, id_value, "Missing textDocument.uri");
         state.store.remove(uri);
         return try diagnostics.clear(allocator, uri);
     }
 
     if (std.mem.eql(u8, method_name, "textDocument/hover")) {
-        const uri = nestedString(params orelse return null, &.{ "textDocument", "uri" }) orelse return null;
+        const request_params = params orelse return try invalidParamsOrNull(allocator, id_value, "Missing params");
+        const uri = nestedString(request_params, &.{ "textDocument", "uri" }) orelse return try invalidParamsOrNull(allocator, id_value, "Missing textDocument.uri");
         const source = state.store.get(uri) orelse "";
-        const line = nestedU32(params.?, &.{ "position", "line" }) orelse 0;
-        const character = nestedU32(params.?, &.{ "position", "character" }) orelse 0;
+        const line = nestedU32(request_params, &.{ "position", "line" }) orelse 0;
+        const character = nestedU32(request_params, &.{ "position", "character" }) orelse 0;
         const result = try hover.response(allocator, source, line, character);
         return try responseOwned(allocator, id_value, result);
     }
     if (std.mem.eql(u8, method_name, "textDocument/completion")) {
-        const uri = nestedString(params orelse return null, &.{ "textDocument", "uri" }) orelse return null;
+        const request_params = params orelse return try invalidParamsOrNull(allocator, id_value, "Missing params");
+        const uri = nestedString(request_params, &.{ "textDocument", "uri" }) orelse return try invalidParamsOrNull(allocator, id_value, "Missing textDocument.uri");
         const source = state.store.get(uri) orelse "";
-        const line = nestedU32(params.?, &.{ "position", "line" }) orelse 0;
-        const character = nestedU32(params.?, &.{ "position", "character" }) orelse 0;
+        const line = nestedU32(request_params, &.{ "position", "line" }) orelse 0;
+        const character = nestedU32(request_params, &.{ "position", "character" }) orelse 0;
         const result = try completion.response(allocator, source, line, character);
         return try responseOwned(allocator, id_value, result);
     }
     if (std.mem.eql(u8, method_name, "textDocument/definition")) {
-        const uri = nestedString(params orelse return null, &.{ "textDocument", "uri" }) orelse return null;
+        const request_params = params orelse return try invalidParamsOrNull(allocator, id_value, "Missing params");
+        const uri = nestedString(request_params, &.{ "textDocument", "uri" }) orelse return try invalidParamsOrNull(allocator, id_value, "Missing textDocument.uri");
         const source = state.store.get(uri) orelse "";
-        const line = nestedU32(params.?, &.{ "position", "line" }) orelse 0;
-        const character = nestedU32(params.?, &.{ "position", "character" }) orelse 0;
+        const line = nestedU32(request_params, &.{ "position", "line" }) orelse 0;
+        const character = nestedU32(request_params, &.{ "position", "character" }) orelse 0;
         const result = try goto_def.response(allocator, uri, source, line, character);
         return try responseOwned(allocator, id_value, result);
     }
     if (std.mem.eql(u8, method_name, "textDocument/documentSymbol")) {
-        const uri = nestedString(params orelse return null, &.{ "textDocument", "uri" }) orelse return null;
+        const request_params = params orelse return try invalidParamsOrNull(allocator, id_value, "Missing params");
+        const uri = nestedString(request_params, &.{ "textDocument", "uri" }) orelse return try invalidParamsOrNull(allocator, id_value, "Missing textDocument.uri");
         const source = state.store.get(uri) orelse "";
         const result = try document_symbols.response(allocator, source);
         return try responseOwned(allocator, id_value, result);
     }
     if (std.mem.eql(u8, method_name, "textDocument/semanticTokens/full")) {
-        const uri = nestedString(params orelse return null, &.{ "textDocument", "uri" }) orelse return null;
+        const request_params = params orelse return try invalidParamsOrNull(allocator, id_value, "Missing params");
+        const uri = nestedString(request_params, &.{ "textDocument", "uri" }) orelse return try invalidParamsOrNull(allocator, id_value, "Missing textDocument.uri");
         const source = state.store.get(uri) orelse "";
         const result = try semantic_tokens.response(allocator, source);
         return try responseOwned(allocator, id_value, result);
@@ -124,7 +158,15 @@ fn responseOwned(allocator: std.mem.Allocator, id_value: ?std.json.Value, result
 }
 
 fn methodNotFoundResponse(allocator: std.mem.Allocator, id_value: std.json.Value, method_name: []const u8) ![]u8 {
-    const id_json = try jsonValue(allocator, id_value);
+    return try errorResponse(allocator, id_value, -32601, "Method not found", method_name);
+}
+
+fn invalidParamsOrNull(allocator: std.mem.Allocator, id_value: ?std.json.Value, message: []const u8) !?[]u8 {
+    return if (id_value) |id| try errorResponse(allocator, id, -32602, "Invalid params", message) else null;
+}
+
+fn errorResponse(allocator: std.mem.Allocator, id_value: ?std.json.Value, code: i32, message: []const u8, data: ?[]const u8) ![]u8 {
+    const id_json = if (id_value) |id| try jsonValue(allocator, id) else try allocator.dupe(u8, "null");
     defer allocator.free(id_json);
 
     var buffer: std.ArrayList(u8) = .empty;
@@ -132,11 +174,15 @@ fn methodNotFoundResponse(allocator: std.mem.Allocator, id_value: std.json.Value
     const writer = buffer.writer(allocator);
 
     try writer.print(
-        "{{\"jsonrpc\":\"2.0\",\"id\":{s},\"error\":{{\"code\":-32601,\"message\":\"Method not found\",\"data\":",
-        .{id_json},
+        "{{\"jsonrpc\":\"2.0\",\"id\":{s},\"error\":{{\"code\":{d},\"message\":",
+        .{ id_json, code },
     );
-    try writeJsonString(writer, method_name);
-    try writer.writeAll("}}}");
+    try writeJsonString(writer, message);
+    if (data) |value| {
+        try writer.writeAll(",\"data\":");
+        try writeJsonString(writer, value);
+    }
+    try writer.writeAll("}}");
     return try buffer.toOwnedSlice(allocator);
 }
 
