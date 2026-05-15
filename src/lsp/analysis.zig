@@ -576,6 +576,10 @@ const Builder = struct {
         var symbols: std.ArrayListUnmanaged(Definition) = .{};
         defer symbols.deinit(self.allocator);
 
+        for (stageBuiltinDefinitions(block.stage)) |builtin| {
+            try symbols.append(self.allocator, builtin);
+        }
+
         for (block.items) |item| {
             switch (item) {
                 .input => |input| try symbols.append(self.allocator, try self.variableDefinition(
@@ -925,6 +929,80 @@ const Builder = struct {
             .end_column = variant.position.column + @as(u32, @intCast(variant.name.len)),
         };
     }
+};
+
+fn stageBuiltinDefinitions(stage: ast.Stage) []const Definition {
+    return switch (stage) {
+        .vertex => vertex_stage_builtins[0..],
+        .fragment => &.{},
+        .compute => compute_stage_builtins[0..],
+    };
+}
+
+const vertex_stage_builtins = [_]Definition{
+    .{
+        .name = "gl_Position",
+        .kind = .variable,
+        .detail = "gl_Position: Vec4",
+        .documentation = "Vertex position output builtin.",
+        .ty = types.builtinType(.vec4),
+        .line = 0,
+        .column = 0,
+        .end_column = 0,
+    },
+};
+
+const compute_stage_builtins = [_]Definition{
+    .{
+        .name = "global_invocation_id",
+        .kind = .variable,
+        .detail = "global_invocation_id: UVec3",
+        .documentation = "Global invocation id for compute shaders.",
+        .ty = types.builtinType(.uvec3),
+        .line = 0,
+        .column = 0,
+        .end_column = 0,
+    },
+    .{
+        .name = "local_invocation_id",
+        .kind = .variable,
+        .detail = "local_invocation_id: UVec3",
+        .documentation = "Local invocation id for compute shaders.",
+        .ty = types.builtinType(.uvec3),
+        .line = 0,
+        .column = 0,
+        .end_column = 0,
+    },
+    .{
+        .name = "workgroup_id",
+        .kind = .variable,
+        .detail = "workgroup_id: UVec3",
+        .documentation = "Workgroup id for compute shaders.",
+        .ty = types.builtinType(.uvec3),
+        .line = 0,
+        .column = 0,
+        .end_column = 0,
+    },
+    .{
+        .name = "num_workgroups",
+        .kind = .variable,
+        .detail = "num_workgroups: UVec3",
+        .documentation = "Number of workgroups for compute shaders.",
+        .ty = types.builtinType(.uvec3),
+        .line = 0,
+        .column = 0,
+        .end_column = 0,
+    },
+    .{
+        .name = "local_invocation_index",
+        .kind = .variable,
+        .detail = "local_invocation_index: UInt",
+        .documentation = "Local invocation index for compute shaders.",
+        .ty = types.builtinType(.uint),
+        .line = 0,
+        .column = 0,
+        .end_column = 0,
+    },
 };
 
 const StaticDoc = struct {

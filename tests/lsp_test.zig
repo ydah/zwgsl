@@ -282,6 +282,38 @@ test "lsp completion offers member and root suggestions" {
     try std.testing.expect(std.mem.indexOf(u8, root, "fn vec4(x: Float, y: Float, z: Float, w: Float) -> Vec4") != null);
 }
 
+test "lsp completion and hover expose stage builtins in stage scope" {
+    const vertex_source =
+        \\vertex do
+        \\  def main
+        \\    gl_Position = vec4(0.0, 0.0, 0.0, 1.0)
+        \\  end
+        \\end
+    ;
+    const vertex_completion = try completion.response(std.testing.allocator, vertex_source, 2, 4);
+    defer std.testing.allocator.free(vertex_completion);
+    try std.testing.expect(std.mem.indexOf(u8, vertex_completion, "\"gl_Position\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, vertex_completion, "gl_Position: Vec4") != null);
+
+    const compute_source =
+        \\compute do
+        \\  def main
+        \\    id: UVec3 = global_invocation_id
+        \\  end
+        \\end
+    ;
+    const compute_completion = try completion.response(std.testing.allocator, compute_source, 2, 16);
+    defer std.testing.allocator.free(compute_completion);
+    try std.testing.expect(std.mem.indexOf(u8, compute_completion, "\"global_invocation_id\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, compute_completion, "\"local_invocation_index\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, compute_completion, "\"gl_Position\"") == null);
+
+    const compute_hover = try hover.response(std.testing.allocator, compute_source, 2, 18);
+    defer std.testing.allocator.free(compute_hover);
+    try std.testing.expect(std.mem.indexOf(u8, compute_hover, "UVec3") != null);
+    try std.testing.expect(std.mem.indexOf(u8, compute_hover, "Global invocation id for compute shaders.") != null);
+}
+
 test "lsp signature help returns user function and builtin constructor signatures" {
     const source =
         \\def shade(pos: Vec3, amount: Float) -> Vec3

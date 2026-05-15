@@ -351,7 +351,7 @@ Current editor-facing features:
 - incremental `didChange` with full-document change compatibility
 - diagnostics from compiler errors and warnings
 - hover with source-aware type / declaration info
-- completion for locals, declarations, builtins, constructors, fields, and methods
+- completion for locals, declarations, stage builtins, constructors, fields, and methods
 - signature help for functions, constructors, and supported builtins
 - code actions for common stage declaration fixes
 - goto-definition for values, functions, and type declarations

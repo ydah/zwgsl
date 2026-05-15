@@ -44,9 +44,9 @@ Legend:
 
 | Feature | WGSL | GLSL ES 3.0 | LSP | Playground |
 | --- | --- | --- | --- | --- |
-| Vertex stage | Yes | Yes | Diagnostics, tokens | Preview |
+| Vertex stage | Yes | Yes | Diagnostics, completion, hover, tokens | Preview |
 | Fragment stage | Yes | Yes | Diagnostics, tokens | Preview |
-| Compute stage | Yes | No | Diagnostics, tokens | Compile output only |
+| Compute stage | Yes | No | Diagnostics, completion, hover, tokens | Compile output only |
 | Vertex inputs with locations | Yes | Yes | Diagnostics | Preview attribute synthesis |
 | Fragment outputs with locations | Yes | Yes | Diagnostics | Preview render target |
 | Varying interface validation | Yes | Yes | Diagnostics | Yes |
