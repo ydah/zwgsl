@@ -1,6 +1,7 @@
 const std = @import("std");
 const lsp = @import("zwgsl").lsp;
 
+const analysis = lsp.analysis;
 const code_actions = lsp.code_actions;
 const completion = lsp.completion;
 const document_symbols = lsp.document_symbols;
@@ -44,6 +45,9 @@ test "lsp initialize advertises editor-facing capabilities" {
     try std.testing.expect(std.mem.indexOf(u8, response, "\"documentSymbolProvider\":true") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"renameProvider\":true") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"semanticTokensProvider\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"uniform\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"builtin\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"constructor\"") != null);
 }
 
 test "lsp didOpen publishes diagnostics" {
@@ -663,9 +667,13 @@ test "lsp handler serves rename from open documents" {
 test "lsp semantic tokens classify keywords comments and properties" {
     const source =
         \\# comment
+        \\uniform :mvp, Mat4
         \\vertex do
         \\  input :position, Vec3, location: 0
+        \\  varying :v_pos, Vec3
         \\  def shade(pos: Vec3) -> Vec3
+        \\    v_pos = pos
+        \\    gl_Position = mvp * vec4(position, 1.0)
         \\    pos.xyz
         \\  end
         \\end
@@ -677,6 +685,27 @@ test "lsp semantic tokens classify keywords comments and properties" {
     try std.testing.expect(std.mem.indexOf(u8, response, "\"data\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, ",7,0") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, ",9,0") != null);
+
+    var document = try analysis.Document.init(std.testing.allocator, source);
+    defer document.deinit();
+
+    try expectSemanticClass(&document, 1, 9, .uniform);
+    try expectSemanticClass(&document, 2, 1, .stage);
+    try expectSemanticClass(&document, 4, 11, .varying);
+    try expectSemanticClass(&document, 7, 4, .builtin);
+    try expectSemanticClass(&document, 7, 18, .uniform);
+    try expectSemanticClass(&document, 7, 24, .constructor);
+    try expectSemanticClass(&document, 8, 8, .property);
+}
+
+fn expectSemanticClass(
+    document: *const analysis.Document,
+    line: u32,
+    character: u32,
+    expected: analysis.LspTokenType,
+) !void {
+    const item = document.tokenAt(line, character) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(expected, document.semanticClass(item.tok, item.index));
 }
 
 fn jsonString(allocator: std.mem.Allocator, value: []const u8) ![]u8 {

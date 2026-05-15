@@ -20,11 +20,21 @@ pub const LspTokenType = enum(u32) {
     comment = 7,
     operator = 8,
     property = 9,
+    uniform = 10,
+    varying = 11,
+    builtin = 12,
+    stage = 13,
+    constructor = 14,
+    trait = 15,
 };
 
 pub const DefinitionKind = enum {
     function,
     variable,
+    uniform,
+    input,
+    output,
+    varying,
     parameter,
     type_name,
     constructor,
@@ -370,7 +380,9 @@ pub const Document = struct {
     pub fn semanticClass(self: *const Document, tok: token.Token, index: usize) LspTokenType {
         return switch (tok.tag) {
             .integer_literal, .float_literal => .number,
-            .string_literal, .symbol => .string,
+            .string_literal => .string,
+            .symbol => self.symbolSemanticClass(index) orelse .string,
+            .kw_vertex, .kw_fragment, .kw_compute => .stage,
             .plus,
             .minus,
             .star,
@@ -401,17 +413,34 @@ pub const Document = struct {
                 const start_column = if (tok.column > 0) tok.column - 1 else 0;
                 const name = self.lexeme(tok);
                 if (self.resolveDefinition(name, start_line, start_column)) |definition| {
+                    if (isSyntheticBuiltin(definition)) break :blk .builtin;
                     break :blk switch (definition.kind) {
-                        .function, .builtin => .function,
+                        .function => .function,
+                        .builtin => .builtin,
                         .parameter => .parameter,
-                        .type_name, .trait, .constructor => .type,
-                        .variable => .variable,
+                        .type_name => .type,
+                        .trait => .trait,
+                        .constructor => .constructor,
+                        .uniform => .uniform,
+                        .varying => .varying,
+                        .variable, .input, .output => .variable,
                     };
                 }
+                if (isBuiltinConstructorName(name)) break :blk .constructor;
                 if (looksLikeTypeName(name)) break :blk .type;
                 break :blk .variable;
             },
             else => if (isKeyword(tok.tag)) .keyword else .variable,
+        };
+    }
+
+    fn symbolSemanticClass(self: *const Document, index: usize) ?LspTokenType {
+        const previous = self.previousSignificantToken(index) orelse return null;
+        return switch (previous.tok.tag) {
+            .kw_uniform => .uniform,
+            .kw_varying => .varying,
+            .kw_input, .kw_output => .variable,
+            else => null,
         };
     }
 
@@ -464,7 +493,7 @@ const Builder = struct {
                     try self.globals.append(self.allocator, try self.variableDefinition(
                         uniform.name,
                         uniform.type_name,
-                        .variable,
+                        .uniform,
                         uniform.position,
                         true,
                     ));
@@ -585,21 +614,21 @@ const Builder = struct {
                 .input => |input| try symbols.append(self.allocator, try self.variableDefinition(
                     input.name,
                     input.type_name,
-                    .variable,
+                    .input,
                     input.position,
                     true,
                 )),
                 .output => |output| try symbols.append(self.allocator, try self.variableDefinition(
                     output.name,
                     output.type_name,
-                    .variable,
+                    .output,
                     output.position,
                     true,
                 )),
                 .varying => |varying| try symbols.append(self.allocator, try self.variableDefinition(
                     varying.name,
                     varying.type_name,
-                    .variable,
+                    .varying,
                     varying.position,
                     true,
                 )),
@@ -1149,6 +1178,18 @@ fn builtinDefinition(name: []const u8) ?Definition {
     };
 }
 
+fn isSyntheticBuiltin(definition: Definition) bool {
+    return definition.kind == .builtin or
+        (definition.line == 0 and definition.column == 0 and definition.end_column == 0 and definition.documentation != null);
+}
+
+fn isBuiltinConstructorName(name: []const u8) bool {
+    for (builtinConstructorItems()) |item| {
+        if (std.mem.eql(u8, item.label, name)) return true;
+    }
+    return false;
+}
+
 fn appendCompletionFromDefinition(
     allocator: std.mem.Allocator,
     items: *std.ArrayListUnmanaged(CompletionItem),
@@ -1182,7 +1223,7 @@ fn completionFromDefinition(definition: Definition) CompletionItem {
             .function, .builtin => 3,
             .parameter => 6,
             .type_name, .trait, .constructor => 7,
-            .variable => 6,
+            .variable, .uniform, .input, .output, .varying => 6,
         },
         .detail = definition.detail,
     };

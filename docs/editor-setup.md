@@ -115,4 +115,4 @@ Current editor-facing capabilities are:
 - goto-definition for values, functions, and type declarations
 - document symbols for editor outlines
 - rename for resolved document-local symbols
-- semantic tokens for syntax coloring
+- semantic tokens for syntax coloring, including shader-specific symbols

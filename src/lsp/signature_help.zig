@@ -121,7 +121,7 @@ fn signatureFor(document: *const analysis.Document, name: []const u8, line: u32,
                 .label = definition.detail,
                 .documentation = definition.documentation orelse "",
             },
-            .variable, .parameter, .type_name, .trait => {},
+            .variable, .uniform, .input, .output, .varying, .parameter, .type_name, .trait => {},
         }
     }
     return staticSignature(name);

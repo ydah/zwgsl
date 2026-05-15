@@ -357,7 +357,7 @@ Current editor-facing features:
 - goto-definition for values, functions, and type declarations
 - document symbols for stages, declarations, functions, types, traits, and impls
 - rename for resolved document-local symbols
-- semantic tokens for keywords, functions, variables, types, numbers, strings, comments, operators, and properties
+- semantic tokens for keywords, functions, variables, uniforms, varyings, builtins, constructors, traits, types, numbers, strings, comments, operators, and properties
 
 ## Playground
 
