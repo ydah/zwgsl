@@ -83,3 +83,5 @@ Avoid documenting planned behavior as implemented behavior. Use
 - Note any target-specific limits, especially WGSL-only or GLSL ES 3.0 gaps.
 - Do not commit generated build output from `zig-out` or playground build
   artifacts.
+- Report security-sensitive issues through `SECURITY.md` instead of public
+  issue details.

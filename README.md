@@ -49,6 +49,7 @@ syntax while still targeting modern GPU backends.
 - [Architecture](docs/architecture.md)
 - [Roadmap](ROADMAP.md)
 - [Changelog](CHANGELOG.md)
+- [Security Policy](SECURITY.md)
 - [Editor Setup](docs/editor-setup.md)
 - [Examples](examples/README.md)
 - [Contributing](CONTRIBUTING.md)
