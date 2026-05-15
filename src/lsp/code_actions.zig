@@ -3,27 +3,204 @@ const ast = @import("../ast.zig");
 const core_diagnostics = @import("../diagnostics.zig");
 const lexer = @import("../lexer.zig");
 const parser = @import("../parser.zig");
+const token = @import("../token.zig");
+
+const Action = struct {
+    title: []const u8,
+    start_line: u32,
+    start_character: u32,
+    end_line: u32,
+    end_character: u32,
+    new_text: []const u8,
+};
+
+const CasingFix = struct {
+    type_name: []const u8,
+    constructor_name: []const u8,
+};
+
+const casing_fixes = [_]CasingFix{
+    .{ .type_name = "Vec2", .constructor_name = "vec2" },
+    .{ .type_name = "Vec3", .constructor_name = "vec3" },
+    .{ .type_name = "Vec4", .constructor_name = "vec4" },
+    .{ .type_name = "IVec2", .constructor_name = "ivec2" },
+    .{ .type_name = "IVec3", .constructor_name = "ivec3" },
+    .{ .type_name = "IVec4", .constructor_name = "ivec4" },
+    .{ .type_name = "UVec2", .constructor_name = "uvec2" },
+    .{ .type_name = "UVec3", .constructor_name = "uvec3" },
+    .{ .type_name = "UVec4", .constructor_name = "uvec4" },
+    .{ .type_name = "BVec2", .constructor_name = "bvec2" },
+    .{ .type_name = "BVec3", .constructor_name = "bvec3" },
+    .{ .type_name = "BVec4", .constructor_name = "bvec4" },
+    .{ .type_name = "Mat2", .constructor_name = "mat2" },
+    .{ .type_name = "Mat3", .constructor_name = "mat3" },
+    .{ .type_name = "Mat4", .constructor_name = "mat4" },
+};
 
 pub fn response(allocator: std.mem.Allocator, uri: []const u8, source: []const u8) ![]u8 {
-    const insert_line = missingPositionInputLine(allocator, source) catch |err| switch (err) {
+    var actions: std.ArrayList(Action) = .empty;
+    defer actions.deinit(allocator);
+
+    if (missingPositionInputLine(allocator, source) catch |err| switch (err) {
         error.OutOfMemory => return err,
         else => null,
-    };
-    if (insert_line == null) return try allocator.dupe(u8, "[]");
+    }) |insert_line| {
+        try actions.append(allocator, .{
+            .title = "Add vertex position input",
+            .start_line = insert_line,
+            .start_character = 0,
+            .end_line = insert_line,
+            .end_character = 0,
+            .new_text = "  input :position, Vec3, location: 0\n",
+        });
+    }
 
+    try appendCasingActions(allocator, &actions, source);
+
+    return try writeActions(allocator, uri, actions.items);
+}
+
+fn appendCasingActions(
+    allocator: std.mem.Allocator,
+    actions: *std.ArrayList(Action),
+    source: []const u8,
+) !void {
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+
+    const tokens = lexer.Lexer.tokenizeResolved(arena.allocator(), source) catch return;
+    for (tokens, 0..) |tok, index| {
+        if (tok.tag != .identifier) continue;
+
+        const name = tok.lexeme(source);
+        if (previousSignificantToken(tokens, index)) |previous| {
+            if (isTypeContext(previous.tag)) {
+                if (typeNameForConstructorName(name)) |replacement| {
+                    try appendReplaceAction(
+                        allocator,
+                        actions,
+                        tok,
+                        "Use uppercase type name",
+                        replacement,
+                    );
+                    continue;
+                }
+            }
+        }
+
+        if (nextSignificantToken(tokens, index)) |next| {
+            if (next.tag == .lparen) {
+                if (constructorNameForTypeName(name)) |replacement| {
+                    try appendReplaceAction(
+                        allocator,
+                        actions,
+                        tok,
+                        "Use lowercase constructor name",
+                        replacement,
+                    );
+                }
+            }
+        }
+    }
+}
+
+fn appendReplaceAction(
+    allocator: std.mem.Allocator,
+    actions: *std.ArrayList(Action),
+    tok: token.Token,
+    title: []const u8,
+    replacement: []const u8,
+) !void {
+    const start_line: u32 = if (tok.line > 0) tok.line - 1 else 0;
+    const start_character: u32 = if (tok.column > 0) tok.column - 1 else 0;
+    const width: u32 = @intCast(tok.end - tok.start);
+
+    try actions.append(allocator, .{
+        .title = title,
+        .start_line = start_line,
+        .start_character = start_character,
+        .end_line = start_line,
+        .end_character = start_character + width,
+        .new_text = replacement,
+    });
+}
+
+fn writeActions(
+    allocator: std.mem.Allocator,
+    uri: []const u8,
+    actions: []const Action,
+) ![]u8 {
     var buffer: std.ArrayList(u8) = .empty;
     defer buffer.deinit(allocator);
     const writer = buffer.writer(allocator);
 
-    try writer.writeAll("[{\"title\":\"Add vertex position input\",\"kind\":\"quickfix\",\"edit\":{\"changes\":{");
-    try writeJsonString(writer, uri);
-    try writer.writeAll(":[{\"range\":{\"start\":{\"line\":");
-    try writer.print("{d}", .{insert_line.?});
-    try writer.writeAll(",\"character\":0},\"end\":{\"line\":");
-    try writer.print("{d}", .{insert_line.?});
-    try writer.writeAll(",\"character\":0}},\"newText\":\"  input :position, Vec3, location: 0\\n\"}]}}}]");
+    try writer.writeByte('[');
+    for (actions, 0..) |action, index| {
+        if (index > 0) try writer.writeByte(',');
+        try writer.writeAll("{\"title\":");
+        try writeJsonString(writer, action.title);
+        try writer.writeAll(",\"kind\":\"quickfix\",\"edit\":{\"changes\":{");
+        try writeJsonString(writer, uri);
+        try writer.writeAll(":[{\"range\":{\"start\":{\"line\":");
+        try writer.print("{d}", .{action.start_line});
+        try writer.writeAll(",\"character\":");
+        try writer.print("{d}", .{action.start_character});
+        try writer.writeAll("},\"end\":{\"line\":");
+        try writer.print("{d}", .{action.end_line});
+        try writer.writeAll(",\"character\":");
+        try writer.print("{d}", .{action.end_character});
+        try writer.writeAll("}},\"newText\":");
+        try writeJsonString(writer, action.new_text);
+        try writer.writeAll("}]}}}");
+    }
+    try writer.writeByte(']');
 
     return try buffer.toOwnedSlice(allocator);
+}
+
+fn previousSignificantToken(tokens: []const token.Token, index: usize) ?token.Token {
+    var cursor = index;
+    while (cursor > 0) {
+        cursor -= 1;
+        if (isSignificantToken(tokens[cursor])) return tokens[cursor];
+    }
+    return null;
+}
+
+fn nextSignificantToken(tokens: []const token.Token, index: usize) ?token.Token {
+    var cursor = index + 1;
+    while (cursor < tokens.len) : (cursor += 1) {
+        if (isSignificantToken(tokens[cursor])) return tokens[cursor];
+    }
+    return null;
+}
+
+fn isSignificantToken(tok: token.Token) bool {
+    return switch (tok.tag) {
+        .comment, .newline, .virtual_indent, .virtual_dedent, .virtual_semi, .eof => false,
+        else => true,
+    };
+}
+
+fn isTypeContext(tag: token.TokenTag) bool {
+    return switch (tag) {
+        .colon, .comma, .arrow => true,
+        else => false,
+    };
+}
+
+fn typeNameForConstructorName(name: []const u8) ?[]const u8 {
+    for (casing_fixes) |fix| {
+        if (std.mem.eql(u8, name, fix.constructor_name)) return fix.type_name;
+    }
+    return null;
+}
+
+fn constructorNameForTypeName(name: []const u8) ?[]const u8 {
+    for (casing_fixes) |fix| {
+        if (std.mem.eql(u8, name, fix.type_name)) return fix.constructor_name;
+    }
+    return null;
 }
 
 fn missingPositionInputLine(allocator: std.mem.Allocator, source: []const u8) !?u32 {

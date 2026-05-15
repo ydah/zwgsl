@@ -402,6 +402,29 @@ test "lsp code actions add missing vertex position input" {
     try std.testing.expect(std.mem.indexOf(u8, response, "\"newText\":\"  input :position, Vec3, location: 0\\n\"") != null);
 }
 
+test "lsp code actions fix type and constructor casing" {
+    const source =
+        \\vertex do
+        \\  input :position, vec3, location: 0
+        \\  def main
+        \\    gl_Position = Vec4(position, 1.0)
+        \\  end
+        \\end
+    ;
+
+    const response = try code_actions.response(std.testing.allocator, "file:///shader.zw", source);
+    defer std.testing.allocator.free(response);
+
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"title\":\"Use uppercase type name\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"line\":1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"character\":19") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"newText\":\"Vec3\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"title\":\"Use lowercase constructor name\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"line\":3") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"character\":18") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"newText\":\"vec4\"") != null);
+}
+
 test "lsp handler serves code actions from open documents" {
     var state = handler.State.init(std.testing.allocator);
     defer state.deinit();
