@@ -49,6 +49,7 @@ syntax while still targeting modern GPU backends.
 - [Roadmap](ROADMAP.md)
 - [Editor Setup](docs/editor-setup.md)
 - [Examples](examples/README.md)
+- [Contributing](CONTRIBUTING.md)
 
 ## Quick Example
 
