@@ -194,7 +194,10 @@ export const createPreview = async (
       const fragmentErrors = await collectShaderModuleErrors(fragmentModule, "fragment");
 
       if (vertexErrors.length > 0 || fragmentErrors.length > 0) {
-        throw new Error([...vertexErrors, ...fragmentErrors].join(" "));
+        throw new PreviewPipelineError("Shader module validation failed", [
+          ...vertexErrors,
+          ...fragmentErrors,
+        ]);
       }
 
       const pipeline = await device.createRenderPipelineAsync({
@@ -265,11 +268,7 @@ export const createPreview = async (
       destroyTextures(textureStates);
       destroyVertexPreview(vertexState);
       status.textContent = "preview error";
-      controlsRoot.replaceChildren(
-        makeEmptyState(
-          `WGSL compiled, but the preview pipeline could not be created. ${describePreviewError(error)}`,
-        ),
-      );
+      controlsRoot.replaceChildren(makePreviewErrorState(error));
       console.error("zwgsl playground preview failed", error);
       return activeState;
     }
@@ -843,9 +842,61 @@ const writeVertexAttribute = (
   }
 };
 
+class PreviewPipelineError extends Error {
+  constructor(
+    message: string,
+    readonly details: string[],
+  ) {
+    super(message);
+    this.name = "PreviewPipelineError";
+  }
+}
+
 const describePreviewError = (error: unknown) => {
-  if (error instanceof Error && error.message) return error.message;
-  return "Check the browser console for the WebGPU validation error.";
+  if (error instanceof PreviewPipelineError) {
+    return {
+      summary: error.message,
+      details: error.details,
+    };
+  }
+
+  if (error instanceof Error && error.message) {
+    return {
+      summary: error.message,
+      details: [] as string[],
+    };
+  }
+
+  return {
+    summary: "The browser did not provide a WebGPU validation message.",
+    details: [] as string[],
+  };
+};
+
+const makePreviewErrorState = (error: unknown) => {
+  const { summary, details } = describePreviewError(error);
+  const section = document.createElement("section");
+  section.className = "preview-error";
+
+  const title = document.createElement("strong");
+  title.textContent = "Preview pipeline failed";
+  section.append(title);
+
+  const summaryText = document.createElement("p");
+  summaryText.textContent = `WGSL compiled, but the WebGPU preview pipeline could not be created. ${summary}`;
+  section.append(summaryText);
+
+  if (details.length > 0) {
+    const list = document.createElement("ul");
+    for (const detail of details) {
+      const item = document.createElement("li");
+      item.textContent = detail;
+      list.append(item);
+    }
+    section.append(list);
+  }
+
+  return section;
 };
 
 const collectShaderModuleErrors = async (module: GPUShaderModule, stage: "vertex" | "fragment") => {

@@ -213,6 +213,34 @@ body {
   line-height: 1.5;
 }
 
+.preview-error {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(217, 93, 57, 0.28);
+  border-radius: 8px;
+  background: rgba(217, 93, 57, 0.08);
+  color: var(--ink);
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.preview-error strong,
+.preview-error p,
+.preview-error ul {
+  margin: 0;
+}
+
+.preview-error ul {
+  display: grid;
+  gap: 6px;
+  padding-left: 18px;
+  color: var(--muted);
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}
+
 .uniform-card {
   display: grid;
   gap: 10px;
