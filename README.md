@@ -34,6 +34,11 @@ syntax while still targeting modern GPU backends.
 - Browser playground with Monaco, wasm compilation, and compiler-backed worker tooling
 - C API surface for embedding the compiler in other tools
 
+## Documentation
+
+- [Language Reference](docs/language.md)
+- [Feature Matrix](docs/feature-matrix.md)
+
 ## Quick Example
 
 `zwgsl` source:
