@@ -941,7 +941,7 @@ const Analyzer = struct {
         for (context.return_types.items) |return_info| {
             saw_value_return = true;
             if (!self.typesCompatible(signature.return_type, return_info.ty)) {
-                try self.report(return_info.position, "return type mismatch in '{s}': expected {s}, got {s}", .{
+                try self.report(return_info.position, "return type mismatch in '{s}': expected {s}, got {s}; expected type comes from return annotation", .{
                     function.name,
                     signature.return_type.sourceName(),
                     return_info.ty.sourceName(),
@@ -952,7 +952,7 @@ const Analyzer = struct {
         if (!saw_value_return) {
             if (last_expr_type) |expr_type| {
                 if (!self.typesCompatible(signature.return_type, expr_type)) {
-                    try self.report(last_expr_position, "implicit return type mismatch in '{s}': expected {s}, got {s}", .{
+                    try self.report(last_expr_position, "implicit return type mismatch in '{s}': expected {s}, got {s}; expected type comes from return annotation", .{
                         function.name,
                         signature.return_type.sourceName(),
                         expr_type.sourceName(),
@@ -983,7 +983,7 @@ const Analyzer = struct {
                 const target_type = try self.resolveTypeName(typed_assignment.type_name, stmt.position);
                 const value_type = try self.analyzeExpr(scope, typed_assignment.value, context);
                 if (!self.typesCompatible(target_type, value_type)) {
-                    try self.report(stmt.position, "type mismatch in typed assignment '{s}': expected {s}, got {s}", .{
+                    try self.report(stmt.position, "type mismatch in typed assignment '{s}': expected {s}, got {s}; expected type comes from explicit annotation", .{
                         typed_assignment.name,
                         target_type.sourceName(),
                         value_type.sourceName(),
@@ -1104,7 +1104,7 @@ const Analyzer = struct {
         const target_type = if (binding.type_name) |type_name| blk: {
             const annotated = try self.resolveTypeName(type_name, binding.position);
             if (!self.typesCompatible(annotated, value_type)) {
-                try self.report(binding.position, "type mismatch in let binding '{s}': expected {s}, got {s}", .{
+                try self.report(binding.position, "type mismatch in let binding '{s}': expected {s}, got {s}; expected type comes from explicit annotation", .{
                     binding.name,
                     annotated.sourceName(),
                     value_type.sourceName(),
@@ -1266,10 +1266,11 @@ const Analyzer = struct {
                     try self.rememberExprType(assignment.target, symbol.ty);
                     if (assignment.operator == .assign) {
                         if (!self.typesCompatible(symbol.ty, value_type)) {
-                            try self.report(assignment.target.position, "type mismatch in assignment to '{s}': expected {s}, got {s}", .{
+                            try self.report(assignment.target.position, "type mismatch in assignment to '{s}': expected {s}, got {s}; expected type comes from {s}", .{
                                 name,
                                 symbol.ty.sourceName(),
                                 value_type.sourceName(),
+                                symbolKindDescription(symbol.kind),
                             });
                         }
                     } else {
@@ -2141,6 +2142,19 @@ fn isComputeBuiltinName(name: []const u8) bool {
         sameName(name, "workgroup_id") or
         sameName(name, "num_workgroups") or
         sameName(name, "local_invocation_index");
+}
+
+fn symbolKindDescription(kind: SymbolKind) []const u8 {
+    return switch (kind) {
+        .uniform => "uniform declaration",
+        .input => "stage input declaration",
+        .output => "stage output declaration",
+        .varying => "varying declaration",
+        .local => "local binding",
+        .param => "parameter declaration",
+        .builtin => "stage builtin",
+        .constructor => "constructor declaration",
+    };
 }
 
 fn isWgslReservedIdentifier(name: []const u8) bool {

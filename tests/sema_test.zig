@@ -187,6 +187,21 @@ test "sema reports type mismatches" {
     );
     defer analyzed.arena.deinit();
     try expectDiagnosticContaining(analyzed.diagnostics.items.items, "type mismatch in assignment to 'frag_color': expected Vec4, got Float");
+    try expectDiagnosticContaining(analyzed.diagnostics.items.items, "expected type comes from stage output declaration");
+}
+
+test "sema explains annotated binding type mismatches" {
+    var analyzed = try analyzeSource(
+        \\def broken
+        \\  value: Vec3 = 1.0
+        \\  let tint: Vec4 = 1.0
+        \\end
+    );
+    defer analyzed.arena.deinit();
+
+    try expectDiagnosticContaining(analyzed.diagnostics.items.items, "type mismatch in typed assignment 'value': expected Vec3, got Float");
+    try expectDiagnosticContaining(analyzed.diagnostics.items.items, "type mismatch in let binding 'tint': expected Vec4, got Float");
+    try expectDiagnosticContaining(analyzed.diagnostics.items.items, "expected type comes from explicit annotation");
 }
 
 test "sema validates varying compatibility" {
@@ -266,6 +281,7 @@ test "sema checks implicit return types" {
     );
     defer analyzed.arena.deinit();
     try expectDiagnosticContaining(analyzed.diagnostics.items.items, "implicit return type mismatch in 'normalize_value': expected Vec3, got Float");
+    try expectDiagnosticContaining(analyzed.diagnostics.items.items, "expected type comes from return annotation");
 }
 
 test "sema rejects invalid builtin calls" {
