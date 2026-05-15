@@ -8,6 +8,7 @@ const goto_def = lsp.goto_def;
 const handler = lsp.handler;
 const hover = lsp.hover;
 const protocol = lsp.protocol;
+const rename = lsp.rename;
 const semantic_tokens = lsp.semantic_tokens;
 const signature_help = lsp.signature_help;
 
@@ -41,6 +42,7 @@ test "lsp initialize advertises editor-facing capabilities" {
     try std.testing.expect(std.mem.indexOf(u8, response, "\"codeActionProvider\":true") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"definitionProvider\":true") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"documentSymbolProvider\":true") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"renameProvider\":true") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"semanticTokensProvider\"") != null);
 }
 
@@ -570,6 +572,67 @@ test "lsp handler serves document symbols from open documents" {
     try std.testing.expect(std.mem.indexOf(u8, response, "\"id\":8") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"name\":\"mvp\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"name\":\"vertex.main\"") != null);
+}
+
+test "lsp rename returns workspace edits for resolved symbols" {
+    const source =
+        \\vertex do
+        \\  input :position, Vec3, location: 0
+        \\  def shade(pos: Vec3) -> Vec4
+        \\    normal = pos
+        \\    vec4(position + normal, 1.0)
+        \\  end
+        \\end
+    ;
+
+    const response = try rename.response(std.testing.allocator, "file:///shader.zw", source, 4, 10, "vertex_position");
+    defer std.testing.allocator.free(response);
+
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"changes\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"line\":1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"character\":9") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"line\":4") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"newText\":\"vertex_position\"") != null);
+}
+
+test "lsp handler serves rename from open documents" {
+    var state = handler.State.init(std.testing.allocator);
+    defer state.deinit();
+
+    const source =
+        \\uniform :mvp, Mat4
+        \\vertex do
+        \\  input :position, Vec3, location: 0
+        \\  def main
+        \\    gl_Position = mvp * vec4(position, 1.0)
+        \\  end
+        \\end
+    ;
+    const escaped_source = try jsonString(std.testing.allocator, source);
+    defer std.testing.allocator.free(escaped_source);
+
+    const open_message = try std.mem.concat(
+        std.testing.allocator,
+        u8,
+        &.{
+            "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file:///shader.zw\",\"text\":",
+            escaped_source,
+            "}}}",
+        },
+    );
+    defer std.testing.allocator.free(open_message);
+    const open_response = (try handler.handle(std.testing.allocator, &state, open_message)).?;
+    defer std.testing.allocator.free(open_response);
+
+    const response = (try handler.handle(
+        std.testing.allocator,
+        &state,
+        "{\"jsonrpc\":\"2.0\",\"id\":12,\"method\":\"textDocument/rename\",\"params\":{\"textDocument\":{\"uri\":\"file:///shader.zw\"},\"position\":{\"line\":4,\"character\":20},\"newName\":\"model_view_projection\"}}",
+    )).?;
+    defer std.testing.allocator.free(response);
+
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"id\":12") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"newText\":\"model_view_projection\"") != null);
 }
 
 test "lsp semantic tokens classify keywords comments and properties" {

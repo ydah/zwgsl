@@ -114,4 +114,5 @@ Current editor-facing capabilities are:
 - code actions for common stage declaration and type/constructor casing fixes
 - goto-definition for values, functions, and type declarations
 - document symbols for editor outlines
+- rename for resolved document-local symbols
 - semantic tokens for syntax coloring
