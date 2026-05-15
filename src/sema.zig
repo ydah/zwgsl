@@ -84,7 +84,15 @@ pub const FunctionSignature = struct {
 
 pub const ConstraintInfo = struct {
     type_var: u32,
+    param_name: []const u8,
     trait_name: []const u8,
+};
+
+const ConstraintFailure = struct {
+    function_name: []const u8,
+    param_name: []const u8,
+    trait_name: []const u8,
+    ty: types.Type,
 };
 
 pub const VariantInfo = struct {
@@ -683,6 +691,7 @@ const Analyzer = struct {
                 }
                 try constraints.append(self.allocator, .{
                     .type_var = id,
+                    .param_name = constraint.param_name,
                     .trait_name = constraint.trait_name,
                 });
             }
@@ -1421,13 +1430,28 @@ const Analyzer = struct {
                         if (builtins.resolve(name, arg_types.items)) |resolution| {
                             break :blk resolution.return_type;
                         }
-                        if (self.findFunction(name, arg_types.items, context.stage_functions)) |match| {
+                        var constraint_failure: ?ConstraintFailure = null;
+                        if (self.findFunction(name, arg_types.items, context.stage_functions, &constraint_failure)) |match| {
                             try self.checkInoutCallArgs(call.args, match.signature.params);
                             break :blk match.return_type;
                         }
-                        if (self.findFunction(name, arg_types.items, self.global_functions.items)) |match| {
+                        if (self.findFunction(name, arg_types.items, self.global_functions.items, &constraint_failure)) |match| {
                             try self.checkInoutCallArgs(call.args, match.signature.params);
                             break :blk match.return_type;
+                        }
+                        if (constraint_failure) |failure| {
+                            try self.report(
+                                expr.position,
+                                "function '{s}' requires {s}: {s}, but {s} does not implement {s}",
+                                .{
+                                    failure.function_name,
+                                    failure.param_name,
+                                    failure.trait_name,
+                                    failure.ty.sourceName(),
+                                    failure.trait_name,
+                                },
+                            );
+                            break :blk types.builtinType(.error_type);
                         }
                         try self.report(expr.position, "unknown function '{s}'", .{name});
                         break :blk types.builtinType(.error_type);
@@ -1931,6 +1955,7 @@ const Analyzer = struct {
         name: []const u8,
         arg_types: []const types.Type,
         functions: []const *ast.FunctionDef,
+        constraint_failure: ?*?ConstraintFailure,
     ) ?struct { signature: FunctionSignature, return_type: types.Type } {
         function_loop: for (functions) |function| {
             const signature = self.typed.function_signatures.get(function) orelse continue;
@@ -1946,6 +1971,16 @@ const Analyzer = struct {
             for (signature.constraints) |constraint| {
                 const constrained_type = substitution.apply(types.typeVar(constraint.type_var)) catch continue :function_loop;
                 if (!self.traits.hasImpl(constraint.trait_name, constrained_type)) {
+                    if (constraint_failure) |failure| {
+                        if (failure.* == null) {
+                            failure.* = .{
+                                .function_name = signature.name,
+                                .param_name = constraint.param_name,
+                                .trait_name = constraint.trait_name,
+                                .ty = constrained_type,
+                            };
+                        }
+                    }
                     continue :function_loop;
                 }
             }

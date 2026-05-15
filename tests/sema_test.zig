@@ -675,7 +675,10 @@ test "sema rejects unsatisfied trait constraints" {
     );
     defer analyzed.arena.deinit();
 
-    try std.testing.expect(analyzed.diagnostics.items.items.len > 0);
+    try expectDiagnosticContaining(
+        analyzed.diagnostics.items.items,
+        "function 'choose' requires T: Numeric, but Vec3 does not implement Numeric",
+    );
 }
 
 test "sema type checks impl methods and constrained trait method calls" {

@@ -1140,7 +1140,7 @@ fn formatSignature(allocator: std.mem.Allocator, signature: sema.FunctionSignatu
         try writer.writeAll(" where ");
         for (signature.constraints, 0..) |constraint, index| {
             if (index != 0) try writer.writeAll(", ");
-            try writer.print("T{d}: {s}", .{ constraint.type_var, constraint.trait_name });
+            try writer.print("{s}: {s}", .{ constraint.param_name, constraint.trait_name });
         }
     }
 
