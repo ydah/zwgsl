@@ -3,6 +3,9 @@
 The examples are small, complete `.zw` programs that compile through the CLI and
 are also available in the playground sample selector.
 
+Open the [Playground](https://ydah.github.io/zwgsl/) and choose a sample from
+the selector to inspect the generated WGSL and preview supported render shaders.
+
 ## Compile
 
 ```sh

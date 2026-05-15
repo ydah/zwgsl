@@ -4,6 +4,8 @@ A Ruby-inspired shading language that compiles to WGSL (WebGPU) and GLSL ES 3.0.
 Built with Zig for fast compilation, a small runtime surface, and tooling that can
 ship as a native library, an LSP server, or a browser wasm module.
 
+Try it in the [Playground](https://ydah.github.io/zwgsl/).
+
 ## Why zwgsl?
 
 GPU shading languages are powerful, but the authoring experience is usually rigid:
@@ -38,6 +40,8 @@ syntax while still targeting modern GPU backends.
 
 - [Language Reference](docs/language.md)
 - [Feature Matrix](docs/feature-matrix.md)
+- [Gotchas](docs/gotchas.md)
+- [Design Notes](docs/design-notes.md)
 - [Editor Setup](docs/editor-setup.md)
 - [Examples](examples/README.md)
 

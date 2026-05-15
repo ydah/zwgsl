@@ -79,3 +79,6 @@ Legend:
   analysis but only have golden output coverage for WGSL fixtures today.
 - Playground preview is render-pipeline oriented. Compute-only shaders compile,
   but they do not currently render a preview surface.
+
+For authoring pitfalls around stage interfaces, uniform layout, sampler lowering,
+and preview behavior, see [Gotchas](gotchas.md).
