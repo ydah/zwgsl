@@ -14,6 +14,7 @@ const uniformControls = document.querySelector<HTMLElement>("#uniform-controls")
 const sampleSelect = document.querySelector<HTMLSelectElement>("#sample-select")!;
 const copyWgslButton = document.querySelector<HTMLButtonElement>("#copy-wgsl-button")!;
 const copyDiagnosticsButton = document.querySelector<HTMLButtonElement>("#copy-diagnostics-button")!;
+const shareSourceButton = document.querySelector<HTMLButtonElement>("#share-source-button")!;
 const downloadSourceButton = document.querySelector<HTMLButtonElement>("#download-source-button")!;
 const downloadWgslButton = document.querySelector<HTMLButtonElement>("#download-wgsl-button")!;
 const outputTabButtons = Array.from(
@@ -39,8 +40,10 @@ type CompileTrigger = "initial" | "edit" | "manual" | "sample";
 type OutputTab = "all" | "vertex" | "fragment" | "compute" | "diagnostics" | "resources";
 
 const sampleQueryKey = "sample";
+const sourceQueryKey = "source";
 
 const sampleIdFromLocation = () => new URLSearchParams(window.location.search).get(sampleQueryKey);
+const sourceParamFromLocation = () => new URLSearchParams(window.location.search).get(sourceQueryKey);
 
 const findSample = (sampleId: string | null) =>
   sampleId ? exampleSources.find((entry) => entry.id === sampleId) : null;
@@ -52,7 +55,36 @@ const updateSampleUrl = (sampleId: string | null) => {
   } else {
     url.searchParams.delete(sampleQueryKey);
   }
+  url.searchParams.delete(sourceQueryKey);
   window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+};
+
+const decodeSharedSource = (value: string) => {
+  try {
+    const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = normalized.padEnd(normalized.length + ((4 - normalized.length % 4) % 4), "=");
+    const binary = window.atob(padded);
+    const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+    return new TextDecoder().decode(bytes);
+  } catch {
+    return null;
+  }
+};
+
+const encodeSharedSource = (source: string) => {
+  const bytes = new TextEncoder().encode(source);
+  let binary = "";
+  bytes.forEach((byte) => {
+    binary += String.fromCharCode(byte);
+  });
+  return window.btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+};
+
+const shareUrlForSource = (source: string) => {
+  const url = new URL(window.location.href);
+  url.searchParams.delete(sampleQueryKey);
+  url.searchParams.set(sourceQueryKey, encodeSharedSource(source));
+  return url;
 };
 
 const customOption = new Option("Custom", "custom");
@@ -62,15 +94,22 @@ for (const example of exampleSources) {
   sampleSelect.append(new Option(example.label, example.id));
 }
 
+const initialSourceParam = sourceParamFromLocation();
+const initialSharedSource =
+  initialSourceParam === null ? null : decodeSharedSource(initialSourceParam);
 const initialSampleId = sampleIdFromLocation();
 const initialSample = findSample(initialSampleId);
 
-if (initialSample) {
+if (initialSharedSource !== null) {
+  editor.setValue(initialSharedSource);
+  sampleSelect.value = "custom";
+} else if (initialSample) {
   editor.setValue(initialSample.source);
   sampleSelect.value = initialSample.id;
+  if (initialSourceParam !== null) updateSampleUrl(initialSample.id);
 } else {
   sampleSelect.value = defaultExample.id;
-  if (initialSampleId) updateSampleUrl(null);
+  if (initialSampleId || initialSourceParam !== null) updateSampleUrl(null);
 }
 
 const setCompileButtonState = (busy: boolean) => {
@@ -314,6 +353,14 @@ copyWgslButton.addEventListener("click", async () => {
 copyDiagnosticsButton.addEventListener("click", async () => {
   await copyText(latestDiagnostics);
   flashButtonLabel(copyDiagnosticsButton, "Copied");
+});
+
+shareSourceButton.addEventListener("click", async () => {
+  const url = shareUrlForSource(editor.getValue());
+  window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+  sampleSelect.value = "custom";
+  await copyText(url.toString());
+  flashButtonLabel(shareSourceButton, "Copied");
 });
 
 downloadSourceButton.addEventListener("click", () => {

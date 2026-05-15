@@ -371,7 +371,7 @@ as the publishing source.
 Current capabilities:
 
 - Monaco language registration for `zwgsl`
-- sample selector backed by repository examples and focused feature fixtures, with `?sample=<id>` direct links
+- sample selector backed by repository examples and focused feature fixtures, with `?sample=<id>` direct links and `?source=<base64url>` share links
 - live WGSL compilation through `zwgsl.wasm`
 - output tabs for combined WGSL, stage-specific WGSL, diagnostics, and generated resource layout
 - compiler-backed diagnostics, hover, completion, and goto-definition from the wasm build
