@@ -34,6 +34,7 @@ feature matrix remains the source of truth for implemented behavior.
 - Add more complete tutorials around uniforms, lighting, texture sampling, and
   PBR/postprocess workflows.
 - Keep examples aligned with playground samples and golden output fixtures.
+- Keep architecture notes aligned with compiler pipeline changes.
 
 ## Non-Goals
 

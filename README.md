@@ -44,6 +44,7 @@ syntax while still targeting modern GPU backends.
 - [C API](docs/c-api.md)
 - [Gotchas](docs/gotchas.md)
 - [Design Notes](docs/design-notes.md)
+- [Architecture](docs/architecture.md)
 - [Roadmap](ROADMAP.md)
 - [Editor Setup](docs/editor-setup.md)
 - [Examples](examples/README.md)
@@ -379,6 +380,10 @@ PLAYGROUND_BASE_PATH=/zwgsl/ npm run build
 ```
 
 ## Architecture
+
+See [Architecture](docs/architecture.md) for the responsibilities of the
+frontend, HIR/MIR WGSL path, retained GLSL path, diagnostics, and tooling entry
+points.
 
 ```mermaid
 flowchart TD
