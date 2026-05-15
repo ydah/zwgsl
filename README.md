@@ -43,6 +43,7 @@ syntax while still targeting modern GPU backends.
 - [Builtins](docs/builtins.md)
 - [C API](docs/c-api.md)
 - [Gotchas](docs/gotchas.md)
+- [Migration From WGSL And GLSL](docs/migration.md)
 - [Design Notes](docs/design-notes.md)
 - [Architecture](docs/architecture.md)
 - [Roadmap](ROADMAP.md)

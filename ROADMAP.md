@@ -30,7 +30,7 @@ feature matrix remains the source of truth for implemented behavior.
 
 ## Examples And Docs
 
-- Expand migration notes for users coming from WGSL and GLSL.
+- Expand the WGSL/GLSL migration guide with more before/after examples.
 - Add more complete tutorials around uniforms, lighting, texture sampling, and
   PBR/postprocess workflows.
 - Keep examples aligned with playground samples and golden output fixtures.
