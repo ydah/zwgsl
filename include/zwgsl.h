@@ -4,6 +4,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#define ZWGSL_ABI_VERSION 1u
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -43,6 +45,8 @@ typedef struct {
     int optimize_output;
 } ZwgslOptions;
 
+uint32_t zwgsl_abi_version(void);
+ZwgslOptions zwgsl_options_default(void);
 ZwgslResult zwgsl_compile(const char* source, size_t source_len, ZwgslOptions options);
 void zwgsl_free(ZwgslResult* result);
 const char* zwgsl_version(void);

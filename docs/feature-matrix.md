@@ -63,7 +63,7 @@ Legend:
 | Surface | Status |
 | --- | --- |
 | Native library | Static and shared `libzwgsl` artifacts are installed by `zig build`. |
-| C API | `zwgsl_compile`, `zwgsl_free`, and `zwgsl_version` are exposed in `include/zwgsl.h`. |
+| C API | `zwgsl_compile`, `zwgsl_free`, `zwgsl_version`, `zwgsl_abi_version`, and `zwgsl_options_default` are exposed in `include/zwgsl.h`. |
 | CLI | `zwgsl compile` and `zwgsl check` are available as `zig-out/bin/zwgsl`. |
 | LSP server | `zwgsl-lsp` supports diagnostics, hover, completion, goto-definition, document symbols, and semantic tokens. |
 | Browser wasm | `zig build wasm` emits `zig-out/bin/zwgsl.wasm`. |

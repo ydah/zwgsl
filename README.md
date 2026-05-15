@@ -41,6 +41,7 @@ syntax while still targeting modern GPU backends.
 - [Language Reference](docs/language.md)
 - [Feature Matrix](docs/feature-matrix.md)
 - [Builtins](docs/builtins.md)
+- [C API](docs/c-api.md)
 - [Gotchas](docs/gotchas.md)
 - [Design Notes](docs/design-notes.md)
 - [Roadmap](ROADMAP.md)
@@ -305,12 +306,14 @@ That installs `zig-out/bin/zwgsl.wasm`, which the playground syncs into
 
 ## C API
 
+See [C API](docs/c-api.md) for ABI/versioning, options, ownership, and C++
+integration notes.
+
 ```c
 #include "zwgsl.h"
 
-ZwgslOptions options = {
-    .target = ZWGSL_TARGET_WGSL,
-};
+ZwgslOptions options = zwgsl_options_default();
+options.target = ZWGSL_TARGET_WGSL;
 
 ZwgslResult result = zwgsl_compile(source, source_len, options);
 

@@ -34,6 +34,7 @@ pub const ZwgslOptions = compiler_api.Options;
 pub const ZwgslResult = compiler_api.Result;
 
 const VERSION: [*:0]const u8 = "0.1.0";
+const ABI_VERSION: u32 = 1;
 const ffi_allocator = if (builtin.target.cpu.arch == .wasm32)
     std.heap.wasm_allocator
 else
@@ -120,6 +121,14 @@ pub export fn zwgsl_free(result: *compiler_api.Result) void {
     const storage: *ResultStorage = @ptrCast(@alignCast(internal));
     deinitResultStorage(storage);
     result.* = emptyResult();
+}
+
+pub export fn zwgsl_abi_version() u32 {
+    return ABI_VERSION;
+}
+
+pub export fn zwgsl_options_default() compiler_api.Options {
+    return .{};
 }
 
 pub export fn zwgsl_version() [*:0]const u8 {
@@ -341,6 +350,15 @@ fn optionalSliceLen(value: ?[]const u8) usize {
 
 test "version is stable" {
     try std.testing.expectEqualStrings("0.1.0", std.mem.span(zwgsl_version()));
+    try std.testing.expectEqual(@as(u32, 1), zwgsl_abi_version());
+}
+
+test "C API exposes default options" {
+    const options = zwgsl_options_default();
+
+    try std.testing.expectEqual(compiler_api.Target.glsl_es_300, options.target);
+    try std.testing.expectEqual(@as(c_int, 0), options.emit_debug_comments);
+    try std.testing.expectEqual(@as(c_int, 0), options.optimize_output);
 }
 
 test "C API compiles a basic shader" {
