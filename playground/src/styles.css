@@ -111,13 +111,28 @@ body {
 
 .panel-header {
   display: flex;
+  align-items: center;
   justify-content: space-between;
+  gap: 12px;
   padding: 12px 16px;
   color: var(--muted);
   border-bottom: 1px solid var(--edge);
   font-size: 0.82rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
+}
+
+.panel-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.panel-actions span {
+  white-space: nowrap;
 }
 
 #editor,
@@ -223,8 +238,28 @@ button {
   min-height: 44px;
 }
 
+.toolbar-button {
+  min-height: 36px;
+  padding: 7px 10px;
+  border: 1px solid var(--edge);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.74);
+  color: var(--ink);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.toolbar-button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.94);
+}
+
 button:disabled {
-  opacity: 0.7;
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+button[aria-busy="true"]:disabled {
   cursor: progress;
 }
 
@@ -244,6 +279,20 @@ button:disabled {
 
   .sample-picker select {
     width: 100%;
+  }
+
+  .panel-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .panel-actions {
+    justify-content: flex-start;
+    width: 100%;
+  }
+
+  .toolbar-button {
+    min-height: 44px;
   }
 
   .grid {

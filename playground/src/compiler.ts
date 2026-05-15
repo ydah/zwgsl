@@ -122,10 +122,11 @@ const createLoadedCompiler = async () => {
 
           return {
             wgsl: stageSources({ vertex, fragment, compute })
-              .filter((entry): entry is readonly [string, string] => typeof entry[1] === "string")
               .map(([stage, part]) => {
+                if (typeof part !== "string") return null;
                 return `// ${stage}\n${part}`;
               })
+              .filter((part): part is string => part !== null)
               .join("\n\n"),
             vertex,
             fragment,

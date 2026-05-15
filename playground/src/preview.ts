@@ -128,11 +128,12 @@ export const createPreview = async (
   controlsRoot: HTMLElement,
   status: HTMLElement,
 ): Promise<PreviewApi> => {
-  const adapter = await navigator.gpu?.requestAdapter();
+  const gpu = navigator.gpu;
+  const adapter = await gpu?.requestAdapter();
   const device = await adapter?.requestDevice();
   const context = canvas.getContext("webgpu");
 
-  if (!adapter || !device || !context) {
+  if (!gpu || !adapter || !device || !context) {
     status.textContent = "2d fallback";
     controlsRoot.replaceChildren(makeEmptyState("WebGPU unavailable"));
     return {
@@ -146,7 +147,7 @@ export const createPreview = async (
     };
   }
 
-  const format = navigator.gpu.getPreferredCanvasFormat();
+  const format = gpu.getPreferredCanvasFormat();
   context.configure({ device, format, alphaMode: "opaque" });
 
   let pendingResult: CompileResult | null = null;
@@ -482,7 +483,7 @@ const initialValues = (spec: UniformSpec, canvas: HTMLCanvasElement) => {
   }
 
   if (spec.columns > 1) {
-    return identityMatrix(spec.length);
+    return identityMatrix(spec.length as 2 | 3 | 4);
   }
 
   if (/color|tint|albedo|base/i.test(spec.name)) {
@@ -714,7 +715,7 @@ const parseVertexAttributeFormat = (typeName: string) => {
       : vectorMatch[2] === "i"
         ? "sint32"
         : "uint32";
-  const kind = vectorMatch[2] === "f" ? "f32" : vectorMatch[2] === "i" ? "i32" : "u32";
+  const kind: VertexAttributeKind = vectorMatch[2] === "f" ? "f32" : vectorMatch[2] === "i" ? "i32" : "u32";
 
   return {
     format: `${prefix}x${width}` as GPUVertexFormat,

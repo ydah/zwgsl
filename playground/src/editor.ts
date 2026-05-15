@@ -106,6 +106,13 @@ export const createEditor = async (element: HTMLElement, value: string) => {
   monaco.languages.registerCompletionItemProvider("zwgsl", {
     triggerCharacters: [".", ":"],
     async provideCompletionItems(activeModel, position) {
+      const word = activeModel.getWordUntilPosition(position);
+      const range = new monaco.Range(
+        position.lineNumber,
+        word.startColumn,
+        position.lineNumber,
+        word.endColumn,
+      );
       const items = await request<CompletionResult>("completion", {
         source: activeModel.getValue(),
         line: position.lineNumber - 1,
@@ -118,7 +125,7 @@ export const createEditor = async (element: HTMLElement, value: string) => {
           kind: item.kind,
           detail: item.detail,
           insertText: item.label,
-          range: undefined,
+          range,
         })),
       };
     },

@@ -25,7 +25,10 @@
         <section class="panel editor-panel">
           <div class="panel-header">
             <span>Source</span>
-            <span id="status">idle</span>
+            <div class="panel-actions">
+              <span id="status">idle</span>
+              <button class="toolbar-button" id="download-source-button" type="button">Download .zw</button>
+            </div>
           </div>
           <div id="editor"></div>
         </section>
@@ -33,6 +36,11 @@
           <section class="panel">
             <div class="panel-header">
               <span>WGSL</span>
+              <div class="panel-actions">
+                <button class="toolbar-button" id="copy-diagnostics-button" type="button" disabled>Copy diag</button>
+                <button class="toolbar-button" id="copy-wgsl-button" type="button" disabled>Copy WGSL</button>
+                <button class="toolbar-button" id="download-wgsl-button" type="button" disabled>Download WGSL</button>
+              </div>
             </div>
             <pre id="wgsl-output"></pre>
           </section>
