@@ -196,7 +196,7 @@ fn main(input: FragmentInput) -> FragmentOutput {
 
 ## Advanced Examples
 
-Pattern matching over ADTs:
+Pattern matching over ADTs ([Open in Playground](https://ydah.github.io/zwgsl/?sample=adt-match)):
 
 ```ruby
 type Shape
@@ -223,7 +223,7 @@ compute do
 end
 ```
 
-Dependent dimensions that lower to fixed-size WGSL types:
+Dependent dimensions that lower to fixed-size WGSL types ([Open in Playground](https://ydah.github.io/zwgsl/?sample=dependent-dimensions)):
 
 ```ruby
 compute do

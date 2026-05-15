@@ -27,7 +27,8 @@ compatible with that backend.
 | `pbr.zw` | Utility functions, scalar uniforms, vector math, and a compact material-style fragment shader. | [Open](https://ydah.github.io/zwgsl/?sample=pbr) |
 | `postprocess.zw` | Texture sampling with `Sampler2D`, UV varyings, and a fullscreen-style postprocess pass. | [Open](https://ydah.github.io/zwgsl/?sample=postprocess) |
 | `utah_teapot.zw` | A larger animated SDF shader using `where` bindings, loops, helper functions, and generated uniform controls in the playground. | [Open](https://ydah.github.io/zwgsl/?sample=utah-teapot) |
+| `tests/fixtures/dependent_dim.zw` | Focused dependent-dimension checking with `Vec(N)` and `Mat(M, N)`. | [Open](https://ydah.github.io/zwgsl/?sample=dependent-dimensions) |
+| `tests/fixtures/match_shape.zw` | Focused ADT and pattern matching coverage. | [Open](https://ydah.github.io/zwgsl/?sample=adt-match) |
 
-The playground also includes focused feature fixtures such as dependent dimension
-checking and ADT pattern matching. Those are sourced from `tests/fixtures/` so the
-demo stays aligned with compiler coverage.
+Focused feature fixtures are sourced from `tests/fixtures/` so the demos stay
+aligned with compiler coverage.
