@@ -106,6 +106,36 @@ test "lsp didClose clears published diagnostics" {
     try std.testing.expect(std.mem.indexOf(u8, close_response, "\"diagnostics\":[]") != null);
 }
 
+test "lsp unknown request returns method-not-found error" {
+    var state = handler.State.init(std.testing.allocator);
+    defer state.deinit();
+
+    const response = (try handler.handle(
+        std.testing.allocator,
+        &state,
+        "{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"workspace/unknown\",\"params\":{}}",
+    )).?;
+    defer std.testing.allocator.free(response);
+
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"id\":7") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"error\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"code\":-32601") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"data\":\"workspace/unknown\"") != null);
+}
+
+test "lsp unknown notification is ignored" {
+    var state = handler.State.init(std.testing.allocator);
+    defer state.deinit();
+
+    const response = try handler.handle(
+        std.testing.allocator,
+        &state,
+        "{\"jsonrpc\":\"2.0\",\"method\":\"workspace/unknown\",\"params\":{}}",
+    );
+
+    try std.testing.expect(response == null);
+}
+
 test "lsp hover returns builtin and inferred type information" {
     const source =
         \\vertex do

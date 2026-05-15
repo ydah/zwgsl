@@ -66,33 +66,38 @@ pub fn handle(allocator: std.mem.Allocator, state: *State, message: []const u8) 
         return try diagnostics.clear(allocator, uri);
     }
 
-    const uri = nestedString(params orelse return null, &.{ "textDocument", "uri" }) orelse return null;
-    const source = state.store.get(uri) orelse "";
-
     if (std.mem.eql(u8, method_name, "textDocument/hover")) {
+        const uri = nestedString(params orelse return null, &.{ "textDocument", "uri" }) orelse return null;
+        const source = state.store.get(uri) orelse "";
         const line = nestedU32(params.?, &.{ "position", "line" }) orelse 0;
         const character = nestedU32(params.?, &.{ "position", "character" }) orelse 0;
         const result = try hover.response(allocator, source, line, character);
         return try responseOwned(allocator, id_value, result);
     }
     if (std.mem.eql(u8, method_name, "textDocument/completion")) {
+        const uri = nestedString(params orelse return null, &.{ "textDocument", "uri" }) orelse return null;
+        const source = state.store.get(uri) orelse "";
         const line = nestedU32(params.?, &.{ "position", "line" }) orelse 0;
         const character = nestedU32(params.?, &.{ "position", "character" }) orelse 0;
         const result = try completion.response(allocator, source, line, character);
         return try responseOwned(allocator, id_value, result);
     }
     if (std.mem.eql(u8, method_name, "textDocument/definition")) {
+        const uri = nestedString(params orelse return null, &.{ "textDocument", "uri" }) orelse return null;
+        const source = state.store.get(uri) orelse "";
         const line = nestedU32(params.?, &.{ "position", "line" }) orelse 0;
         const character = nestedU32(params.?, &.{ "position", "character" }) orelse 0;
         const result = try goto_def.response(allocator, uri, source, line, character);
         return try responseOwned(allocator, id_value, result);
     }
     if (std.mem.eql(u8, method_name, "textDocument/semanticTokens/full")) {
+        const uri = nestedString(params orelse return null, &.{ "textDocument", "uri" }) orelse return null;
+        const source = state.store.get(uri) orelse "";
         const result = try semantic_tokens.response(allocator, source);
         return try responseOwned(allocator, id_value, result);
     }
 
-    return if (id_value != null) try response(allocator, id_value, "null") else null;
+    return if (id_value != null) try methodNotFoundResponse(allocator, id_value.?, method_name) else null;
 }
 
 fn response(allocator: std.mem.Allocator, id_value: ?std.json.Value, result_json: []const u8) ![]u8 {
@@ -109,6 +114,23 @@ fn response(allocator: std.mem.Allocator, id_value: ?std.json.Value, result_json
 fn responseOwned(allocator: std.mem.Allocator, id_value: ?std.json.Value, result_json: []u8) ![]u8 {
     defer allocator.free(result_json);
     return try response(allocator, id_value, result_json);
+}
+
+fn methodNotFoundResponse(allocator: std.mem.Allocator, id_value: std.json.Value, method_name: []const u8) ![]u8 {
+    const id_json = try jsonValue(allocator, id_value);
+    defer allocator.free(id_json);
+
+    var buffer: std.ArrayList(u8) = .empty;
+    defer buffer.deinit(allocator);
+    const writer = buffer.writer(allocator);
+
+    try writer.print(
+        "{{\"jsonrpc\":\"2.0\",\"id\":{s},\"error\":{{\"code\":-32601,\"message\":\"Method not found\",\"data\":",
+        .{id_json},
+    );
+    try writeJsonString(writer, method_name);
+    try writer.writeAll("}}}");
+    return try buffer.toOwnedSlice(allocator);
 }
 
 fn jsonValue(allocator: std.mem.Allocator, value: std.json.Value) ![]u8 {
