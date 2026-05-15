@@ -16,6 +16,9 @@ const copyWgslButton = document.querySelector<HTMLButtonElement>("#copy-wgsl-but
 const copyDiagnosticsButton = document.querySelector<HTMLButtonElement>("#copy-diagnostics-button")!;
 const downloadSourceButton = document.querySelector<HTMLButtonElement>("#download-source-button")!;
 const downloadWgslButton = document.querySelector<HTMLButtonElement>("#download-wgsl-button")!;
+const outputTabButtons = Array.from(
+  document.querySelectorAll<HTMLButtonElement>("[data-output-tab]"),
+);
 
 const editor = await createEditor(
   document.querySelector<HTMLElement>("#editor")!,
@@ -29,8 +32,11 @@ let compileLoop: Promise<void> | null = null;
 let isLoadingSample = false;
 let latestWgsl = "";
 let latestDiagnostics = "";
+let latestResult: CompileResult | null = null;
+let activeOutputTab: OutputTab = "all";
 
 type CompileTrigger = "initial" | "edit" | "manual" | "sample";
+type OutputTab = "all" | "vertex" | "fragment" | "compute" | "diagnostics" | "resources";
 
 const sampleQueryKey = "sample";
 
@@ -98,6 +104,81 @@ const renderCompileOutput = (result: CompileResult) => {
 const renderDiagnostics = (result: CompileResult) =>
   result.diagnostics.map(formatDiagnostic).join("\n");
 
+const renderStageOutput = (stage: "vertex" | "fragment" | "compute", source: string | null) =>
+  source && source.trim().length > 0 ? source : `// No ${stage} output.\n`;
+
+const renderResourceLayout = (result: CompileResult) => {
+  const sources = [
+    ["vertex", result.vertex],
+    ["fragment", result.fragment],
+    ["compute", result.compute],
+  ] as const;
+  const rows: string[] = [];
+
+  for (const [stage, source] of sources) {
+    if (!source) continue;
+
+    for (const match of source.matchAll(/@group\((\d+)\)\s*@binding\((\d+)\)\s*var(?:<([^>]+)>)?\s+([A-Za-z_]\w*):\s*([^;]+);/g)) {
+      const bindingClass = match[3] ? `<${match[3]}> ` : "";
+      rows.push(`${stage}: group ${match[1]} binding ${match[2]} ${bindingClass}${match[4]}: ${match[5].trim()}`);
+    }
+
+    for (const match of source.matchAll(/@location\((\d+)\)\s+([A-Za-z_]\w*):\s*([^,\n}]+)/g)) {
+      rows.push(`${stage}: location ${match[1]} ${match[2]}: ${match[3].trim()}`);
+    }
+  }
+
+  if (rows.length === 0) return "// No resources or stage locations detected.\n";
+  return ["// Generated resource layout", ...rows.map((row) => `// ${row}`)].join("\n");
+};
+
+const outputTabAvailable = (result: CompileResult, tab: OutputTab) => {
+  switch (tab) {
+    case "all":
+      return true;
+    case "vertex":
+      return Boolean(result.vertex?.trim());
+    case "fragment":
+      return Boolean(result.fragment?.trim());
+    case "compute":
+      return Boolean(result.compute?.trim());
+    case "diagnostics":
+      return result.diagnostics.length > 0;
+    case "resources":
+      return !renderResourceLayout(result).startsWith("// No resources");
+  }
+};
+
+const resolveOutputTab = (result: CompileResult) =>
+  outputTabAvailable(result, activeOutputTab) ? activeOutputTab : "all";
+
+const renderOutputTab = (result: CompileResult, tab: OutputTab) => {
+  switch (tab) {
+    case "all":
+      return renderCompileOutput(result);
+    case "vertex":
+      return renderStageOutput("vertex", result.vertex);
+    case "fragment":
+      return renderStageOutput("fragment", result.fragment);
+    case "compute":
+      return renderStageOutput("compute", result.compute);
+    case "diagnostics":
+      return latestDiagnostics.trim().length > 0 ? latestDiagnostics : "// No diagnostics.\n";
+    case "resources":
+      return renderResourceLayout(result);
+  }
+};
+
+const renderOutputPanel = (result: CompileResult) => {
+  activeOutputTab = resolveOutputTab(result);
+  output.textContent = renderOutputTab(result, activeOutputTab);
+  for (const button of outputTabButtons) {
+    const tab = button.dataset.outputTab as OutputTab;
+    button.disabled = !outputTabAvailable(result, tab);
+    button.setAttribute("aria-pressed", tab === activeOutputTab ? "true" : "false");
+  }
+};
+
 const updateActionButtons = () => {
   const hasWgsl = latestWgsl.trim().length > 0;
   copyWgslButton.disabled = !hasWgsl;
@@ -163,9 +244,10 @@ const runCompile = async (trigger: CompileTrigger) => {
   try {
     const result = await compiler.compile(editor.getValue());
     const compileDuration = performance.now() - compileStartedAt;
+    latestResult = result;
     latestWgsl = result.wgsl;
     latestDiagnostics = renderDiagnostics(result);
-    output.textContent = renderCompileOutput(result);
+    renderOutputPanel(result);
     updateActionButtons();
     await preview.render(result);
     status.textContent =
@@ -175,9 +257,17 @@ const runCompile = async (trigger: CompileTrigger) => {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const compileDuration = performance.now() - compileStartedAt;
+    latestResult = {
+      wgsl: "",
+      vertex: null,
+      fragment: null,
+      compute: null,
+      diagnostics: [{ message, line: 0, column: 0, severity: 1 }],
+    };
     latestWgsl = "";
     latestDiagnostics = `// compile failed\n// ${message}`;
-    output.textContent = `// compile failed\n// ${message}\n`;
+    activeOutputTab = "diagnostics";
+    renderOutputPanel(latestResult);
     updateActionButtons();
     status.textContent = `compile failed • compile ${formatCompileDuration(compileDuration)}`;
     previewStatus.textContent = "compile failed";
@@ -235,6 +325,13 @@ downloadWgslButton.addEventListener("click", () => {
   downloadText(`${selectedSampleId()}.wgsl`, latestWgsl, "text/plain;charset=utf-8");
   flashButtonLabel(downloadWgslButton, "Saved");
 });
+
+for (const button of outputTabButtons) {
+  button.addEventListener("click", () => {
+    activeOutputTab = button.dataset.outputTab as OutputTab;
+    if (latestResult) renderOutputPanel(latestResult);
+  });
+}
 
 sampleSelect.addEventListener("change", () => {
   if (sampleSelect.value === "custom") {

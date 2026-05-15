@@ -135,6 +135,36 @@ body {
   white-space: nowrap;
 }
 
+.output-tabs {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.output-tab {
+  min-height: 32px;
+  padding: 6px 9px;
+  border: 1px solid var(--edge);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.62);
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+.output-tab[aria-pressed="true"] {
+  background: var(--ink);
+  color: white;
+}
+
+.output-tab:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
 #editor,
 #wgsl-output {
   min-height: 0;

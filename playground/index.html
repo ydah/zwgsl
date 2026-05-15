@@ -36,6 +36,14 @@
           <section class="panel">
             <div class="panel-header">
               <span>WGSL</span>
+              <div class="output-tabs" id="output-tabs" role="group" aria-label="Generated output">
+                <button class="output-tab" type="button" data-output-tab="all" aria-pressed="true">All</button>
+                <button class="output-tab" type="button" data-output-tab="vertex">Vertex</button>
+                <button class="output-tab" type="button" data-output-tab="fragment">Fragment</button>
+                <button class="output-tab" type="button" data-output-tab="compute">Compute</button>
+                <button class="output-tab" type="button" data-output-tab="diagnostics">Diagnostics</button>
+                <button class="output-tab" type="button" data-output-tab="resources">Resources</button>
+              </div>
               <div class="panel-actions">
                 <button class="toolbar-button" id="copy-diagnostics-button" type="button" disabled>Copy diag</button>
                 <button class="toolbar-button" id="copy-wgsl-button" type="button" disabled>Copy WGSL</button>

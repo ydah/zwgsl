@@ -373,6 +373,7 @@ Current capabilities:
 - Monaco language registration for `zwgsl`
 - sample selector backed by repository examples and focused feature fixtures, with `?sample=<id>` direct links
 - live WGSL compilation through `zwgsl.wasm`
+- output tabs for combined WGSL, stage-specific WGSL, diagnostics, and generated resource layout
 - compiler-backed diagnostics, hover, completion, and goto-definition from the wasm build
 - WebGPU preview surface with animated `iTime` / `iResolution` uniforms, generated controls, and sampler placeholders
 - `npm run sync-wasm` to refresh the generated wasm asset from `zig-out/bin/zwgsl.wasm`
