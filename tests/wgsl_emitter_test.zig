@@ -419,6 +419,34 @@ test "compiler rejects mixing compute with render stages" {
     try std.testing.expect(std.mem.indexOf(u8, std.mem.span(output.errors[0].message), "cannot be combined") != null);
 }
 
+test "compiler reports source location for unsupported WGSL sampler materialization" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const source =
+        \\uniform :scene_tex, Sampler2D
+        \\
+        \\def choose(scene: Sampler2D) -> Sampler2D
+        \\  scene
+        \\end
+        \\
+        \\compute do
+        \\  def main
+        \\    uv: Vec2 = vec2(0.5, 0.25)
+        \\    color: Vec4 = texture(choose(scene_tex), uv)
+        \\  end
+        \\end
+    ;
+
+    const output = try zwgsl.compiler.compile(arena.allocator(), source, .{
+        .target = .wgsl,
+    });
+    try std.testing.expectEqual(@as(usize, 1), output.errors.len);
+    try std.testing.expect(std.mem.indexOf(u8, std.mem.span(output.errors[0].message), "cannot materialize sampler values") != null);
+    try std.testing.expectEqual(@as(u32, 4), output.errors[0].line);
+    try std.testing.expectEqual(@as(u32, 3), output.errors[0].column);
+}
+
 test "compiler specializes constrained trait calls for WGSL" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

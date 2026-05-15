@@ -93,15 +93,17 @@ pub fn compile(allocator: std.mem.Allocator, source: []const u8, options: Option
         .wgsl => blk: {
             const hir_module = try hir_builder.build(allocator, typed);
             const mir_module = try mir_builder.build(allocator, hir_module);
+            var backend_error_position: wgsl_emitter.SourcePosition = .{};
             break :blk wgsl_emitter.emit(allocator, mir_module, .{
                 .emit_debug_comments = options.emit_debug_comments != 0,
                 .optimize_output = options.optimize_output != 0,
                 .source = source,
+                .error_position = &backend_error_position,
             }) catch |err| switch (err) {
-                error.UnsupportedSamplerValue => return singleError(allocator, "WGSL backend cannot materialize sampler values outside texture() or sampler arguments", 0, 0),
-                error.UnsupportedSamplerType => return singleError(allocator, "WGSL backend encountered an unsupported sampler type", 0, 0),
-                error.UnsupportedTextureBuiltin => return singleError(allocator, "WGSL backend encountered an unsupported texture() call", 0, 0),
-                error.UnsupportedTextureSource => return singleError(allocator, "WGSL backend requires texture() samplers to resolve to uniforms, parameters, or immutable aliases", 0, 0),
+                error.UnsupportedSamplerValue => return singleError(allocator, "WGSL backend cannot materialize sampler values outside texture() or sampler arguments", backend_error_position.line, backend_error_position.column),
+                error.UnsupportedSamplerType => return singleError(allocator, "WGSL backend encountered an unsupported sampler type", backend_error_position.line, backend_error_position.column),
+                error.UnsupportedTextureBuiltin => return singleError(allocator, "WGSL backend encountered an unsupported texture() call", backend_error_position.line, backend_error_position.column),
+                error.UnsupportedTextureSource => return singleError(allocator, "WGSL backend requires texture() samplers to resolve to uniforms, parameters, or immutable aliases", backend_error_position.line, backend_error_position.column),
                 else => return err,
             };
         },

@@ -9,6 +9,12 @@ pub const EmitOptions = struct {
     emit_debug_comments: bool = false,
     optimize_output: bool = false,
     source: ?[]const u8 = null,
+    error_position: ?*SourcePosition = null,
+};
+
+pub const SourcePosition = struct {
+    line: u32 = 0,
+    column: u32 = 0,
 };
 
 pub const Output = glsl_emitter.Output;
@@ -19,6 +25,27 @@ pub const EmitError = error{
     UnsupportedTextureBuiltin,
     UnsupportedTextureSource,
 };
+
+fn emitErrorAt(options: EmitOptions, line: ?u32, column: ?u32, err: anyerror) anyerror {
+    switch (err) {
+        error.UnsupportedSamplerValue,
+        error.UnsupportedSamplerType,
+        error.UnsupportedTextureBuiltin,
+        error.UnsupportedTextureSource,
+        => {
+            if (options.error_position) |position| {
+                if (position.line == 0 and position.column == 0) {
+                    position.* = .{
+                        .line = line orelse 0,
+                        .column = column orelse 0,
+                    };
+                }
+            }
+        },
+        else => {},
+    }
+    return err;
+}
 
 const SamplerAlias = struct {
     name: []const u8,
@@ -179,7 +206,7 @@ fn emitStage(allocator: std.mem.Allocator, module: *const mir.Module, entry_poin
     if (entry_point.stage != .compute) {
         try emitStageInterfaceStructs(writer, module, entry_point);
     }
-    try emitBindings(writer, module.bindings);
+    try emitBindings(writer, module.bindings, options);
     try emitPrivateGlobals(writer, entry_point);
 
     for (module.structs) |struct_decl| {
@@ -362,7 +389,7 @@ fn emitStageInterfaceStructs(writer: anytype, module: *const mir.Module, entry_p
     }
 }
 
-fn emitBindings(writer: anytype, bindings: []const mir.Binding) !void {
+fn emitBindings(writer: anytype, bindings: []const mir.Binding, options: EmitOptions) !void {
     for (bindings) |binding| {
         switch (binding.kind) {
             .uniform => {
@@ -385,12 +412,16 @@ fn emitBindings(writer: anytype, bindings: []const mir.Binding) !void {
                     });
                 }
             },
-            .texture => try writer.print("@group({d}) @binding({d}) var {s}_texture: {s};\n", .{
-                binding.group,
-                binding.binding,
-                binding.name,
-                samplerTextureType(binding.ty) orelse return error.UnsupportedSamplerType,
-            }),
+            .texture => {
+                const texture_type = samplerTextureType(binding.ty) orelse
+                    return emitErrorAt(options, binding.source_line, binding.source_column, error.UnsupportedSamplerType);
+                try writer.print("@group({d}) @binding({d}) var {s}_texture: {s};\n", .{
+                    binding.group,
+                    binding.binding,
+                    binding.name,
+                    texture_type,
+                });
+            },
             .sampler => try writer.print("@group({d}) @binding({d}) var {s}_sampler: sampler;\n", .{
                 binding.group,
                 binding.binding,
@@ -465,9 +496,11 @@ fn emitFunction(
     for (function.params) |param| {
         if (param.ty.isSampler()) {
             if (wrote_param) try writer.writeAll(", ");
+            const texture_type = samplerTextureType(param.ty) orelse
+                return emitErrorAt(options, param.source_line, param.source_column, error.UnsupportedSamplerType);
             try writer.print("{s}_texture: {s}, {s}_sampler: sampler", .{
                 param.name,
-                samplerTextureType(param.ty) orelse return error.UnsupportedSamplerType,
+                texture_type,
                 param.name,
             });
             wrote_param = true;
@@ -601,7 +634,8 @@ fn emitPhiAssignments(
             try emitDebugComment(writer, options, instruction.source_line, indent);
             try writeIndent(writer, indent);
             try writer.print("{s} = ", .{result.name});
-            try emitValue(writer, module, function_context, incoming.value, 0, uniforms, current_functions, current_params, sampler_aliases);
+            emitValue(writer, module, function_context, incoming.value, 0, uniforms, current_functions, current_params, sampler_aliases) catch |err|
+                return emitErrorAt(options, instruction.source_line, instruction.source_column, err);
             try writer.writeAll(";\n");
             break;
         }
@@ -659,7 +693,8 @@ fn emitBlockRegion(
                 try writeIndent(writer, indent);
                 if (value) |returned_value| {
                     try writer.writeAll("return ");
-                    try emitValue(writer, module, function_context, returned_value, 0, uniforms, current_functions, current_params, sampler_aliases.items);
+                    emitValue(writer, module, function_context, returned_value, 0, uniforms, current_functions, current_params, sampler_aliases.items) catch |err|
+                        return emitErrorAt(options, block.source_line, block.source_column, err);
                     try writer.writeAll(";\n");
                 } else {
                     try writer.writeAll("return;\n");
@@ -677,7 +712,8 @@ fn emitBlockRegion(
                 try emitDebugComment(writer, options, block.source_line, indent);
                 try writeIndent(writer, indent);
                 try writer.writeAll("if (");
-                try emitValue(writer, module, function_context, if_term.condition, 0, uniforms, current_functions, current_params, sampler_aliases.items);
+                emitValue(writer, module, function_context, if_term.condition, 0, uniforms, current_functions, current_params, sampler_aliases.items) catch |err|
+                    return emitErrorAt(options, block.source_line, block.source_column, err);
                 try writer.writeAll(") {\n");
                 const alias_checkpoint = sampler_aliases.items.len;
                 try emitBlockRegion(writer, allocator, module, function, function_context, if_term.then_block, if_term.merge_block, indent + 1, options, uniforms, current_functions, current_params, sampler_aliases);
@@ -695,7 +731,8 @@ fn emitBlockRegion(
                 try emitDebugComment(writer, options, block.source_line, indent);
                 try writeIndent(writer, indent);
                 try writer.writeAll("switch (");
-                try emitValue(writer, module, function_context, switch_term.selector, 0, uniforms, current_functions, current_params, sampler_aliases.items);
+                emitValue(writer, module, function_context, switch_term.selector, 0, uniforms, current_functions, current_params, sampler_aliases.items) catch |err|
+                    return emitErrorAt(options, block.source_line, block.source_column, err);
                 try writer.writeAll(") {\n");
                 for (switch_term.cases) |case_target| {
                     try writeIndent(writer, indent + 1);
@@ -722,6 +759,34 @@ fn emitBlockRegion(
 }
 
 fn emitInstruction(
+    writer: anytype,
+    allocator: std.mem.Allocator,
+    module: *const mir.Module,
+    instruction: mir.Instruction,
+    function_context: *const EmitFunctionContext,
+    indent: usize,
+    options: EmitOptions,
+    uniforms: []const mir.Global,
+    current_functions: []const mir.Function,
+    current_params: []const mir.Param,
+    sampler_aliases: *std.ArrayListUnmanaged(SamplerAlias),
+) anyerror!void {
+    emitInstructionInner(
+        writer,
+        allocator,
+        module,
+        instruction,
+        function_context,
+        indent,
+        options,
+        uniforms,
+        current_functions,
+        current_params,
+        sampler_aliases,
+    ) catch |err| return emitErrorAt(options, instruction.source_line, instruction.source_column, err);
+}
+
+fn emitInstructionInner(
     writer: anytype,
     allocator: std.mem.Allocator,
     module: *const mir.Module,
