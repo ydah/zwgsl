@@ -4,6 +4,7 @@ import { createEditor } from "./editor";
 import { createCompiler, type CompileResult } from "./compiler";
 import { defaultExample, exampleSources } from "./examples";
 import { createPreview } from "./preview";
+import { hasResourceLayout, renderResourceLayout } from "./resource-layout";
 
 const status = document.querySelector<HTMLSpanElement>("#status")!;
 const output = document.querySelector<HTMLElement>("#wgsl-output")!;
@@ -146,31 +147,6 @@ const renderDiagnostics = (result: CompileResult) =>
 const renderStageOutput = (stage: "vertex" | "fragment" | "compute", source: string | null) =>
   source && source.trim().length > 0 ? source : `// No ${stage} output.\n`;
 
-const renderResourceLayout = (result: CompileResult) => {
-  const sources = [
-    ["vertex", result.vertex],
-    ["fragment", result.fragment],
-    ["compute", result.compute],
-  ] as const;
-  const rows: string[] = [];
-
-  for (const [stage, source] of sources) {
-    if (!source) continue;
-
-    for (const match of source.matchAll(/@group\((\d+)\)\s*@binding\((\d+)\)\s*var(?:<([^>]+)>)?\s+([A-Za-z_]\w*):\s*([^;]+);/g)) {
-      const bindingClass = match[3] ? `<${match[3]}> ` : "";
-      rows.push(`${stage}: group ${match[1]} binding ${match[2]} ${bindingClass}${match[4]}: ${match[5].trim()}`);
-    }
-
-    for (const match of source.matchAll(/@location\((\d+)\)\s+([A-Za-z_]\w*):\s*([^,\n}]+)/g)) {
-      rows.push(`${stage}: location ${match[1]} ${match[2]}: ${match[3].trim()}`);
-    }
-  }
-
-  if (rows.length === 0) return "// No resources or stage locations detected.\n";
-  return ["// Generated resource layout", ...rows.map((row) => `// ${row}`)].join("\n");
-};
-
 const outputTabAvailable = (result: CompileResult, tab: OutputTab) => {
   switch (tab) {
     case "all":
@@ -184,7 +160,7 @@ const outputTabAvailable = (result: CompileResult, tab: OutputTab) => {
     case "diagnostics":
       return result.diagnostics.length > 0;
     case "resources":
-      return !renderResourceLayout(result).startsWith("// No resources");
+      return hasResourceLayout(result);
   }
 };
 
