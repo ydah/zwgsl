@@ -459,12 +459,38 @@ button[aria-busy="true"]:disabled {
 }
 
 .compute-preview-state strong,
-.compute-preview-state p {
+.compute-preview-state p,
+.compute-preview-state ul {
   margin: 0;
 }
 
 .compute-preview-state p {
   color: var(--muted);
+}
+
+.compute-preview-state ul {
+  display: grid;
+  gap: 8px;
+  padding-left: 0;
+  list-style: none;
+}
+
+.compute-preview-state li {
+  display: grid;
+  gap: 4px;
+}
+
+.compute-preview-state span {
+  color: #156580;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.compute-preview-state code {
+  color: var(--muted);
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 0.76rem;
+  overflow-wrap: anywhere;
 }
 
 .learning-line-highlight {

@@ -46,6 +46,31 @@ type TextureState = {
   sampler: GPUSampler;
 };
 
+type StorageSpec = {
+  binding: number;
+  name: string;
+  typeName: string;
+  access: "read" | "read_write";
+};
+
+type StorageState = {
+  spec: StorageSpec;
+  buffer: GPUBuffer;
+  readBuffer: GPUBuffer;
+};
+
+type StorageSample = {
+  binding: number;
+  name: string;
+  values: string[];
+};
+
+type ComputePreviewResult = {
+  lineCount: number;
+  elapsedMs: number;
+  storageSamples: StorageSample[];
+};
+
 type VertexAttributeKind = "f32" | "i32" | "u32";
 
 type VertexAttributeSpec = {
@@ -91,6 +116,8 @@ type PreviewDeviceState =
 
 const uniformStorageKey = "zwgsl.playground.uniforms.v1";
 const uploadedTextureSize = 512;
+const computeStorageBufferSize = 256;
+const computeReadbackBytes = 64;
 const shaderValidationFailure = "Shader module validation failed";
 
 const fallbackVertexShader = `
@@ -170,6 +197,9 @@ const hashSource = (source: string) => {
   }
   return hash >>> 0;
 };
+
+const formatDuration = (milliseconds: number) =>
+  milliseconds < 100 ? `${milliseconds.toFixed(1)}ms` : `${Math.round(milliseconds)}ms`;
 
 const describeErrorMessage = (error: unknown) => {
   if (error instanceof Error && error.message) return error.message;
@@ -295,6 +325,7 @@ export const createPreview = async (
     const vertexState = createVertexPreviewState(device, vertexSource, uniformSpecs, textureSpecs);
 
     try {
+      let computePreviewResult: ComputePreviewResult | null = null;
       const vertexModule = device.createShaderModule({ code: vertexSource });
       const fragmentModule = device.createShaderModule({ code: fragmentSource });
       const computeModule = computeOnly ? device.createShaderModule({ code: computeSource }) : null;
@@ -310,6 +341,16 @@ export const createPreview = async (
           ...fragmentErrors,
           ...computeErrors,
         ]);
+      }
+
+      if (computeOnly && computeModule) {
+        computePreviewResult = await runComputePreview(device, computeModule, computeSource, canvas);
+        if (currentVersion !== buildVersion) {
+          destroyUniforms(uniformStates);
+          destroyTextures(textureStates);
+          destroyVertexPreview(vertexState);
+          return activeState;
+        }
       }
 
       const pipeline = await device.createRenderPipelineAsync({
@@ -366,12 +407,12 @@ export const createPreview = async (
       }
 
       if (computeOnly) {
-        controlsRoot.replaceChildren(makeComputePreviewState(computeSource));
+        controlsRoot.replaceChildren(makeComputePreviewState(computeSource, computePreviewResult));
       } else {
         renderControls(device, controlsRoot, uniformStates, textureStates);
       }
       status.textContent = computeOnly
-        ? "compute preview"
+        ? "compute executed"
         : vertexState.profile === "triangle"
           ? "WGSL valid • pipeline live • triangle"
           : "WGSL valid • pipeline live • fullscreen";
@@ -437,6 +478,94 @@ const destroyTextures = (textures: TextureState[]) => {
 
 const destroyVertexPreview = (vertex: VertexPreviewState) => {
   vertex.buffer?.destroy();
+};
+
+const runComputePreview = async (
+  device: GPUDevice,
+  module: GPUShaderModule,
+  source: string,
+  canvas: HTMLCanvasElement,
+): Promise<ComputePreviewResult> => {
+  const startedAt = performance.now();
+  const uniformStates = collectUniformSpecs(source).map((spec) => createUniformState(device, spec, canvas));
+  const storageStates = collectStorageSpecs(source).map((spec) => createStorageState(device, spec));
+
+  try {
+    updateUniforms(uniformStates, canvas, device, 0);
+    device.pushErrorScope("validation");
+    const pipeline = await device.createComputePipelineAsync({
+      layout: "auto",
+      compute: { module, entryPoint: "main" },
+    });
+    const pipelineError = await device.popErrorScope();
+    if (pipelineError) {
+      throw new PreviewPipelineError("Compute preview pipeline failed", [pipelineError.message]);
+    }
+
+    const bindEntries = [
+      ...uniformStates.map<GPUBindGroupEntry>((state) => ({
+        binding: state.spec.binding,
+        resource: { buffer: state.buffer },
+      })),
+      ...storageStates.map<GPUBindGroupEntry>((state) => ({
+        binding: state.spec.binding,
+        resource: { buffer: state.buffer },
+      })),
+    ];
+    const bindGroup =
+      bindEntries.length > 0
+        ? device.createBindGroup({
+            layout: pipeline.getBindGroupLayout(0),
+            entries: bindEntries,
+          })
+        : null;
+
+    device.pushErrorScope("validation");
+    const encoder = device.createCommandEncoder();
+    const pass = encoder.beginComputePass();
+    pass.setPipeline(pipeline);
+    if (bindGroup) pass.setBindGroup(0, bindGroup);
+    pass.dispatchWorkgroups(1);
+    pass.end();
+
+    for (const state of storageStates) {
+      encoder.copyBufferToBuffer(
+        state.buffer,
+        0,
+        state.readBuffer,
+        0,
+        Math.min(computeReadbackBytes, computeStorageBufferSize),
+      );
+    }
+
+    device.queue.submit([encoder.finish()]);
+    await device.queue.onSubmittedWorkDone();
+    const dispatchError = await device.popErrorScope();
+    if (dispatchError) {
+      throw new PreviewPipelineError("Compute preview dispatch failed", [dispatchError.message]);
+    }
+
+    const storageSamples: StorageSample[] = [];
+    for (const state of storageStates) {
+      storageSamples.push(await readStorageSample(state));
+    }
+
+    return {
+      lineCount: source.split("\n").filter((line) => line.trim().length > 0).length,
+      elapsedMs: performance.now() - startedAt,
+      storageSamples,
+    };
+  } finally {
+    destroyUniforms(uniformStates);
+    destroyStorageStates(storageStates);
+  }
+};
+
+const destroyStorageStates = (states: StorageState[]) => {
+  for (const state of states) {
+    state.buffer.destroy();
+    state.readBuffer.destroy();
+  }
 };
 
 const collectUniformSpecs = (...sources: Array<string | null>) => {
@@ -518,6 +647,25 @@ const collectTextureSpecs = (...sources: Array<string | null>) => {
       ];
     })
     .sort((left, right) => left.textureBinding - right.textureBinding);
+};
+
+const collectStorageSpecs = (source: string) => {
+  const specs = new Map<number, StorageSpec>();
+  const pattern =
+    /@group\(0\)\s*@binding\((\d+)\)\s*var<storage(?:,\s*(read|read_write))?>\s+([A-Za-z_]\w*):\s*([^;]+);/g;
+
+  for (const match of source.matchAll(pattern)) {
+    const binding = Number(match[1]);
+    if (Number.isNaN(binding) || specs.has(binding)) continue;
+    specs.set(binding, {
+      binding,
+      access: match[2] === "read_write" ? "read_write" : "read",
+      name: match[3],
+      typeName: match[4].trim(),
+    });
+  }
+
+  return [...specs.values()].sort((left, right) => left.binding - right.binding);
 };
 
 const parseUniformSpec = (binding: number, name: string, typeName: string): UniformSpec | null => {
@@ -752,6 +900,48 @@ const makePreviewTexture = (device: GPUDevice, spec: TextureSpec) => {
   );
 
   return texture;
+};
+
+const createStorageState = (device: GPUDevice, spec: StorageSpec): StorageState => {
+  const buffer = device.createBuffer({
+    size: computeStorageBufferSize,
+    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
+  });
+  const readBuffer = device.createBuffer({
+    size: computeReadbackBytes,
+    usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+  });
+  const seed = new Float32Array(computeStorageBufferSize / Float32Array.BYTES_PER_ELEMENT);
+  for (let index = 0; index < seed.length; index += 1) {
+    seed[index] = index / Math.max(1, seed.length - 1);
+  }
+  device.queue.writeBuffer(buffer, 0, seed);
+  return { spec, buffer, readBuffer };
+};
+
+const readStorageSample = async (state: StorageState): Promise<StorageSample> => {
+  await state.readBuffer.mapAsync(GPUMapMode.READ);
+  const bytes = new Uint8Array(state.readBuffer.getMappedRange()).slice();
+  state.readBuffer.unmap();
+  return {
+    binding: state.spec.binding,
+    name: state.spec.name,
+    values: formatStorageSample(bytes),
+  };
+};
+
+const formatStorageSample = (bytes: Uint8Array) => {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const floats = [];
+  const floatCount = Math.min(4, Math.floor(bytes.byteLength / Float32Array.BYTES_PER_ELEMENT));
+  for (let index = 0; index < floatCount; index += 1) {
+    floats.push(view.getFloat32(index * Float32Array.BYTES_PER_ELEMENT, true).toFixed(3));
+  }
+
+  const hex = Array.from(bytes.slice(0, 16))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join(" ");
+  return [`f32 ${floats.join(", ")}`, `hex ${hex}`];
 };
 
 const createVertexPreviewState = (
@@ -1087,7 +1277,7 @@ const makeEmptyState = (message: string) => {
   return element;
 };
 
-const makeComputePreviewState = (source: string) => {
+const makeComputePreviewState = (source: string, result: ComputePreviewResult | null) => {
   const section = document.createElement("section");
   section.className = "compute-preview-state";
 
@@ -1095,10 +1285,26 @@ const makeComputePreviewState = (source: string) => {
   title.textContent = "Compute preview";
   section.append(title);
 
-  const lineCount = source.split("\n").filter((line) => line.trim().length > 0).length;
+  const lineCount = result?.lineCount ?? source.split("\n").filter((line) => line.trim().length > 0).length;
   const summary = document.createElement("p");
-  summary.textContent = `${lineCount} WGSL lines validated; deterministic swatch rendered.`;
+  summary.textContent = result
+    ? `${lineCount} WGSL lines executed in ${formatDuration(result.elapsedMs)}; deterministic swatch rendered.`
+    : `${lineCount} WGSL lines validated; deterministic swatch rendered.`;
   section.append(summary);
+
+  if (result?.storageSamples.length) {
+    const list = document.createElement("ul");
+    for (const sample of result.storageSamples) {
+      const item = document.createElement("li");
+      const label = document.createElement("span");
+      label.textContent = `@binding(${sample.binding}) ${sample.name}`;
+      const values = document.createElement("code");
+      values.textContent = sample.values.join(" / ");
+      item.append(label, values);
+      list.append(item);
+    }
+    section.append(list);
+  }
 
   return section;
 };
