@@ -3,6 +3,7 @@ import "./styles.css";
 import { createEditor } from "./editor";
 import { createCompiler, type CompileResult } from "./compiler";
 import { defaultExample, exampleSources, type ExampleSource } from "./examples";
+import { learningAnnotationsForSource } from "./learning";
 import { createPreview } from "./preview";
 import { hasResourceLayout, renderResourceLayout } from "./resource-layout";
 
@@ -212,6 +213,10 @@ const updateActionButtons = () => {
 
 const selectedSampleId = () => (sampleSelect.value === "custom" ? "custom" : sampleSelect.value);
 
+const refreshLearningAnnotations = () => {
+  editor.setLearningAnnotations(learningAnnotationsForSource(editor.getValue()));
+};
+
 const updateSampleButtons = () => {
   const selected = selectedSampleId();
   for (const button of document.querySelectorAll<HTMLButtonElement>("[data-sample-id]")) {
@@ -343,6 +348,7 @@ const runCompile = async (trigger: CompileTrigger) => {
     latestDiagnostics = renderDiagnostics(result);
     renderOutputPanel(result);
     updateActionButtons();
+    editor.setCompilerDiagnostics(result.diagnostics);
     await preview.render(result);
     status.textContent =
       result.diagnostics.length === 0
@@ -363,6 +369,7 @@ const runCompile = async (trigger: CompileTrigger) => {
     activeOutputTab = "diagnostics";
     renderOutputPanel(latestResult);
     updateActionButtons();
+    editor.setCompilerDiagnostics(latestResult.diagnostics);
     status.textContent = `compile failed • compile ${formatCompileDuration(compileDuration)}`;
     previewStatus.textContent = "compile failed";
     console.error("zwgsl playground compile failed", error);
@@ -393,6 +400,7 @@ editor.onDidChangeModelContent(() => {
     updateSampleUrl(null);
     updateSampleButtons();
   }
+  refreshLearningAnnotations();
   compileTimer = window.setTimeout(() => requestCompile("edit"), 300);
 });
 
@@ -453,5 +461,6 @@ renderExampleGallery();
 renderTutorialSteps();
 updateActionButtons();
 updateSampleButtons();
+refreshLearningAnnotations();
 requestCompile("initial");
 await compileLoop;

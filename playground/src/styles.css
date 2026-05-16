@@ -467,6 +467,24 @@ button[aria-busy="true"]:disabled {
   color: var(--muted);
 }
 
+.learning-line-highlight {
+  background: rgba(21, 101, 128, 0.08);
+}
+
+.learning-glyph {
+  background: #5ec4bd;
+  border-radius: 50%;
+  width: 8px !important;
+  height: 8px !important;
+  margin-left: 14px;
+  margin-top: 6px;
+}
+
+.learning-inline-hint {
+  color: rgba(179, 230, 226, 0.86);
+  font-style: italic;
+}
+
 @media (max-width: 960px) {
   .chrome {
     align-items: stretch;

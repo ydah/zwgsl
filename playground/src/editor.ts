@@ -8,6 +8,16 @@ type Diagnostic = {
   severity: number;
 };
 
+type LearningAnnotation = {
+  line: number;
+  message: string;
+};
+
+export type PlaygroundEditor = monaco.editor.IStandaloneCodeEditor & {
+  setCompilerDiagnostics(diagnostics: Diagnostic[]): void;
+  setLearningAnnotations(annotations: LearningAnnotation[]): void;
+};
+
 type HoverResult = {
   detail: string;
   documentation?: string;
@@ -35,7 +45,7 @@ type DefinitionResult = {
   length: number;
 } | null;
 
-export const createEditor = async (element: HTMLElement, value: string) => {
+export const createEditor = async (element: HTMLElement, value: string): Promise<PlaygroundEditor> => {
   registerLanguage(monaco);
   const worker = new Worker(new URL("./lsp-worker.ts", import.meta.url), { type: "module" });
   let nextId = 1;
@@ -50,11 +60,13 @@ export const createEditor = async (element: HTMLElement, value: string) => {
     fontSize: 14,
     theme: "vs-dark",
     smoothScrolling: true,
+    glyphMargin: true,
     padding: { top: 20, bottom: 20 },
   });
 
   const model = editor.getModel();
-  if (!model) return editor;
+  if (!model) return withPlaygroundMethods(editor, () => undefined, () => undefined);
+  const learningDecorations = editor.createDecorationsCollection();
 
   worker.addEventListener("message", (event: MessageEvent<{ id: number; result: unknown }>) => {
     const resolve = pending.get(event.data.id);
@@ -70,12 +82,10 @@ export const createEditor = async (element: HTMLElement, value: string) => {
       worker.postMessage({ id, method, ...payload });
     });
 
-  const pushDiagnostics = async () => {
-    const diagnostics = await request<Diagnostic[]>("diagnostics", { source: model.getValue() });
-
+  const setDiagnostics = (owner: string, diagnostics: Diagnostic[]) => {
     monaco.editor.setModelMarkers(
       model,
-      "zwgsl",
+      owner,
       diagnostics.map((diagnostic) => ({
         message: diagnostic.message,
         severity:
@@ -85,9 +95,21 @@ export const createEditor = async (element: HTMLElement, value: string) => {
         startLineNumber: Math.max(1, diagnostic.line || 1),
         startColumn: Math.max(1, diagnostic.column || 1),
         endLineNumber: Math.max(1, diagnostic.line || 1),
-        endColumn: Math.max(1, (diagnostic.column || 1) + 1),
+        endColumn: markerEndColumn(diagnostic),
       })),
     );
+  };
+
+  const markerEndColumn = (diagnostic: Diagnostic) => {
+    const line = Math.max(1, diagnostic.line || 1);
+    const column = Math.max(1, diagnostic.column || 1);
+    if (line > model.getLineCount()) return column + 1;
+    return Math.min(model.getLineMaxColumn(line), column + 1);
+  };
+
+  const pushDiagnostics = async () => {
+    const diagnostics = await request<Diagnostic[]>("diagnostics", { source: model.getValue() });
+    setDiagnostics("zwgsl", diagnostics);
   };
 
   let diagnosticsTimer = window.setTimeout(() => undefined, 0);
@@ -189,5 +211,35 @@ export const createEditor = async (element: HTMLElement, value: string) => {
   });
 
   await pushDiagnostics();
-  return editor;
+  return withPlaygroundMethods(
+    editor,
+    (diagnostics) => setDiagnostics("zwgsl-compile", diagnostics),
+    (annotations) => {
+      learningDecorations.set(
+        annotations.map((annotation) => ({
+          range: new monaco.Range(annotation.line, 1, annotation.line, 1),
+          options: {
+            isWholeLine: true,
+            className: "learning-line-highlight",
+            glyphMarginClassName: "learning-glyph",
+            hoverMessage: { value: annotation.message },
+            after: {
+              content: `  ${annotation.message}`,
+              inlineClassName: "learning-inline-hint",
+            },
+          },
+        })),
+      );
+    },
+  );
 };
+
+const withPlaygroundMethods = (
+  editor: monaco.editor.IStandaloneCodeEditor,
+  setCompilerDiagnostics: (diagnostics: Diagnostic[]) => void,
+  setLearningAnnotations: (annotations: LearningAnnotation[]) => void,
+): PlaygroundEditor =>
+  Object.assign(editor, {
+    setCompilerDiagnostics,
+    setLearningAnnotations,
+  });
