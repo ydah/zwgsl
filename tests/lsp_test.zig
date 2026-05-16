@@ -203,6 +203,22 @@ test "lsp invalid params returns error instead of trapping" {
     try std.testing.expect(std.mem.indexOf(u8, response, "\"data\":\"Missing contentChanges[0]\"") != null);
 }
 
+test "lsp rejects negative range positions instead of trapping" {
+    var state = handler.State.init(std.testing.allocator);
+    defer state.deinit();
+
+    const response = (try handler.handle(
+        std.testing.allocator,
+        &state,
+        "{\"jsonrpc\":\"2.0\",\"id\":11,\"method\":\"textDocument/didChange\",\"params\":{\"textDocument\":{\"uri\":\"file:///shader.zw\"},\"contentChanges\":[{\"range\":{\"start\":{\"line\":-1,\"character\":0},\"end\":{\"line\":0,\"character\":0}},\"text\":\"uniform :mvp, Mat4\\n\"}]}}",
+    )).?;
+    defer std.testing.allocator.free(response);
+
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"id\":11") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"code\":-32602") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"data\":\"contentChanges[0].range must include start and end positions\"") != null);
+}
+
 test "lsp didChange applies incremental and full text changes" {
     var state = handler.State.init(std.testing.allocator);
     defer state.deinit();

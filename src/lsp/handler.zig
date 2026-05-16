@@ -344,7 +344,13 @@ fn nestedU32(root: std.json.Value, path: []const []const u8) ?u32 {
         };
     }
     return switch (current) {
-        .integer => |value| @intCast(value),
+        .integer => |value| integerToU32(value),
         else => null,
     };
+}
+
+fn integerToU32(value: i64) ?u32 {
+    if (value < 0) return null;
+    if (value > std.math.maxInt(u32)) return null;
+    return @intCast(value);
 }
