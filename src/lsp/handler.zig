@@ -296,18 +296,42 @@ fn offsetForPosition(source: []const u8, target_line: u32, target_character: u32
     var character: u32 = 0;
     var index: usize = 0;
 
-    while (index < source.len) : (index += 1) {
+    while (index < source.len) {
         if (line == target_line and character == target_character) return index;
         if (source[index] == '\n') {
             line += 1;
             character = 0;
+            index += 1;
         } else {
-            character += 1;
+            const scalar = utf8ScalarAt(source, index) orelse return null;
+            const next_character = character + scalar.utf16_units;
+            if (line == target_line and target_character < next_character) return null;
+            character = next_character;
+            index += scalar.byte_len;
         }
     }
 
     if (line == target_line and character == target_character) return source.len;
     return null;
+}
+
+const Utf8Scalar = struct {
+    byte_len: usize,
+    utf16_units: u32,
+};
+
+fn utf8ScalarAt(source: []const u8, index: usize) ?Utf8Scalar {
+    const first = source[index];
+    if (first < 0x80) return .{ .byte_len = 1, .utf16_units = 1 };
+
+    const byte_len = std.unicode.utf8ByteSequenceLength(first) catch return null;
+    const end = index + @as(usize, byte_len);
+    if (end > source.len) return null;
+    const codepoint = std.unicode.utf8Decode(source[index..end]) catch return null;
+    return .{
+        .byte_len = @as(usize, byte_len),
+        .utf16_units = if (codepoint > 0xFFFF) 2 else 1,
+    };
 }
 
 fn contentChangeErrorMessage(err: anyerror) []const u8 {

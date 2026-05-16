@@ -257,6 +257,27 @@ test "lsp didChange applies incremental and full text changes" {
     try std.testing.expectEqualStrings("uniform :view, Mat4\n", state.store.get("file:///shader.zw").?);
 }
 
+test "lsp didChange uses UTF-16 character offsets" {
+    var state = handler.State.init(std.testing.allocator);
+    defer state.deinit();
+
+    const open_response = (try handler.handle(
+        std.testing.allocator,
+        &state,
+        "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file:///shader.zw\",\"text\":\"uniform :caf\\u00e9, Float\\n\"}}}",
+    )).?;
+    defer std.testing.allocator.free(open_response);
+
+    const change_response = (try handler.handle(
+        std.testing.allocator,
+        &state,
+        "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didChange\",\"params\":{\"textDocument\":{\"uri\":\"file:///shader.zw\"},\"contentChanges\":[{\"range\":{\"start\":{\"line\":0,\"character\":13},\"end\":{\"line\":0,\"character\":13}},\"text\":\"X\"}]}}",
+    )).?;
+    defer std.testing.allocator.free(change_response);
+
+    try std.testing.expectEqualStrings("uniform :caf\xc3\xa9X, Float\n", state.store.get("file:///shader.zw").?);
+}
+
 test "lsp hover returns builtin and inferred type information" {
     const source =
         \\vertex do
