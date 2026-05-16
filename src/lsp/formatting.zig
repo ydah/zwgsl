@@ -2,7 +2,10 @@ const std = @import("std");
 const formatter = @import("../formatter.zig");
 
 pub fn response(allocator: std.mem.Allocator, source: []const u8) ![]u8 {
-    const formatted = try formatter.format(allocator, source, .{});
+    const formatted = formatter.formatChecked(allocator, source, .{}) catch |err| switch (err) {
+        error.FormattedSourceInvalid => return try allocator.dupe(u8, "[]"),
+        else => return err,
+    };
     defer allocator.free(formatted);
 
     if (std.mem.eql(u8, source, formatted)) {

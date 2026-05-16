@@ -1,9 +1,25 @@
 const std = @import("std");
+const diagnostics = @import("diagnostics.zig");
+const lexer = @import("lexer.zig");
+const parser = @import("parser.zig");
+const string_pool = @import("string_pool.zig");
 
 pub const Options = struct {
     indent_size: usize = 2,
     final_newline: bool = true,
 };
+
+pub const FormatError = error{
+    FormattedSourceInvalid,
+};
+
+pub fn formatChecked(allocator: std.mem.Allocator, source: []const u8, options: Options) ![]u8 {
+    const formatted = try format(allocator, source, options);
+    errdefer allocator.free(formatted);
+
+    if (!try syntaxValid(allocator, formatted)) return FormatError.FormattedSourceInvalid;
+    return formatted;
+}
 
 pub fn format(allocator: std.mem.Allocator, source: []const u8, options: Options) ![]u8 {
     var buffer = try std.ArrayList(u8).initCapacity(allocator, source.len + 1);
@@ -24,11 +40,12 @@ pub fn format(allocator: std.mem.Allocator, source: []const u8, options: Options
             }
         } else {
             previous_blank = false;
-            if (dedentsBefore(line) and indent > 0) indent -= 1;
+            const syntax = syntaxPortion(line);
+            if (dedentsBefore(syntax) and indent > 0) indent -= 1;
             try appendIndent(allocator, &buffer, indent * options.indent_size);
             try buffer.appendSlice(allocator, line);
             try buffer.append(allocator, '\n');
-            if (indentsAfter(line)) indent += 1;
+            if (indentsAfter(syntax)) indent += 1;
         }
 
         if (end == source.len) break;
@@ -39,6 +56,23 @@ pub fn format(allocator: std.mem.Allocator, source: []const u8, options: Options
         _ = buffer.pop();
     }
     return try buffer.toOwnedSlice(allocator);
+}
+
+fn syntaxValid(allocator: std.mem.Allocator, source: []const u8) !bool {
+    var arena_state = std.heap.ArenaAllocator.init(allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var pool = string_pool.StringPool.init(arena);
+    defer pool.deinit();
+
+    const tokens = try lexer.Lexer.tokenizeResolvedWithPool(arena, &pool, source);
+    var diagnostic_list = diagnostics.DiagnosticList.init(arena);
+    defer diagnostic_list.deinit();
+
+    var syntax_parser = parser.Parser.initWithPool(arena, &pool, source, tokens, &diagnostic_list);
+    _ = try syntax_parser.parseProgram();
+    return diagnostic_list.items.items.len == 0;
 }
 
 fn appendIndent(allocator: std.mem.Allocator, buffer: *std.ArrayList(u8), count: usize) !void {
@@ -73,6 +107,30 @@ fn indentsAfter(line: []const u8) bool {
 fn hasBlockDo(line: []const u8) bool {
     if (hasTrailingWord(line, "do")) return true;
     return std.mem.indexOf(u8, line, " do |") != null;
+}
+
+fn syntaxPortion(line: []const u8) []const u8 {
+    var in_string = false;
+    var escaped = false;
+    for (line, 0..) |byte, index| {
+        if (in_string) {
+            if (escaped) {
+                escaped = false;
+            } else if (byte == '\\') {
+                escaped = true;
+            } else if (byte == '"') {
+                in_string = false;
+            }
+            continue;
+        }
+
+        if (byte == '"') {
+            in_string = true;
+            continue;
+        }
+        if (byte == '#') return std.mem.trim(u8, line[0..index], " \t\r");
+    }
+    return line;
 }
 
 fn hasLeadingWord(line: []const u8, word: []const u8) bool {

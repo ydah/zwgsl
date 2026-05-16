@@ -83,7 +83,13 @@ fn run(allocator: std.mem.Allocator) !u8 {
     const source = try std.fs.cwd().readFileAlloc(arena, options.input_path, max_source_bytes);
 
     if (options.command == .fmt) {
-        const formatted = try zwgsl.formatter.format(arena, source, .{});
+        const formatted = zwgsl.formatter.formatChecked(arena, source, .{}) catch |err| switch (err) {
+            error.FormattedSourceInvalid => {
+                try stderr.print("zwgsl fmt: formatted source failed syntax validation\n", .{});
+                return 1;
+            },
+            else => return err,
+        };
         switch (options.format_mode) {
             .stdout => {
                 try stdout.writeAll(formatted);

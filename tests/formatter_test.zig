@@ -58,3 +58,39 @@ test "formatter handles where and match arms" {
 
     try std.testing.expectEqualStrings(expected, formatted);
 }
+
+test "formatter reads block markers before trailing comments" {
+    const source =
+        \\vertex do # stage comment
+        \\def main # function comment
+        \\gl_Position = vec4(0.0)
+        \\end
+        \\end
+    ;
+    const expected =
+        \\vertex do # stage comment
+        \\  def main # function comment
+        \\    gl_Position = vec4(0.0)
+        \\  end
+        \\end
+        \\
+    ;
+
+    const formatted = try zwgsl.formatter.formatChecked(std.testing.allocator, source, .{});
+    defer std.testing.allocator.free(formatted);
+
+    try std.testing.expectEqualStrings(expected, formatted);
+}
+
+test "formatter rejects source that remains invalid after formatting" {
+    const source =
+        \\fragment do
+        \\  def main
+        \\    frag_color = vec4(1.0)
+    ;
+
+    try std.testing.expectError(
+        error.FormattedSourceInvalid,
+        zwgsl.formatter.formatChecked(std.testing.allocator, source, .{}),
+    );
+}
