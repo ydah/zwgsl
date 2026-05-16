@@ -9,6 +9,7 @@ const Command = enum {
     fmt,
     lsp,
     playground,
+    source_map,
 };
 
 const FormatMode = enum {
@@ -106,8 +107,8 @@ fn run(allocator: std.mem.Allocator) !u8 {
     }
 
     const output = try zwgsl.compiler.compile(arena, source, .{
-        .target = options.target,
-        .emit_debug_comments = if (options.emit_debug_comments) 1 else 0,
+        .target = if (options.command == .source_map) .wgsl else options.target,
+        .emit_debug_comments = if (options.command == .source_map or options.emit_debug_comments) 1 else 0,
         .optimize_output = if (options.optimize_output) 1 else 0,
     });
 
@@ -137,6 +138,11 @@ fn run(allocator: std.mem.Allocator) !u8 {
             }
             return 0;
         },
+        .source_map => {
+            try zwgsl.source_map.writeJson(stdout, output, sourceMapStageFilter(options.stage));
+            return 0;
+        },
+        .fmt, .lsp, .playground => unreachable,
     }
 }
 
@@ -245,7 +251,7 @@ fn parseArgs(
     }
 
     switch (options.command) {
-        .compile, .check, .fmt => {
+        .compile, .check, .fmt, .source_map => {
             if (input_path) |path| {
                 options.input_path = path;
             } else {
@@ -269,6 +275,10 @@ fn parseArgs(
         try writeUsageError(stderr, "fmt does not accept --output", .{});
         return .{ .exit_code = 2 };
     }
+    if (options.command == .source_map and options.output_path != null) {
+        try writeUsageError(stderr, "source-map does not accept --output", .{});
+        return .{ .exit_code = 2 };
+    }
 
     return .{ .options = options };
 }
@@ -279,6 +289,7 @@ fn parseCommand(value: []const u8) ?Command {
     if (std.mem.eql(u8, value, "fmt")) return .fmt;
     if (std.mem.eql(u8, value, "lsp")) return .lsp;
     if (std.mem.eql(u8, value, "playground")) return .playground;
+    if (std.mem.eql(u8, value, "source-map")) return .source_map;
     return null;
 }
 
@@ -296,6 +307,15 @@ fn parseStage(value: []const u8) ?Stage {
     if (std.mem.eql(u8, value, "fragment")) return .fragment;
     if (std.mem.eql(u8, value, "compute")) return .compute;
     return null;
+}
+
+fn sourceMapStageFilter(stage: Stage) zwgsl.source_map.StageFilter {
+    return switch (stage) {
+        .all => .all,
+        .vertex => .vertex,
+        .fragment => .fragment,
+        .compute => .compute,
+    };
 }
 
 fn isHelp(value: []const u8) bool {
@@ -388,6 +408,7 @@ fn writeUsage(writer: anytype) !void {
         \\  zwgsl fmt [--check|--write] <input.zw>
         \\  zwgsl lsp
         \\  zwgsl playground
+        \\  zwgsl source-map [--stage <all|vertex|fragment|compute>] <input.zw>
         \\
         \\Options:
         \\  --target <wgsl|glsl-es-300>  Output target (default: wgsl)
@@ -501,6 +522,25 @@ test "CLI parses lsp without input path" {
 
     try std.testing.expectEqual(Command.lsp, parsed.options.command);
     try std.testing.expectEqualStrings("", parsed.options.input_path);
+}
+
+test "CLI parses source-map stage selection" {
+    const args = [_][:0]const u8{
+        "zwgsl",
+        "source-map",
+        "--stage",
+        "fragment",
+        "shader.zw",
+    };
+    var stderr = TestWriter{};
+    var stdout = TestWriter{};
+
+    const parsed = try parseArgs(args[0..], &stderr, &stdout);
+    const options = parsed.options;
+
+    try std.testing.expectEqual(Command.source_map, options.command);
+    try std.testing.expectEqual(Stage.fragment, options.stage);
+    try std.testing.expectEqualStrings("shader.zw", options.input_path);
 }
 
 test "CLI diagnostics include source context" {

@@ -1,0 +1,25 @@
+{
+  "name": "@zwgsl/compiler",
+  "version": "0.1.0",
+  "description": "Wasm compiler package for zwgsl",
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./zwgsl.wasm": "./dist/zwgsl.wasm"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ydah/zwgsl.git",
+    "directory": "packages/compiler"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

@@ -280,10 +280,13 @@ zig build -Doptimize=ReleaseFast
 ```sh
 zig build test
 bash script/validate_generated_wgsl.sh
+zig build benchmark
 ```
 
 `script/validate_generated_wgsl.sh` validates generated WGSL fixtures when
 `naga`, `tint`, or `WGSL_VALIDATOR` is available.
+`zig build benchmark` prints CSV compile-time measurements for representative
+examples.
 
 ### CLI
 
@@ -292,12 +295,15 @@ zig build
 zig-out/bin/zwgsl compile --target wgsl examples/hello_triangle.zw
 zig-out/bin/zwgsl check examples/hello_triangle.zw
 zig-out/bin/zwgsl fmt --check examples/hello_triangle.zw
+zig-out/bin/zwgsl source-map --stage vertex examples/hello_triangle.zw
 zig-out/bin/zwgsl lsp
 ```
 
 Use `--target glsl-es-300` for GLSL ES 3.0 output, `--stage` to select a
 single generated stage, and `-o` / `--output` to write compile output to a file.
 Use `zwgsl fmt --write <input.zw>` to rewrite a source file in place.
+Use `zwgsl source-map` to emit a JSON mapping from generated WGSL lines back to
+source lines when debugging output.
 
 ### Browser Wasm Build
 
@@ -317,6 +323,10 @@ That installs `zig-out/bin/zwgsl.wasm`, which the playground syncs into
 - `zig-out/include/zwgsl.h`
 - `zig-out/bin/zwgsl`
 - `zig-out/bin/zwgsl-lsp`
+
+The repository also includes a `Dockerfile`, a Homebrew formula template under
+`packaging/homebrew/`, and an npm compiler package scaffold under
+`packages/compiler/`.
 
 ## C API
 

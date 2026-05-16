@@ -20,6 +20,7 @@ pub const parser = @import("parser.zig");
 pub const sema = @import("sema.zig");
 pub const mir = @import("mir.zig");
 pub const mir_builder = @import("mir_builder.zig");
+pub const source_map = @import("source_map.zig");
 pub const string_pool = @import("string_pool.zig");
 pub const token = @import("token.zig");
 pub const typeclass = @import("typeclass.zig");

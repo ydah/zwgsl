@@ -19,6 +19,7 @@ test "package manifests match zwgsl_version" {
     try expectBuildZonVersion(allocator, expected);
     try expectPackageVersion(allocator, "playground/package.json", expected);
     try expectPackageVersion(allocator, "editors/vscode/package.json", expected);
+    try expectPackageVersion(allocator, "packages/compiler/package.json", expected);
     try expectPackageLockVersion(allocator, "playground/package-lock.json", expected);
 }
 

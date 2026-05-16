@@ -119,4 +119,23 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run all tests");
     test_step.dependOn(&run_tests.step);
     test_step.dependOn(&run_cli_tests.step);
+
+    const benchmark = b.addExecutable(.{
+        .name = "zwgsl-compile-benchmark",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("benchmarks/compile_time.zig"),
+            .imports = &.{
+                .{
+                    .name = "zwgsl",
+                    .module = lib_module,
+                },
+            },
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        }),
+    });
+    const run_benchmark = b.addRunArtifact(benchmark);
+    const benchmark_step = b.step("benchmark", "Measure compile time for representative shaders");
+    benchmark_step.dependOn(&run_benchmark.step);
 }

@@ -1,0 +1,37 @@
+class Zwgsl < Formula
+  desc "Ruby-inspired shading language that compiles to WGSL and GLSL ES 3.0"
+  homepage "https://github.com/ydah/zwgsl"
+  version "0.1.0"
+  license "MIT"
+
+  on_macos do
+    if Hardware::CPU.arm?
+      url "https://github.com/ydah/zwgsl/releases/download/v#{version}/zwgsl-#{version}-macos-aarch64.tar.gz"
+      sha256 "REPLACE_WITH_RELEASE_SHA256"
+    else
+      url "https://github.com/ydah/zwgsl/releases/download/v#{version}/zwgsl-#{version}-macos-x86_64.tar.gz"
+      sha256 "REPLACE_WITH_RELEASE_SHA256"
+    end
+  end
+
+  on_linux do
+    if Hardware::CPU.arm?
+      url "https://github.com/ydah/zwgsl/releases/download/v#{version}/zwgsl-#{version}-linux-aarch64.tar.gz"
+      sha256 "REPLACE_WITH_RELEASE_SHA256"
+    else
+      url "https://github.com/ydah/zwgsl/releases/download/v#{version}/zwgsl-#{version}-linux-x86_64.tar.gz"
+      sha256 "REPLACE_WITH_RELEASE_SHA256"
+    end
+  end
+
+  def install
+    bin.install "bin/zwgsl"
+    bin.install "bin/zwgsl-lsp"
+    include.install "include/zwgsl.h"
+    lib.install Dir["lib/*"]
+  end
+
+  test do
+    assert_match "zwgsl", shell_output("#{bin}/zwgsl --version")
+  end
+end

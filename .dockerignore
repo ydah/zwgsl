@@ -1,0 +1,8 @@
+.git
+zig-cache
+zig-out
+playground/dist
+playground/node_modules
+editors/vscode/node_modules
+node_modules
+npm-debug.log

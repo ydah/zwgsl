@@ -38,6 +38,7 @@ Legend:
 | Vector `each` loops | Yes | Yes | Diagnostics | Yes |
 | `N.times` loops | Yes | Yes | Diagnostics | Yes |
 | Source formatting | Source rewrite | Source rewrite | Document formatting | No |
+| Generated source maps | JSON line mapping | N/A | N/A | No |
 | Debug comments in output | Yes | Yes | N/A | Via wasm API option only |
 | Optimized output formatting | Yes | Yes | N/A | Via wasm API option only |
 
@@ -65,12 +66,16 @@ Legend:
 | --- | --- |
 | Native library | Static and shared `libzwgsl` artifacts are installed by `zig build`. |
 | C API | `zwgsl_compile`, `zwgsl_free`, `zwgsl_version`, `zwgsl_abi_version`, and `zwgsl_options_default` are exposed in `include/zwgsl.h`. |
-| CLI | `zwgsl compile`, `zwgsl check`, `zwgsl fmt`, `zwgsl lsp`, and `zwgsl playground` are available as `zig-out/bin/zwgsl`. |
+| CLI | `zwgsl compile`, `zwgsl check`, `zwgsl fmt`, `zwgsl source-map`, `zwgsl lsp`, and `zwgsl playground` are available as `zig-out/bin/zwgsl`. |
 | LSP server | `zwgsl-lsp` supports diagnostics, hover, completion, signature help, code actions, goto-definition, document symbols, formatting, rename, and semantic tokens. |
 | Browser wasm | `zig build wasm` emits `zig-out/bin/zwgsl.wasm`. |
 | Playground | Monaco editor, compiler-backed diagnostics and language features, WGSL output tabs with resource layout, URL-addressable sample/share links, and WebGPU preview with generated controls and texture upload. |
 | CI | Zig formatting, Zig tests, optional generated WGSL validation, native build, wasm build, and playground build run in GitHub Actions. |
 | Releases | Version tags package Linux x86_64 CLI, LSP, C library/header, and wasm artifacts with checksums. |
+| Benchmarks | `zig build benchmark` reports compile-time CSV for representative shaders. |
+| Docker | A repository `Dockerfile` builds and packages the CLI, LSP, C headers/libraries, wasm, and playground. |
+| Homebrew | `packaging/homebrew/` contains a release-asset formula template for a tap. |
+| npm package | `packages/compiler/` stages metadata for a future `@zwgsl/compiler` wasm package. |
 
 ## Target Compatibility Notes
 
