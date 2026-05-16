@@ -2,7 +2,7 @@ import "./styles.css";
 
 import { createEditor } from "./editor";
 import { createCompiler, type CompileResult } from "./compiler";
-import { defaultExample, exampleSources } from "./examples";
+import { defaultExample, exampleSources, type ExampleSource } from "./examples";
 import { createPreview } from "./preview";
 import { hasResourceLayout, renderResourceLayout } from "./resource-layout";
 
@@ -18,6 +18,8 @@ const copyDiagnosticsButton = document.querySelector<HTMLButtonElement>("#copy-d
 const shareSourceButton = document.querySelector<HTMLButtonElement>("#share-source-button")!;
 const downloadSourceButton = document.querySelector<HTMLButtonElement>("#download-source-button")!;
 const downloadWgslButton = document.querySelector<HTMLButtonElement>("#download-wgsl-button")!;
+const exampleGallery = document.querySelector<HTMLElement>("#example-gallery")!;
+const tutorialSteps = document.querySelector<HTMLElement>("#tutorial-steps")!;
 const outputTabButtons = Array.from(
   document.querySelectorAll<HTMLButtonElement>("[data-output-tab]"),
 );
@@ -42,6 +44,13 @@ type OutputTab = "all" | "vertex" | "fragment" | "compute" | "diagnostics" | "re
 
 const sampleQueryKey = "sample";
 const sourceQueryKey = "source";
+const tutorialSampleIds = [
+  "hello-triangle",
+  "animated-uniforms",
+  "phong",
+  "postprocess",
+  "adt-match",
+] as const;
 
 const sampleIdFromLocation = () => new URLSearchParams(window.location.search).get(sampleQueryKey);
 const sourceParamFromLocation = () => new URLSearchParams(window.location.search).get(sourceQueryKey);
@@ -203,6 +212,76 @@ const updateActionButtons = () => {
 
 const selectedSampleId = () => (sampleSelect.value === "custom" ? "custom" : sampleSelect.value);
 
+const updateSampleButtons = () => {
+  const selected = selectedSampleId();
+  for (const button of document.querySelectorAll<HTMLButtonElement>("[data-sample-id]")) {
+    button.setAttribute("aria-pressed", button.dataset.sampleId === selected ? "true" : "false");
+  }
+};
+
+const loadExample = (example: ExampleSource, trigger: CompileTrigger) => {
+  isLoadingSample = true;
+  editor.setValue(example.source);
+  isLoadingSample = false;
+  sampleSelect.value = example.id;
+  updateSampleUrl(example.id);
+  updateSampleButtons();
+
+  window.clearTimeout(compileTimer);
+  requestCompile(trigger);
+};
+
+const renderExampleGallery = () => {
+  const fragment = document.createDocumentFragment();
+
+  for (const example of exampleSources) {
+    const card = document.createElement("button");
+    card.className = "example-card";
+    card.type = "button";
+    card.dataset.sampleId = example.id;
+
+    const title = document.createElement("strong");
+    title.textContent = example.label;
+    const summary = document.createElement("span");
+    summary.textContent = example.summary;
+    const tags = document.createElement("small");
+    tags.textContent = example.tags.join(" / ");
+
+    card.append(title, summary, tags);
+    card.addEventListener("click", () => loadExample(example, "sample"));
+    fragment.append(card);
+  }
+
+  exampleGallery.replaceChildren(fragment);
+};
+
+const renderTutorialSteps = () => {
+  const fragment = document.createDocumentFragment();
+
+  for (const [index, sampleId] of tutorialSampleIds.entries()) {
+    const example = findSample(sampleId);
+    if (!example) continue;
+
+    const step = document.createElement("button");
+    step.className = "tutorial-step";
+    step.type = "button";
+    step.dataset.sampleId = example.id;
+
+    const number = document.createElement("span");
+    number.textContent = String(index + 1).padStart(2, "0");
+    const label = document.createElement("strong");
+    label.textContent = example.label;
+    const summary = document.createElement("small");
+    summary.textContent = example.summary;
+
+    step.append(number, label, summary);
+    step.addEventListener("click", () => loadExample(example, "sample"));
+    fragment.append(step);
+  }
+
+  tutorialSteps.replaceChildren(fragment);
+};
+
 const downloadText = (filename: string, contents: string, type: string) => {
   const blob = new Blob([contents], { type });
   const url = URL.createObjectURL(blob);
@@ -312,6 +391,7 @@ editor.onDidChangeModelContent(() => {
   if (!isLoadingSample) {
     sampleSelect.value = "custom";
     updateSampleUrl(null);
+    updateSampleButtons();
   }
   compileTimer = window.setTimeout(() => requestCompile("edit"), 300);
 });
@@ -335,6 +415,7 @@ shareSourceButton.addEventListener("click", async () => {
   const url = shareUrlForSource(editor.getValue());
   window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
   sampleSelect.value = "custom";
+  updateSampleButtons();
   await copyText(url.toString());
   flashButtonLabel(shareSourceButton, "Copied");
 });
@@ -359,21 +440,18 @@ for (const button of outputTabButtons) {
 sampleSelect.addEventListener("change", () => {
   if (sampleSelect.value === "custom") {
     updateSampleUrl(null);
+    updateSampleButtons();
     return;
   }
 
   const example = exampleSources.find((entry) => entry.id === sampleSelect.value);
   if (!example) return;
-
-  isLoadingSample = true;
-  editor.setValue(example.source);
-  isLoadingSample = false;
-  updateSampleUrl(example.id);
-
-  window.clearTimeout(compileTimer);
-  requestCompile("sample");
+  loadExample(example, "sample");
 });
 
+renderExampleGallery();
+renderTutorialSteps();
 updateActionButtons();
+updateSampleButtons();
 requestCompile("initial");
 await compileLoop;

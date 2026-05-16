@@ -36,6 +36,8 @@ end
 export type ExampleSource = {
   id: string;
   label: string;
+  summary: string;
+  tags: string[];
   source: string;
 };
 
@@ -43,41 +45,57 @@ export const exampleSources = [
   {
     id: "animated-uniforms",
     label: "Animated Uniforms",
+    summary: "Uniform controls and animated fragment output.",
+    tags: ["uniform", "fragment", "preview"],
     source: animatedUniformsSource,
   },
   {
     id: "hello-triangle",
     label: "Hello Triangle",
+    summary: "Minimal vertex/fragment pipeline.",
+    tags: ["vertex", "fragment"],
     source: helloTriangleSource,
   },
   {
     id: "phong",
     label: "Phong Lighting",
+    summary: "Varyings, helper functions, and lighting math.",
+    tags: ["lighting", "varying"],
     source: phongSource,
   },
   {
     id: "pbr",
     label: "PBR",
+    summary: "Structs and reusable shading helpers.",
+    tags: ["pbr", "struct"],
     source: pbrSource,
   },
   {
     id: "postprocess",
     label: "Postprocess",
+    summary: "Texture sampling and fullscreen preview.",
+    tags: ["texture", "sampler"],
     source: postprocessSource,
   },
   {
     id: "utah-teapot",
     label: "Utah Teapot",
+    summary: "Larger procedural shader with where bindings.",
+    tags: ["sdf", "where"],
     source: utahTeapotSource,
   },
   {
     id: "dependent-dimensions",
     label: "Dependent Dimensions",
+    summary: "Compile-time vector dimension checks.",
+    tags: ["compute", "types"],
     source: dependentDimSource,
   },
   {
     id: "adt-match",
     label: "ADT Match",
+    summary: "Algebraic data types and pattern matching.",
+    tags: ["adt", "match"],
     source: matchShapeSource,
   },
 ] satisfies ExampleSource[];

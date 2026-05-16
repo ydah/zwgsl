@@ -367,6 +367,106 @@ button[aria-busy="true"]:disabled {
   cursor: progress;
 }
 
+.guide-panel {
+  grid-template-rows: auto auto;
+}
+
+.example-gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+  padding: 12px;
+}
+
+.example-card,
+.tutorial-step {
+  display: grid;
+  gap: 5px;
+  min-height: 0;
+  padding: 10px;
+  border: 1px solid rgba(29, 26, 22, 0.1);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.68);
+  color: var(--ink);
+  text-align: left;
+}
+
+.example-card:hover,
+.tutorial-step:hover {
+  border-color: rgba(21, 101, 128, 0.32);
+  background: rgba(242, 250, 249, 0.86);
+}
+
+.example-card[aria-pressed="true"],
+.tutorial-step[aria-pressed="true"] {
+  border-color: rgba(21, 101, 128, 0.46);
+  background: rgba(225, 244, 241, 0.92);
+}
+
+.example-card strong,
+.tutorial-step strong {
+  font-size: 0.9rem;
+}
+
+.example-card span,
+.example-card small,
+.tutorial-step small {
+  color: var(--muted);
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
+.tutorial-steps {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+  padding: 12px;
+}
+
+.tutorial-step {
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-items: start;
+}
+
+.tutorial-step span {
+  grid-row: span 2;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: rgba(21, 101, 128, 0.12);
+  color: #156580;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+.tutorial-step small {
+  grid-column: 2;
+}
+
+.compute-preview-state {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid rgba(21, 101, 128, 0.26);
+  border-radius: 8px;
+  background: rgba(225, 244, 241, 0.82);
+  color: var(--ink);
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.compute-preview-state strong,
+.compute-preview-state p {
+  margin: 0;
+}
+
+.compute-preview-state p {
+  color: var(--muted);
+}
+
 @media (max-width: 960px) {
   .chrome {
     align-items: stretch;
@@ -401,6 +501,10 @@ button[aria-busy="true"]:disabled {
 
   .grid {
     grid-template-columns: 1fr;
+  }
+
+  .tutorial-steps {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .preview-shell {

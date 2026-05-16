@@ -112,6 +112,26 @@ fn main() -> @location(0) vec4f {
 }
 `;
 
+const computePreviewFragmentShader = (source: string) => {
+  const hash = hashSource(source);
+  const red = ((hash & 0xff) / 255).toFixed(6);
+  const green = (((hash >>> 8) & 0xff) / 255).toFixed(6);
+  const blue = (((hash >>> 16) & 0xff) / 255).toFixed(6);
+  const phase = ((hash % 628) / 100).toFixed(3);
+  const frequency = (0.014 + ((hash >>> 24) / 255) * 0.018).toFixed(6);
+
+  return `
+@fragment
+fn main(@builtin(position) position: vec4f) -> @location(0) vec4f {
+  let wave = 0.5 + 0.5 * sin((position.x + position.y * 0.7) * ${frequency} + ${phase});
+  let stripe = select(0.16, 1.0, wave > 0.58);
+  let base = vec3f(${red}, ${green}, ${blue});
+  let accent = vec3f(0.12, 0.22, 0.34);
+  return vec4f(base * stripe + accent * (1.0 - stripe), 1.0);
+}
+`;
+};
+
 const previewFullscreenPositions = [
   [-1, -1, 0, 1],
   [3, -1, 0, 1],
@@ -141,6 +161,15 @@ const previewColors = [
   [0.18, 0.64, 1, 1],
   [1, 0.82, 0.24, 1],
 ] as const;
+
+const hashSource = (source: string) => {
+  let hash = 2166136261;
+  for (let index = 0; index < source.length; index += 1) {
+    hash ^= source.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+};
 
 const describeErrorMessage = (error: unknown) => {
   if (error instanceof Error && error.message) return error.message;
@@ -243,16 +272,17 @@ export const createPreview = async (
 
   const ensureState = async (result: CompileResult) => {
     const currentVersion = ++buildVersion;
-
-    if (result.compute && !result.vertex && !result.fragment) {
-      status.textContent = "compute only";
-      controlsRoot.replaceChildren(makeEmptyState("Compute shaders do not have a preview surface."));
-      return activeState;
-    }
-
+    const computeOnly = Boolean(result.compute && !result.vertex && !result.fragment);
+    const computeSource = result.compute ?? "";
     const vertexSource = result.vertex?.includes("@vertex") ? result.vertex : fallbackVertexShader;
-    const fragmentSource = result.fragment?.includes("@fragment") ? result.fragment : fallbackFragmentShader;
-    const nextKey = `${vertexSource}\n// ---\n${fragmentSource}`;
+    const fragmentSource = computeOnly
+      ? computePreviewFragmentShader(computeSource)
+      : result.fragment?.includes("@fragment")
+        ? result.fragment
+        : fallbackFragmentShader;
+    const nextKey = computeOnly
+      ? `${vertexSource}\n// --- compute preview ---\n${computeSource}`
+      : `${vertexSource}\n// ---\n${fragmentSource}`;
 
     if (activeState?.key === nextKey) {
       return activeState;
@@ -267,13 +297,18 @@ export const createPreview = async (
     try {
       const vertexModule = device.createShaderModule({ code: vertexSource });
       const fragmentModule = device.createShaderModule({ code: fragmentSource });
+      const computeModule = computeOnly ? device.createShaderModule({ code: computeSource }) : null;
       const vertexErrors = await collectShaderModuleErrors(vertexModule, "vertex");
       const fragmentErrors = await collectShaderModuleErrors(fragmentModule, "fragment");
+      const computeErrors = computeModule
+        ? await collectShaderModuleErrors(computeModule, "compute")
+        : [];
 
-      if (vertexErrors.length > 0 || fragmentErrors.length > 0) {
+      if (vertexErrors.length > 0 || fragmentErrors.length > 0 || computeErrors.length > 0) {
         throw new PreviewPipelineError(shaderValidationFailure, [
           ...vertexErrors,
           ...fragmentErrors,
+          ...computeErrors,
         ]);
       }
 
@@ -330,9 +365,14 @@ export const createPreview = async (
         destroyVertexPreview(activeState.vertex);
       }
 
-      renderControls(device, controlsRoot, uniformStates, textureStates);
-      status.textContent =
-        vertexState.profile === "triangle"
+      if (computeOnly) {
+        controlsRoot.replaceChildren(makeComputePreviewState(computeSource));
+      } else {
+        renderControls(device, controlsRoot, uniformStates, textureStates);
+      }
+      status.textContent = computeOnly
+        ? "compute preview"
+        : vertexState.profile === "triangle"
           ? "WGSL valid • pipeline live • triangle"
           : "WGSL valid • pipeline live • fullscreen";
       return {
@@ -1005,7 +1045,10 @@ const makePreviewUnavailableState = (state: Extract<PreviewDeviceState, { availa
   return section;
 };
 
-const collectShaderModuleErrors = async (module: GPUShaderModule, stage: "vertex" | "fragment") => {
+const collectShaderModuleErrors = async (
+  module: GPUShaderModule,
+  stage: "vertex" | "fragment" | "compute",
+) => {
   const info = await module.getCompilationInfo();
   return info.messages
     .filter((message) => message.type === "error")
@@ -1042,6 +1085,22 @@ const makeEmptyState = (message: string) => {
   element.className = "uniform-empty";
   element.textContent = message;
   return element;
+};
+
+const makeComputePreviewState = (source: string) => {
+  const section = document.createElement("section");
+  section.className = "compute-preview-state";
+
+  const title = document.createElement("strong");
+  title.textContent = "Compute preview";
+  section.append(title);
+
+  const lineCount = source.split("\n").filter((line) => line.trim().length > 0).length;
+  const summary = document.createElement("p");
+  summary.textContent = `${lineCount} WGSL lines validated; deterministic swatch rendered.`;
+  section.append(summary);
+
+  return section;
 };
 
 const makeUniformCard = (state: UniformState) => {
