@@ -1,4 +1,5 @@
 const std = @import("std");
+const ast = @import("ast.zig");
 const ir = @import("ir.zig");
 const token = @import("token.zig");
 
@@ -93,6 +94,7 @@ fn emitStage(allocator: std.mem.Allocator, module: *const ir.Module, stage: ir.S
 }
 
 fn emitFunction(writer: anytype, function: ir.Function, options: EmitOptions) anyerror!void {
+    try emitLoweringDebugComment(writer, options, function.stage, function.name);
     try emitDebugComment(writer, options, function.source_line, function.source_column, 0);
     try writer.print("{s} {s}(", .{ function.return_type.glslName(), function.name });
     for (function.params, 0..) |param, index| {
@@ -301,6 +303,30 @@ fn emitDebugComment(writer: anytype, options: EmitOptions, source_line: ?u32, so
     } else {
         try writer.print("// zwgsl:{d}: {s}\n", .{ line, text });
     }
+}
+
+fn emitLoweringDebugComment(writer: anytype, options: EmitOptions, stage: ?ast.Stage, function_name: []const u8) anyerror!void {
+    if (!options.emit_debug_comments) return;
+
+    if (stage) |resolved_stage| {
+        const role = if (std.mem.eql(u8, function_name, "main")) "entry" else "function";
+        try writer.print("// zwgsl:lowering: glsl {s} {s} {s}\n", .{
+            stageName(resolved_stage),
+            role,
+            function_name,
+        });
+        return;
+    }
+
+    try writer.print("// zwgsl:lowering: glsl function {s}\n", .{function_name});
+}
+
+fn stageName(stage: ast.Stage) []const u8 {
+    return switch (stage) {
+        .vertex => "vertex",
+        .fragment => "fragment",
+        .compute => "compute",
+    };
 }
 
 fn sourceLineText(source: []const u8, line: u32) []const u8 {

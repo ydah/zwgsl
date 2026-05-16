@@ -39,7 +39,7 @@ Fields:
 | Field | Default | Meaning |
 | --- | --- | --- |
 | `target` | `ZWGSL_TARGET_GLSL_ES_300` | Selects GLSL ES 3.0 or WGSL output. |
-| `emit_debug_comments` | `0` | Includes source-oriented comments in generated output when supported. |
+| `emit_debug_comments` | `0` | Includes source-oriented and lowering comments in generated output when supported. |
 | `optimize_output` | `0` | Emits more compact generated output when supported. |
 
 Set `target` to `ZWGSL_TARGET_WGSL` for WebGPU output.

@@ -485,12 +485,13 @@ fn emitFunction(
     uniforms: []const mir.Global,
     current_functions: []const mir.Function,
 ) anyerror!void {
+    const name = if (stage != null and is_entry_main) internalMainName(stage.?) else function.name;
+    try emitLoweringDebugComment(writer, options, stage, function.name, name);
     try emitDebugComment(writer, options, function.source_line, function.source_column, 0);
 
     var function_context = try EmitFunctionContext.build(allocator, function);
     defer function_context.deinit();
 
-    const name = if (stage != null and is_entry_main) internalMainName(stage.?) else function.name;
     try writer.print("fn {s}(", .{name});
     var wrote_param = false;
     for (function.params) |param| {
@@ -1854,6 +1855,14 @@ fn internalMainName(stage: ast.Stage) []const u8 {
     };
 }
 
+fn stageName(stage: ast.Stage) []const u8 {
+    return switch (stage) {
+        .vertex => "vertex",
+        .fragment => "fragment",
+        .compute => "compute",
+    };
+}
+
 fn callName(name: []const u8, ty: types.Type) []const u8 {
     if (types.fromConstructorName(name) != null) {
         return switch (ty) {
@@ -1923,6 +1932,37 @@ fn emitDebugComment(writer: anytype, options: EmitOptions, source_line: ?u32, so
     } else {
         try writer.print("// zwgsl:{d}: {s}\n", .{ line, text });
     }
+}
+
+fn emitLoweringDebugComment(
+    writer: anytype,
+    options: EmitOptions,
+    stage: ?ast.Stage,
+    source_name: []const u8,
+    emitted_name: []const u8,
+) !void {
+    if (!options.emit_debug_comments) return;
+
+    if (stage) |resolved_stage| {
+        const role = if (std.mem.eql(u8, source_name, "main")) "entry" else "function";
+        if (std.mem.eql(u8, source_name, emitted_name)) {
+            try writer.print("// zwgsl:lowering: wgsl {s} {s} {s}\n", .{
+                stageName(resolved_stage),
+                role,
+                source_name,
+            });
+        } else {
+            try writer.print("// zwgsl:lowering: wgsl {s} {s} {s} -> {s}\n", .{
+                stageName(resolved_stage),
+                role,
+                source_name,
+                emitted_name,
+            });
+        }
+        return;
+    }
+
+    try writer.print("// zwgsl:lowering: wgsl function {s}\n", .{source_name});
 }
 
 fn sourceLineText(source: []const u8, line: u32) []const u8 {

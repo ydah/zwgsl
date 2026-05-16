@@ -303,7 +303,7 @@ fn writeUsage(writer: anytype) !void {
         \\  --target <wgsl|glsl-es-300>  Output target (default: wgsl)
         \\  --stage <all|vertex|fragment|compute>
         \\  -o, --output <path>          Write compile output to a file
-        \\  --debug-comments             Include source comments in generated output
+        \\  --debug-comments             Include source and lowering comments in generated output
         \\  --optimize-output            Emit optimized output formatting
         \\  -h, --help                   Show this help
         \\  --version                    Show version
