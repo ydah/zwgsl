@@ -16,3 +16,5 @@ playground/public/zwgsl.wasm
 playground/src/generated/zwgsl.wasm
 playground/dist/
 playground/node_modules/
+packages/compiler/dist/zwgsl.wasm
+packages/compiler/*.tgz

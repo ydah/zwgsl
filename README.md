@@ -328,6 +328,10 @@ The repository also includes a `Dockerfile`, a Homebrew formula template under
 `packaging/homebrew/`, and an npm compiler package scaffold under
 `packages/compiler/`.
 
+Tagged releases attach a Linux x86_64 CLI/LSP/library archive, a standalone
+`zwgsl.wasm` asset, and an `@zwgsl/compiler` npm package tarball with checksum
+files for each asset.
+
 ## C API
 
 See [C API](docs/c-api.md) for ABI/versioning, options, ownership, and C++

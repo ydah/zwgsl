@@ -34,7 +34,7 @@ jobs:
           echo "${GITHUB_WORKSPACE}/zig-x86_64-linux-${ZIG_VERSION}" >> "${GITHUB_PATH}"
 
       - name: Check Zig formatting
-        run: zig fmt --check build.zig build.zig.zon src tests
+        run: zig fmt --check build.zig build.zig.zon src tests benchmarks
 
       - name: Run Zig tests
         run: zig build test
@@ -53,6 +53,13 @@ jobs:
 
       - name: Build wasm artifact
         run: zig build wasm
+
+      - name: Check npm compiler package
+        working-directory: packages/compiler
+        run: |
+          cp ../../zig-out/bin/zwgsl.wasm dist/zwgsl.wasm
+          npm run check
+          npm pack --dry-run
 
       - name: Install playground dependencies
         working-directory: playground

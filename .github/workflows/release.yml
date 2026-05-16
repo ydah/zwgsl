@@ -26,8 +26,13 @@ jobs:
           tar -xf zig.tar.xz
           echo "${GITHUB_WORKSPACE}/zig-x86_64-linux-${ZIG_VERSION}" >> "${GITHUB_PATH}"
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
       - name: Check Zig formatting
-        run: zig fmt --check build.zig build.zig.zon src tests
+        run: zig fmt --check build.zig build.zig.zon src tests benchmarks
 
       - name: Run Zig tests
         run: zig build test
@@ -47,12 +52,24 @@ jobs:
           cp zig-out/bin/zwgsl "${package_dir}/bin/"
           cp zig-out/bin/zwgsl-lsp "${package_dir}/bin/"
           cp zig-out/bin/zwgsl.wasm "${package_dir}/bin/"
+          cp zig-out/bin/zwgsl.wasm "dist/zwgsl.wasm"
           cp zig-out/include/zwgsl.h "${package_dir}/include/"
           cp zig-out/lib/libzwgsl.* "${package_dir}/lib/"
           cp README.md LICENSE "${package_dir}/"
 
           tar -czf "dist/${package_name}.tar.gz" -C dist "${package_name}"
           sha256sum "dist/${package_name}.tar.gz" > "dist/${package_name}.tar.gz.sha256"
+          sha256sum "dist/zwgsl.wasm" > "dist/zwgsl.wasm.sha256"
+
+      - name: Package npm compiler
+        working-directory: packages/compiler
+        run: |
+          cp ../../dist/zwgsl.wasm dist/zwgsl.wasm
+          npm run check
+          npm pack --pack-destination "${GITHUB_WORKSPACE}/dist"
+          for asset in "${GITHUB_WORKSPACE}"/dist/*.tgz; do
+            sha256sum "${asset}" > "${asset}.sha256"
+          done
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
@@ -60,6 +77,8 @@ jobs:
           name: release-assets
           path: |
             dist/*.tar.gz
+            dist/*.tgz
+            dist/*.wasm
             dist/*.sha256
 
   publish:
