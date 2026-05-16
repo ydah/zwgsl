@@ -1178,6 +1178,24 @@ fn emitMatrixConstructorCast(
     const target_cols = target_type.matrixCols() orelse return false;
     const target_rows = target_type.matrixRows() orelse return false;
     const source = call.args[0];
+
+    if (source.ty.isScalar()) {
+        try emitMatrixScalarConstructor(
+            writer,
+            module,
+            function_context,
+            target_type,
+            source,
+            target_cols,
+            target_rows,
+            uniforms,
+            current_functions,
+            current_params,
+            sampler_aliases,
+        );
+        return true;
+    }
+
     const source_cols = source.ty.matrixCols() orelse return false;
     const source_rows = source.ty.matrixRows() orelse return false;
 
@@ -1206,6 +1224,36 @@ fn emitMatrixConstructorCast(
     }
     try writer.writeByte(')');
     return true;
+}
+
+fn emitMatrixScalarConstructor(
+    writer: anytype,
+    module: *const mir.Module,
+    function_context: *const EmitFunctionContext,
+    target_type: types.Type,
+    source: *const mir.Value,
+    target_cols: u8,
+    target_rows: u8,
+    uniforms: []const mir.Global,
+    current_functions: []const mir.Function,
+    current_params: []const mir.Param,
+    sampler_aliases: []const SamplerAlias,
+) anyerror!void {
+    try writer.print("{s}(", .{target_type.wgslName()});
+    for (0..target_cols) |column_index| {
+        if (column_index > 0) try writer.writeAll(", ");
+        try writer.print("vec{d}f(", .{target_rows});
+        for (0..target_rows) |row_index| {
+            if (row_index > 0) try writer.writeAll(", ");
+            if (row_index == column_index) {
+                try emitValue(writer, module, function_context, source, 0, uniforms, current_functions, current_params, sampler_aliases);
+            } else {
+                try writer.writeAll("0.0");
+            }
+        }
+        try writer.writeByte(')');
+    }
+    try writer.writeByte(')');
 }
 
 fn emitMatrixConstructorColumn(
