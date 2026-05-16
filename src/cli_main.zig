@@ -6,6 +6,15 @@ const max_source_bytes = 64 * 1024 * 1024;
 const Command = enum {
     compile,
     check,
+    fmt,
+    lsp,
+    playground,
+};
+
+const FormatMode = enum {
+    stdout,
+    check,
+    write,
 };
 
 const Stage = enum {
@@ -23,6 +32,7 @@ const CliOptions = struct {
     output_path: ?[]const u8 = null,
     emit_debug_comments: bool = false,
     optimize_output: bool = false,
+    format_mode: FormatMode = .stdout,
 };
 
 const ParseResult = union(enum) {
@@ -56,11 +66,45 @@ fn run(allocator: std.mem.Allocator) !u8 {
         .exit_code => |code| return code,
     };
 
+    switch (options.command) {
+        .lsp => {
+            try zwgsl.lsp.server.main();
+            return 0;
+        },
+        .playground => return try writePlaygroundInfo(stdout),
+        else => {},
+    }
+
     var arena_state = std.heap.ArenaAllocator.init(allocator);
     defer arena_state.deinit();
     const arena = arena_state.allocator();
 
     const source = try std.fs.cwd().readFileAlloc(arena, options.input_path, max_source_bytes);
+
+    if (options.command == .fmt) {
+        const formatted = try zwgsl.formatter.format(arena, source, .{});
+        switch (options.format_mode) {
+            .stdout => {
+                try stdout.writeAll(formatted);
+                return 0;
+            },
+            .check => {
+                if (std.mem.eql(u8, source, formatted)) {
+                    try stdout.print("{s}: formatted\n", .{options.input_path});
+                    return 0;
+                }
+                try stderr.print("{s}: not formatted\n", .{options.input_path});
+                return 1;
+            },
+            .write => {
+                const file = try std.fs.cwd().createFile(options.input_path, .{ .truncate = true });
+                defer file.close();
+                try file.deprecatedWriter().writeAll(formatted);
+                return 0;
+            },
+        }
+    }
+
     const output = try zwgsl.compiler.compile(arena, source, .{
         .target = options.target,
         .emit_debug_comments = if (options.emit_debug_comments) 1 else 0,
@@ -138,6 +182,18 @@ fn parseArgs(
             options.emit_debug_comments = true;
         } else if (std.mem.eql(u8, arg, "--optimize-output")) {
             options.optimize_output = true;
+        } else if (std.mem.eql(u8, arg, "--check")) {
+            if (options.command != .fmt) {
+                try writeUsageError(stderr, "--check is only valid for fmt", .{});
+                return .{ .exit_code = 2 };
+            }
+            options.format_mode = .check;
+        } else if (std.mem.eql(u8, arg, "--write") or std.mem.eql(u8, arg, "-w")) {
+            if (options.command != .fmt) {
+                try writeUsageError(stderr, "{s} is only valid for fmt", .{arg});
+                return .{ .exit_code = 2 };
+            }
+            options.format_mode = .write;
         } else if (std.mem.eql(u8, arg, "--target")) {
             index += 1;
             if (index >= args.len) {
@@ -188,15 +244,29 @@ fn parseArgs(
         }
     }
 
-    if (input_path) |path| {
-        options.input_path = path;
-    } else {
-        try writeUsageError(stderr, "missing input file", .{});
-        return .{ .exit_code = 2 };
+    switch (options.command) {
+        .compile, .check, .fmt => {
+            if (input_path) |path| {
+                options.input_path = path;
+            } else {
+                try writeUsageError(stderr, "missing input file", .{});
+                return .{ .exit_code = 2 };
+            }
+        },
+        .lsp, .playground => {
+            if (input_path != null) {
+                try writeUsageError(stderr, "{s} does not accept an input file", .{args[1]});
+                return .{ .exit_code = 2 };
+            }
+        },
     }
 
     if (options.command == .check and options.output_path != null) {
         try writeUsageError(stderr, "check does not accept --output", .{});
+        return .{ .exit_code = 2 };
+    }
+    if (options.command == .fmt and options.output_path != null) {
+        try writeUsageError(stderr, "fmt does not accept --output", .{});
         return .{ .exit_code = 2 };
     }
 
@@ -206,6 +276,9 @@ fn parseArgs(
 fn parseCommand(value: []const u8) ?Command {
     if (std.mem.eql(u8, value, "compile")) return .compile;
     if (std.mem.eql(u8, value, "check")) return .check;
+    if (std.mem.eql(u8, value, "fmt")) return .fmt;
+    if (std.mem.eql(u8, value, "lsp")) return .lsp;
+    if (std.mem.eql(u8, value, "playground")) return .playground;
     return null;
 }
 
@@ -270,6 +343,20 @@ fn writeStage(writer: anytype, source: ?[]const u8) !bool {
     return true;
 }
 
+fn writePlaygroundInfo(writer: anytype) !u8 {
+    try writer.writeAll(
+        \\Playground:
+        \\  https://ydah.github.io/zwgsl/
+        \\
+        \\Local development:
+        \\  cd playground
+        \\  npm install
+        \\  npm run dev
+        \\
+    );
+    return 0;
+}
+
 fn writeDiagnostics(writer: anytype, path: []const u8, source: []const u8, errors: []const zwgsl.compiler.Error) !void {
     for (errors) |diagnostic| {
         try writer.print("{s}:{d}:{d}: {s}: {s}\n", .{
@@ -298,6 +385,9 @@ fn writeUsage(writer: anytype) !void {
         \\Usage:
         \\  zwgsl compile [options] <input.zw>
         \\  zwgsl check [options] <input.zw>
+        \\  zwgsl fmt [--check|--write] <input.zw>
+        \\  zwgsl lsp
+        \\  zwgsl playground
         \\
         \\Options:
         \\  --target <wgsl|glsl-es-300>  Output target (default: wgsl)
@@ -305,6 +395,8 @@ fn writeUsage(writer: anytype) !void {
         \\  -o, --output <path>          Write compile output to a file
         \\  --debug-comments             Include source and lowering comments in generated output
         \\  --optimize-output            Emit optimized output formatting
+        \\  --check                      Check formatting with zwgsl fmt
+        \\  -w, --write                  Rewrite the file with zwgsl fmt
         \\  -h, --help                   Show this help
         \\  --version                    Show version
         \\
@@ -377,6 +469,38 @@ test "CLI rejects unknown stage" {
     const parsed = try parseArgs(args[0..], &stderr, &stdout);
 
     try std.testing.expectEqual(@as(u8, 2), parsed.exit_code);
+}
+
+test "CLI parses fmt check mode" {
+    const args = [_][:0]const u8{
+        "zwgsl",
+        "fmt",
+        "--check",
+        "shader.zw",
+    };
+    var stderr = TestWriter{};
+    var stdout = TestWriter{};
+
+    const parsed = try parseArgs(args[0..], &stderr, &stdout);
+    const options = parsed.options;
+
+    try std.testing.expectEqual(Command.fmt, options.command);
+    try std.testing.expectEqual(FormatMode.check, options.format_mode);
+    try std.testing.expectEqualStrings("shader.zw", options.input_path);
+}
+
+test "CLI parses lsp without input path" {
+    const args = [_][:0]const u8{
+        "zwgsl",
+        "lsp",
+    };
+    var stderr = TestWriter{};
+    var stdout = TestWriter{};
+
+    const parsed = try parseArgs(args[0..], &stderr, &stdout);
+
+    try std.testing.expectEqual(Command.lsp, parsed.options.command);
+    try std.testing.expectEqualStrings("", parsed.options.input_path);
 }
 
 test "CLI diagnostics include source context" {

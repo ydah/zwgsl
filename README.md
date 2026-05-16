@@ -287,10 +287,13 @@ zig build test
 zig build
 zig-out/bin/zwgsl compile --target wgsl examples/hello_triangle.zw
 zig-out/bin/zwgsl check examples/hello_triangle.zw
+zig-out/bin/zwgsl fmt --check examples/hello_triangle.zw
+zig-out/bin/zwgsl lsp
 ```
 
 Use `--target glsl-es-300` for GLSL ES 3.0 output, `--stage` to select a
 single generated stage, and `-o` / `--output` to write compile output to a file.
+Use `zwgsl fmt --write <input.zw>` to rewrite a source file in place.
 
 ### Browser Wasm Build
 
@@ -355,6 +358,7 @@ Current editor-facing features:
 - code actions for common stage declaration, unused uniform, and type/constructor casing fixes
 - goto-definition for values, functions, and type declarations
 - document symbols for stages, declarations, functions, types, traits, and impls
+- document formatting through the same formatter used by `zwgsl fmt`
 - rename for resolved document-local symbols
 - semantic tokens for keywords, functions, variables, uniforms, varyings, builtins, constructors, traits, types, numbers, strings, comments, operators, and properties
 

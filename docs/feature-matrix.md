@@ -37,6 +37,7 @@ Legend:
 | `Mat(M, N)` dependent dimensions | Yes | No output coverage | Diagnostics | Yes |
 | Vector `each` loops | Yes | Yes | Diagnostics | Yes |
 | `N.times` loops | Yes | Yes | Diagnostics | Yes |
+| Source formatting | Source rewrite | Source rewrite | Document formatting | No |
 | Debug comments in output | Yes | Yes | N/A | Via wasm API option only |
 | Optimized output formatting | Yes | Yes | N/A | Via wasm API option only |
 
@@ -64,8 +65,8 @@ Legend:
 | --- | --- |
 | Native library | Static and shared `libzwgsl` artifacts are installed by `zig build`. |
 | C API | `zwgsl_compile`, `zwgsl_free`, `zwgsl_version`, `zwgsl_abi_version`, and `zwgsl_options_default` are exposed in `include/zwgsl.h`. |
-| CLI | `zwgsl compile` and `zwgsl check` are available as `zig-out/bin/zwgsl`. |
-| LSP server | `zwgsl-lsp` supports diagnostics, hover, completion, signature help, code actions, goto-definition, document symbols, rename, and semantic tokens. |
+| CLI | `zwgsl compile`, `zwgsl check`, `zwgsl fmt`, `zwgsl lsp`, and `zwgsl playground` are available as `zig-out/bin/zwgsl`. |
+| LSP server | `zwgsl-lsp` supports diagnostics, hover, completion, signature help, code actions, goto-definition, document symbols, formatting, rename, and semantic tokens. |
 | Browser wasm | `zig build wasm` emits `zig-out/bin/zwgsl.wasm`. |
 | Playground | Monaco editor, compiler-backed diagnostics and language features, WGSL output tabs with resource layout, URL-addressable sample/share links, and WebGPU preview with generated controls and texture upload. |
 | CI | Zig formatting, Zig tests, native build, wasm build, and playground build run in GitHub Actions. |

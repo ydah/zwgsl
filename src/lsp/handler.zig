@@ -4,6 +4,7 @@ const completion = @import("completion.zig");
 const diagnostics = @import("diagnostics.zig");
 const document_symbols = @import("document_symbols.zig");
 const document_store = @import("document_store.zig");
+const formatting = @import("formatting.zig");
 const goto_def = @import("goto_def.zig");
 const hover = @import("hover.zig");
 const rename = @import("rename.zig");
@@ -48,7 +49,7 @@ pub fn handle(allocator: std.mem.Allocator, state: *State, message: []const u8) 
     const params = root.get("params");
 
     if (std.mem.eql(u8, method_name, "initialize")) {
-        return try response(allocator, id_value, "{\"capabilities\":{\"textDocumentSync\":2,\"hoverProvider\":true,\"completionProvider\":{\"triggerCharacters\":[\".\"]},\"signatureHelpProvider\":{\"triggerCharacters\":[\"(\",\",\"]},\"codeActionProvider\":true,\"definitionProvider\":true,\"documentSymbolProvider\":true,\"renameProvider\":true,\"semanticTokensProvider\":{\"legend\":{\"tokenTypes\":[\"keyword\",\"function\",\"variable\",\"parameter\",\"type\",\"number\",\"string\",\"comment\",\"operator\",\"property\",\"uniform\",\"varying\",\"builtin\",\"stage\",\"constructor\",\"trait\"],\"tokenModifiers\":[]},\"full\":true}}}");
+        return try response(allocator, id_value, "{\"capabilities\":{\"textDocumentSync\":2,\"hoverProvider\":true,\"completionProvider\":{\"triggerCharacters\":[\".\"]},\"signatureHelpProvider\":{\"triggerCharacters\":[\"(\",\",\"]},\"codeActionProvider\":true,\"definitionProvider\":true,\"documentSymbolProvider\":true,\"documentFormattingProvider\":true,\"renameProvider\":true,\"semanticTokensProvider\":{\"legend\":{\"tokenTypes\":[\"keyword\",\"function\",\"variable\",\"parameter\",\"type\",\"number\",\"string\",\"comment\",\"operator\",\"property\",\"uniform\",\"varying\",\"builtin\",\"stage\",\"constructor\",\"trait\"],\"tokenModifiers\":[]},\"full\":true}}}");
     }
     if (std.mem.eql(u8, method_name, "shutdown")) {
         state.shutdown_requested = true;
@@ -144,6 +145,13 @@ pub fn handle(allocator: std.mem.Allocator, state: *State, message: []const u8) 
         const uri = nestedString(request_params, &.{ "textDocument", "uri" }) orelse return try invalidParamsOrNull(allocator, id_value, "Missing textDocument.uri");
         const source = state.store.get(uri) orelse "";
         const result = try document_symbols.response(allocator, source);
+        return try responseOwned(allocator, id_value, result);
+    }
+    if (std.mem.eql(u8, method_name, "textDocument/formatting")) {
+        const request_params = params orelse return try invalidParamsOrNull(allocator, id_value, "Missing params");
+        const uri = nestedString(request_params, &.{ "textDocument", "uri" }) orelse return try invalidParamsOrNull(allocator, id_value, "Missing textDocument.uri");
+        const source = state.store.get(uri) orelse "";
+        const result = try formatting.response(allocator, source);
         return try responseOwned(allocator, id_value, result);
     }
     if (std.mem.eql(u8, method_name, "textDocument/rename")) {

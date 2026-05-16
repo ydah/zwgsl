@@ -7,6 +7,7 @@ pub const ast = @import("ast.zig");
 pub const diagnostics = @import("diagnostics.zig");
 pub const builtins = @import("builtins.zig");
 pub const compiler = compiler_api;
+pub const formatter = @import("formatter.zig");
 pub const glsl_emitter = @import("glsl_emitter.zig");
 pub const hm = @import("hm.zig");
 pub const hir = @import("hir.zig");

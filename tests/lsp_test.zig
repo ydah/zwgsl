@@ -5,6 +5,7 @@ const analysis = lsp.analysis;
 const code_actions = lsp.code_actions;
 const completion = lsp.completion;
 const document_symbols = lsp.document_symbols;
+const formatting = lsp.formatting;
 const goto_def = lsp.goto_def;
 const handler = lsp.handler;
 const hover = lsp.hover;
@@ -43,6 +44,7 @@ test "lsp initialize advertises editor-facing capabilities" {
     try std.testing.expect(std.mem.indexOf(u8, response, "\"codeActionProvider\":true") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"definitionProvider\":true") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"documentSymbolProvider\":true") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"documentFormattingProvider\":true") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"renameProvider\":true") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"semanticTokensProvider\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"uniform\"") != null);
@@ -663,6 +665,60 @@ test "lsp handler serves document symbols from open documents" {
     try std.testing.expect(std.mem.indexOf(u8, response, "\"id\":8") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"name\":\"mvp\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"name\":\"vertex.main\"") != null);
+}
+
+test "lsp formatting returns a full document edit" {
+    const source =
+        \\fragment do
+        \\output :frag_color, Vec4, location: 0
+        \\def main
+        \\frag_color = vec4(1.0)
+        \\end
+        \\end
+    ;
+
+    const response = try formatting.response(std.testing.allocator, source);
+    defer std.testing.allocator.free(response);
+
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"newText\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "  output :frag_color") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "    frag_color = vec4(1.0)") != null);
+}
+
+test "lsp handler serves formatting from open documents" {
+    var state = handler.State.init(std.testing.allocator);
+    defer state.deinit();
+
+    const source =
+        \\fragment do
+        \\output :frag_color, Vec4, location: 0
+        \\end
+    ;
+    const escaped_source = try jsonString(std.testing.allocator, source);
+    defer std.testing.allocator.free(escaped_source);
+
+    const open_message = try std.mem.concat(
+        std.testing.allocator,
+        u8,
+        &.{
+            "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file:///shader.zw\",\"text\":",
+            escaped_source,
+            "}}}",
+        },
+    );
+    defer std.testing.allocator.free(open_message);
+    const open_response = (try handler.handle(std.testing.allocator, &state, open_message)).?;
+    defer std.testing.allocator.free(open_response);
+
+    const response = (try handler.handle(
+        std.testing.allocator,
+        &state,
+        "{\"jsonrpc\":\"2.0\",\"id\":13,\"method\":\"textDocument/formatting\",\"params\":{\"textDocument\":{\"uri\":\"file:///shader.zw\"},\"options\":{\"tabSize\":2,\"insertSpaces\":true}}}",
+    )).?;
+    defer std.testing.allocator.free(response);
+
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"id\":13") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "  output :frag_color") != null);
 }
 
 test "lsp rename returns workspace edits for resolved symbols" {
