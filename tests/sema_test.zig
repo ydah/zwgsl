@@ -789,6 +789,62 @@ test "sema rejects unsatisfied trait constraints" {
     );
 }
 
+test "sema explains ambiguous constrained trait method candidates" {
+    var analyzed = try analyzeSource(
+        \\trait Additive
+        \\  def combine(other: Self) -> Self end
+        \\end
+        \\
+        \\trait Multiplicative
+        \\  def combine(other: Self) -> Self end
+        \\end
+        \\
+        \\def merge(a: T, b: T) -> T where T: Additive, T: Multiplicative
+        \\  a.combine(b)
+        \\end
+    );
+    defer analyzed.arena.deinit();
+
+    try expectDiagnosticContaining(
+        analyzed.diagnostics.items.items,
+        "method 'combine' is ambiguous for constrained type T; candidates: Additive.combine, Multiplicative.combine",
+    );
+}
+
+test "sema explains ambiguous concrete trait method candidates" {
+    var analyzed = try analyzeSource(
+        \\trait Additive
+        \\  def combine(other: Self) -> Self end
+        \\end
+        \\
+        \\trait Multiplicative
+        \\  def combine(other: Self) -> Self end
+        \\end
+        \\
+        \\impl Additive for Float
+        \\  def combine(other: Self) -> Self
+        \\    self + other
+        \\  end
+        \\end
+        \\
+        \\impl Multiplicative for Float
+        \\  def combine(other: Self) -> Self
+        \\    self * other
+        \\  end
+        \\end
+        \\
+        \\def run -> Float
+        \\  1.0.combine(2.0)
+        \\end
+    );
+    defer analyzed.arena.deinit();
+
+    try expectDiagnosticContaining(
+        analyzed.diagnostics.items.items,
+        "method 'combine' is ambiguous for Float; candidates: Additive.combine, Multiplicative.combine",
+    );
+}
+
 test "sema type checks impl methods and constrained trait method calls" {
     var analyzed = try analyzeSource(
         \\trait Numeric

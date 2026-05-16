@@ -1608,18 +1608,23 @@ const Analyzer = struct {
         if (receiver_type == .type_var) {
             var resolved_type: ?types.Type = null;
             var match_count: usize = 0;
+            var receiver_name: []const u8 = "type variable";
+            var candidates: std.ArrayListUnmanaged(u8) = .{};
+            defer candidates.deinit(self.allocator);
 
             for (context.signature.constraints) |constraint| {
                 if (constraint.type_var != receiver_type.type_var) continue;
+                receiver_name = constraint.param_name;
                 const trait_method = self.traits.findTraitMethod(constraint.trait_name, method_name) orelse continue;
                 const return_type = try self.matchTraitMethodCall(trait_method, receiver_type, arg_types);
                 if (return_type == null) continue;
+                try self.appendTraitMethodCandidate(&candidates, constraint.trait_name, method_name);
                 resolved_type = return_type;
                 match_count += 1;
             }
 
             if (match_count > 1) {
-                try self.report(position, "method '{s}' is ambiguous for constrained type", .{method_name});
+                try self.report(position, "method '{s}' is ambiguous for constrained type {s}; candidates: {s}", .{ method_name, receiver_name, candidates.items });
                 return types.builtinType(.error_type);
             }
             return resolved_type;
@@ -1627,19 +1632,34 @@ const Analyzer = struct {
 
         var resolved_type: ?types.Type = null;
         var match_count: usize = 0;
+        var candidates: std.ArrayListUnmanaged(u8) = .{};
+        defer candidates.deinit(self.allocator);
+
         for (self.traits.impls.items) |impl_info| {
             if (!impl_info.for_type.eql(receiver_type)) continue;
             const impl_method = self.traits.findImplMethod(impl_info.trait_name, receiver_type, method_name) orelse continue;
             if (!try self.matchConcreteMethodCall(impl_method.params, arg_types)) continue;
+            try self.appendTraitMethodCandidate(&candidates, impl_info.trait_name, method_name);
             resolved_type = impl_method.return_type;
             match_count += 1;
         }
 
         if (match_count > 1) {
-            try self.report(position, "method '{s}' is ambiguous for {s}", .{ method_name, receiver_type.glslName() });
+            try self.report(position, "method '{s}' is ambiguous for {s}; candidates: {s}", .{ method_name, receiver_type.sourceName(), candidates.items });
             return types.builtinType(.error_type);
         }
         return resolved_type;
+    }
+
+    fn appendTraitMethodCandidate(
+        self: *Analyzer,
+        candidates: *std.ArrayListUnmanaged(u8),
+        trait_name: []const u8,
+        method_name: []const u8,
+    ) !void {
+        if (candidates.items.len != 0) try candidates.appendSlice(self.allocator, ", ");
+        const writer = candidates.writer(self.allocator);
+        try writer.print("{s}.{s}", .{ trait_name, method_name });
     }
 
     fn matchTraitMethodCall(
