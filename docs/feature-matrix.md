@@ -69,7 +69,7 @@ Legend:
 | LSP server | `zwgsl-lsp` supports diagnostics, hover, completion, signature help, code actions, goto-definition, document symbols, formatting, rename, and semantic tokens. |
 | Browser wasm | `zig build wasm` emits `zig-out/bin/zwgsl.wasm`. |
 | Playground | Monaco editor, compiler-backed diagnostics and language features, WGSL output tabs with resource layout, URL-addressable sample/share links, and WebGPU preview with generated controls and texture upload. |
-| CI | Zig formatting, Zig tests, native build, wasm build, and playground build run in GitHub Actions. |
+| CI | Zig formatting, Zig tests, optional generated WGSL validation, native build, wasm build, and playground build run in GitHub Actions. |
 | Releases | Version tags package Linux x86_64 CLI, LSP, C library/header, and wasm artifacts with checksums. |
 
 ## Target Compatibility Notes

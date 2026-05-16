@@ -42,6 +42,15 @@ jobs:
       - name: Build Zig artifacts
         run: zig build
 
+      - name: Install optional WGSL validator
+        run: |
+          if command -v cargo >/dev/null 2>&1; then
+            cargo install naga-cli --locked || true
+          fi
+
+      - name: Validate generated WGSL
+        run: bash script/validate_generated_wgsl.sh
+
       - name: Build wasm artifact
         run: zig build wasm
 

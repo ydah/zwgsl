@@ -279,7 +279,11 @@ zig build -Doptimize=ReleaseFast
 
 ```sh
 zig build test
+bash script/validate_generated_wgsl.sh
 ```
+
+`script/validate_generated_wgsl.sh` validates generated WGSL fixtures when
+`naga`, `tint`, or `WGSL_VALIDATOR` is available.
 
 ### CLI
 

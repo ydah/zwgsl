@@ -91,6 +91,7 @@ type PreviewDeviceState =
 
 const uniformStorageKey = "zwgsl.playground.uniforms.v1";
 const uploadedTextureSize = 512;
+const shaderValidationFailure = "Shader module validation failed";
 
 const fallbackVertexShader = `
 @vertex
@@ -270,7 +271,7 @@ export const createPreview = async (
       const fragmentErrors = await collectShaderModuleErrors(fragmentModule, "fragment");
 
       if (vertexErrors.length > 0 || fragmentErrors.length > 0) {
-        throw new PreviewPipelineError("Shader module validation failed", [
+        throw new PreviewPipelineError(shaderValidationFailure, [
           ...vertexErrors,
           ...fragmentErrors,
         ]);
@@ -330,7 +331,10 @@ export const createPreview = async (
       }
 
       renderControls(device, controlsRoot, uniformStates, textureStates);
-      status.textContent = vertexState.profile === "triangle" ? "live • triangle" : "live • fullscreen";
+      status.textContent =
+        vertexState.profile === "triangle"
+          ? "WGSL valid • pipeline live • triangle"
+          : "WGSL valid • pipeline live • fullscreen";
       return {
         key: nextKey,
         pipeline,
@@ -343,7 +347,10 @@ export const createPreview = async (
       destroyUniforms(uniformStates);
       destroyTextures(textureStates);
       destroyVertexPreview(vertexState);
-      status.textContent = "preview error";
+      status.textContent =
+        error instanceof PreviewPipelineError && error.message === shaderValidationFailure
+          ? "WGSL validation error"
+          : "pipeline error";
       controlsRoot.replaceChildren(makePreviewErrorState(error));
       console.error("zwgsl playground preview failed", error);
       return activeState;
