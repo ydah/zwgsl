@@ -285,6 +285,9 @@ zig build benchmark
 
 `script/validate_generated_wgsl.sh` validates generated WGSL fixtures when
 `naga`, `tint`, or `WGSL_VALIDATOR` is available.
+Use `WGSL_VALIDATOR_REQUIRED=1 bash script/validate_generated_wgsl.sh` or
+`bash script/validate_generated_wgsl.sh --require-validator` when a missing
+external validator should fail the run.
 `zig build benchmark` prints CSV compile-time measurements for representative
 examples.
 

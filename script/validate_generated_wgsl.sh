@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+require_validator="${WGSL_VALIDATOR_REQUIRED:-0}"
+if [[ "${1:-}" == "--require-validator" ]]; then
+  require_validator="1"
+  shift
+fi
+
 validator="${WGSL_VALIDATOR:-}"
 if [[ -z "${validator}" ]]; then
   if command -v naga >/dev/null 2>&1; then
@@ -11,7 +17,17 @@ if [[ -z "${validator}" ]]; then
 fi
 
 if [[ -z "${validator}" ]]; then
-  echo "WGSL validator not found; install naga or tint, or set WGSL_VALIDATOR." >&2
+  cat >&2 <<'EOF'
+WGSL validator not found; install naga or tint, or set WGSL_VALIDATOR.
+
+Examples:
+  cargo install naga-cli --locked
+  WGSL_VALIDATOR=naga bash script/validate_generated_wgsl.sh
+  WGSL_VALIDATOR_REQUIRED=1 bash script/validate_generated_wgsl.sh
+EOF
+  if [[ "${require_validator}" == "1" ]]; then
+    exit 1
+  fi
   exit 0
 fi
 
